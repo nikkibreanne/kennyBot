@@ -609,6 +609,16 @@
       "name": "Hamilton"
     }
   ],
-  "user": {},
-  "catchablePokemon": "Arbok"
+  "users": [
+    {
+      "username": "scasplte2",
+      "pokemon": [
+        "Sandslash",
+        "Hamilton",
+        "Poliwag"
+      ],
+      "id": "ec3077d6-7d3f-4398-b734-428794489d6e"
+    }
+  ],
+  "catchablePokemon": ""
 }

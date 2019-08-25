@@ -1,12 +1,14 @@
 require("dotenv").config();
 const tmi = require("tmi.js");
 const low = require("lowdb");
+const lodashId = require("lodash-id");
 const FileSync = require("lowdb/adapters/FileSync");
 
 // LocalStorage is a lowdb adapter for saving to localStorage
 const adapter = new FileSync("db.json");
 // Create database instance
 const db = low(adapter);
+db._.mixin(lodashId);
 
 // set default options
 const options = {
@@ -26,14 +28,18 @@ const options = {
 };
 
 // Set default database state
-db.defaults({ pokemon: [], user: {}, catchablePokemon: "" }).write();
+db.defaults({ pokemon: [], users: [], catchablePokemon: "" }).write();
 
 // Define functions
 function getRandomInt(max) {
   return Math.floor(Math.random() * Math.floor(max));
 }
 
-function readPoke(pokeID) {
+function getUserRecord(_username) {
+  return db.get("users").find({ username: _username });
+}
+
+function pickPokemon(pokeID) {
   const poke = db
     .get("pokemon")
     .find({ id: pokeID })
@@ -42,48 +48,70 @@ function readPoke(pokeID) {
   //   return (str = JSON.stringify(poke.name, null, 2));
 }
 
-function getUser(username) {
-    return db
-      .get("user")
-      .find({ name: username })
-      .value();
-  }
-  
-  function isUserInDB(username) {
-    let existingUser = false;
-    if (getUser(username)) {
-      existingUser = true;
-    }
-    return existingUser;
-  }
-  
-  function newUser(username) {
-    db.get("user")
-      .push({{ name: username, pokemon: [] }})
-      .write();
-  }
-  
-function updateUser() {}
+function addPokemonToUser(_username, _pokemon) {
+  getUserRecord(_username)
+    .value()
+    .pokemon.push(_pokemon);
+}
+
+function releasePokemon(_username, _pokemon) {
+  getUserRecord(_username)
+    .value()
+    .pokemon.pop(_pokemon);
+}
 
 function updateCatchablePokemon(wildPokemon) {
   db.set("catchablePokemon", wildPokemon).write();
 }
 
-// function to check if the user is registered and to attempt catch if so
-function allowAttempt(username) {
+function getUserPokemon(_username) {
   let msg = "";
-  if (isUserInDB(username)) {
-    msg = attemptCatch(username);
+  if (isUserInDB(_username)) {
+    msg = `${_username} you currently have ${JSON.stringify(
+      getUserRecord(_username).value().pokemon
+    )}`;
   } else {
-    msg = `Sorry ${username}, please visit Professor Oak ( !visitprofoak ) to register your Pokedex before trying to catch Pokemon.`;
+    msg = `Silly ${_username}. You must visit Professor Oak ( !visitprofoak ) to register your Pokedex to have Pokemon.`;
+  }
+  return msg;
+}
+
+function isUserInDB(_username) {
+  let existingUser = false;
+  if (getUserRecord(_username).value()) {
+    existingUser = true;
+  }
+  return existingUser;
+}
+
+function newUser(_username) {
+  let msg = "";
+  if (isUserInDB(_username)) {
+    msg = `${_username}, you're already registered! Get out there and catch em' all!`;
+  } else {
+    db.get("users")
+      .insert({ username: _username, pokemon: [] })
+      .write();
+    msg = `Thanks for registering your Pokedex ${_username}! You can view it's contents using !pokedex`;
+  }
+  return msg;
+}
+
+// function to check if the user is registered and to attempt catch if so
+function allowAttempt(_username) {
+  let msg = "";
+  if (isUserInDB(_username)) {
+    msg = attemptCatch(_username);
+  } else {
+    msg = `Sorry ${_username}, please visit Professor Oak ( !visitprofoak ) to register your Pokedex before attempting to catch Pokemon.`;
   }
   return msg;
 }
 
 // function to compute the catch attempt
-function attemptCatch(username) {
+function attemptCatch(_username) {
   // Retrieve catchable pokemon for convenience
-  const wildPK = db.get("catchablePokemon").value();
+  const wildPokemon = db.get("catchablePokemon").value();
   // calculate normalization (makes catching more variable)
   //const normalization = getRandomInt(12);
   const normalization = 1;
@@ -91,21 +119,17 @@ function attemptCatch(username) {
   const attempt = getRandomInt(100);
   // check if the pokemon was caught
   let msg = "";
-  if (wildPK) {
+  if (wildPokemon) {
     if (attempt < 100 / normalization) {
-      msg = `Congratulations ${username}! You caught a ${wildPK}.`;
-      updateUser(username);
-      const poke = db
-        .get("pokemon")
-        .find({ name: wildPK })
-        .value();
-      console.log(poke);
+      msg = `Congratulations ${_username}! You caught a ${wildPokemon}.`;
+      addPokemonToUser(_username, wildPokemon);
     } else {
-      updateCatchablePokemon("");
-      msg = `Your pokeball missed ${username}! You scared away the ${wildPK}.`;
+      msg = `Your pokeball missed ${_username}! You scared away the ${wildPokemon}.`;
     }
+    // always clear out the wild pokemon after an attempt
+    updateCatchablePokemon("");
   } else {
-    msg = `Sorry ${username}. There are currently no wild pokemon around to catch.`;
+    msg = `Sorry ${_username}. There are currently no wild pokemon around to catch.`;
   }
   return msg;
 }
@@ -128,31 +152,18 @@ client.on("chat", (channel, user, message, self) => {
       break;
 
     case "!visitprofoak":
-      newUser(user["display-name"]);
-      client.action(
-        "scasplte2",
-        `Thanks for registering your Pokedex ${
-          user["display-name"]
-        }! You can view it's contents using !pokedex`
-      );
-      console.log(getUser(user["display-name"]));
+      client.action("scasplte2", newUser(user["display-name"]));
       break;
 
     case "!pokedex":
-      console.log(
-        db
-          .get("user")
-          .find({ name: user["display-name"] })
-          .value()
-      );
-      client.action("scasplte2", ``);
+      client.action("scasplte2", getUserPokemon(user["display-name"]));
       break;
 
     // A wild pokemon will appear if a chat message has been sent within 1 second of a 15 minute interval
     default:
       //if (Date.now() % (0.2 * 60 * 1000) < 1000) {
       if (user["display-name"] === "scasplte2") {
-        const wildPoke = readPoke(getRandomInt(151));
+        const wildPoke = pickPokemon(getRandomInt(151));
         updateCatchablePokemon(wildPoke);
         client.action("scasplte2", `A wild ${wildPoke} appeared!`);
       }
