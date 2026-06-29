@@ -30,15 +30,15 @@ export default {
     const { seasonId, weekId, phase, boss, pointer } = active;
 
     if (phase === 'live') {
-      reply(`⚔️ ${boss.name}: the battle is happening NOW — watch it at ${config.siteUrl}/live/`);
+      reply(`⚔️ ${boss.name}: the battle is happening NOW — watch it at ${config.siteUrl}/arena/`);
       return;
     }
     if (phase === 'done') {
-      reply(`This week’s raid is over — see the replay + result at ${config.siteUrl}/live/`);
+      reply(`This week’s raid is over — see the replay + result at ${config.siteUrl}/arena/`);
       return;
     }
     if (phase === 'locked') {
-      reply(`🔒 The roster is locked — ${boss.name} battle begins in ${whenHtmlSafe(pointer.startsAt)}. Watch at ${config.siteUrl}/live/`);
+      reply(`🔒 The roster is locked — ${boss.name} battle begins in ${whenHtmlSafe(pointer.startsAt)}. Watch at ${config.siteUrl}/arena/`);
       return;
     }
 

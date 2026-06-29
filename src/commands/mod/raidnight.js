@@ -16,12 +16,12 @@ export default {
       return;
     }
     if (active.phase === 'live' || active.phase === 'done') {
-      reply(`The battle already ran — watch it at ${config.siteUrl}/live/`);
+      reply(`The battle already ran — watch it at ${config.siteUrl}/arena/`);
       return;
     }
     reply(`⚔️ RAID NIGHT! Locking the roster and summoning ${active.boss.name}…`);
     const combat = await forceRaidNight(active.seasonId, active.weekId);
     const outcome = combat?.result?.downed ? `💀 ${active.boss.name} is DOWNED!` : `🪦 the raid was wiped…`;
-    reply(`${outcome} Watch it unfold at ${config.siteUrl}/live/`);
+    reply(`${outcome} Watch it unfold at ${config.siteUrl}/arena/`);
   },
 };
