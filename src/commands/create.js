@@ -20,6 +20,7 @@ export default {
       login: user.login,
       displayName: user.displayName,
       className,
+      isSubscriber: user.isSubscriber,
     });
 
     if (!created) {

@@ -87,9 +87,11 @@ export const config = {
     defaultBossAtk: 90,
   },
 
-  // Fixed weekly raid-night slot (LOCAL server time). Mods can override per week
-  // with !raidnight. dayOfWeek: 0=Sun..6=Sat.
-  raidNight: { dayOfWeek: 0, hour: 19, minute: 0 },
+  // Fixed weekly raid-night slot, anchored to an explicit IANA time zone (DST-
+  // aware) so it fires at the right wall-clock time no matter the server's TZ.
+  // Default: Sundays 8:00 PM America/Los_Angeles. dayOfWeek: 0=Sun..6=Sat.
+  // Mods can still trigger a raid early with !raidnight.
+  raidNight: { timeZone: 'America/Los_Angeles', dayOfWeek: 0, hour: 20, minute: 0 },
 
   // ── Automated combat engine (spec §5.8 / IMPLEMENTATION §L) ───────────────
   combat: {
@@ -104,8 +106,11 @@ export const config = {
     msPerEvent: 1200, // must match the UI replay player (live.html MS_PER_EVENT)
     variance: 0.2, // ±20% damage/heal variance
     crit: { party: 0.16, boss: 0.12, mult: 1.8, bossMult: 1.7 },
-    bossTankTargetChance: 0.6,
+    bossTankTargetChance: 0.4, // boss still favors the tank, but spreads its hits
     defaultBossAtk: 90,
+    // Affix critter "adds": stats are derived from the boss's atk so they scale
+    // with the season. They attack the party each round and can be killed.
+    adds: { hpFactor: 1.5, atkFactor: 0.35, maxAlive: 6, focusChance: 0.45 },
     // Context-aware AI: how actors weight ability choice by the fight state.
     ai: {
       healAt: 0.6, // healer heals when the lowest ally is below this HP fraction

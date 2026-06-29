@@ -5,8 +5,10 @@ import create from './create.js';
 import char from './char.js';
 import bag from './bag.js';
 import equip from './equip.js';
+import unequip from './unequip.js';
 import grab from './grab.js';
 import raid from './raid.js';
+import top from './top.js';
 import exp from './mod/exp.js';
 import drop from './mod/drop.js';
 import drops from './mod/drops.js';
@@ -14,7 +16,7 @@ import boss from './mod/boss.js';
 import raidnight from './mod/raidnight.js';
 import season from './mod/season.js';
 
-const defs = [create, char, bag, equip, grab, raid, exp, drop, drops, boss, raidnight, season];
+const defs = [create, char, bag, equip, unequip, grab, raid, top, exp, drop, drops, boss, raidnight, season];
 
 /** @type {Map<string, typeof defs[number]>} */
 const byName = new Map();

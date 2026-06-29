@@ -97,6 +97,32 @@ test('ability cooldowns are respected (no back-to-back high-cd ability per actor
   }
 });
 
+test('swarm affix spawns critters that attack the party', () => {
+  const { events } = simulateBattle(roster(), { name: 'Aphid Queen', hp: 4000, atk: 100, affix: 'swarm' }, 7, config);
+  assert.ok(events.some((e) => e.kind === 'summon'), 'critters are summoned');
+  assert.ok(events.some((e) => String(e.actor || '').startsWith('add_') && e.kind === 'damage'), 'critters bite heroes');
+});
+
+test('blight affix applies party-wide damage-over-time', () => {
+  const { events } = simulateBattle(roster(), { name: 'Mildew', hp: 4000, atk: 100, affix: 'blight' }, 3, config);
+  assert.ok(events.some((e) => e.actor === 'affix' && e.kind === 'aoe'), 'the DoT ticks the whole party');
+});
+
+test('a cleave affix lets the boss hit multiple heroes in one round', () => {
+  const { events } = simulateBattle(roster(), { name: 'Burrower', hp: 8000, atk: 120, affix: 'burrow' }, 5, config);
+  let perTurn = 0, sawMulti = false;
+  for (const e of events) {
+    if (e.type === 'turn') perTurn = 0;
+    if (e.type === 'action' && e.actor === 'boss' && e.kind === 'damage') { perTurn += 1; if (perTurn >= 2) sawMulti = true; }
+  }
+  assert.ok(sawMulti, 'boss cleaves 2+ heroes in a single round');
+});
+
+test('affix battles stay deterministic for a fixed seed', () => {
+  const b = { name: 'The Scarecrow King', hp: 9000, atk: 130, affix: 'finale' };
+  assert.deepEqual(simulateBattle(roster(), b, 9, config).events, simulateBattle(roster(), b, 9, config).events);
+});
+
 test('empty roster cannot win', () => {
   const { result, events } = simulateBattle([], boss(1000), 1, config);
   assert.equal(result.downed, false);

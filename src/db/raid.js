@@ -297,15 +297,49 @@ export async function forceRaidNight(seasonId, weekId, { now = Date.now(), seed 
 
 // ── scheduling helpers ──────────────────────────────────────────────────────
 
-/** Next fixed weekly raid-night timestamp (local time) strictly after `now`. */
+// ── timezone-aware raid-night scheduling ─────────────────────────────────────
+
+const WEEKDAY = { Sun: 0, Mon: 1, Tue: 2, Wed: 3, Thu: 4, Fri: 5, Sat: 6 };
+
+/** Wall-clock parts of an instant as seen in a given IANA time zone. */
+function zoneParts(epoch, timeZone) {
+  const dtf = new Intl.DateTimeFormat('en-US', {
+    timeZone, hourCycle: 'h23', weekday: 'short',
+    year: 'numeric', month: '2-digit', day: '2-digit',
+    hour: '2-digit', minute: '2-digit', second: '2-digit',
+  });
+  const p = {};
+  for (const part of dtf.formatToParts(new Date(epoch))) p[part.type] = part.value;
+  return { year: +p.year, month: +p.month, day: +p.day, weekday: WEEKDAY[p.weekday], hour: +p.hour, minute: +p.minute, second: +p.second };
+}
+
+/** Zone offset (ms) at an instant: (its wall-clock read as UTC) − instant. */
+function zoneOffsetMs(epoch, timeZone) {
+  const p = zoneParts(epoch, timeZone);
+  return Date.UTC(p.year, p.month - 1, p.day, p.hour, p.minute, p.second) - epoch;
+}
+
+/** Epoch ms for a wall-clock time in a zone (DST-correct, one-step refined). */
+function zonedWallTimeToEpoch(year, month, day, hour, minute, timeZone) {
+  const guess = Date.UTC(year, month - 1, day, hour, minute, 0); // normalizes day overflow
+  const offset = zoneOffsetMs(guess, timeZone);
+  let epoch = guess - offset;
+  const offset2 = zoneOffsetMs(epoch, timeZone);
+  if (offset2 !== offset) epoch = guess - offset2; // correct across a DST edge
+  return epoch;
+}
+
+/**
+ * Next weekly raid-night timestamp strictly after `now`, at the configured
+ * wall-clock time in config.raidNight.timeZone (DST-aware).
+ */
 export function computeNextRaidNight(now = Date.now()) {
-  const { dayOfWeek, hour, minute } = config.raidNight;
-  const target = new Date(now);
-  target.setHours(hour, minute, 0, 0);
-  let add = (dayOfWeek - target.getDay() + 7) % 7;
-  if (add === 0 && target.getTime() <= now) add = 7;
-  target.setDate(target.getDate() + add);
-  return target.getTime();
+  const { timeZone = 'America/Los_Angeles', dayOfWeek, hour, minute } = config.raidNight;
+  const p = zoneParts(now, timeZone);
+  const add = (dayOfWeek - p.weekday + 7) % 7;
+  let epoch = zonedWallTimeToEpoch(p.year, p.month, p.day + add, hour, minute, timeZone);
+  if (epoch <= now) epoch = zonedWallTimeToEpoch(p.year, p.month, p.day + add + 7, hour, minute, timeZone);
+  return epoch;
 }
 
 /** Sequential, human-friendly week id for a season ("w1", "w2", …). */

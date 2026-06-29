@@ -24,7 +24,7 @@ export async function getPlayer(userId) {
  * @param {{ userId: string, login: string, displayName: string, className: string }} args
  * @returns {Promise<{ created: boolean, player: object }>}
  */
-export async function createPlayer({ userId, login, displayName, className }) {
+export async function createPlayer({ userId, login, displayName, className, isSubscriber }) {
   if (!CLASSES[className]) throw new Error(`unknown class: ${className}`);
   const role = roleForClass(className);
   const now = Date.now();
@@ -38,7 +38,7 @@ export async function createPlayer({ userId, login, displayName, className }) {
     level: 1,
     exp: 0,
     levelPressure: 0,
-    subTier: 0,
+    subTier: isSubscriber ? 1 : 0, // exact 2/3 refined by sub events / Helix lookup
     subMonths: 0,
     renown: 0, // veteran reputation (persists across seasons; §5.6)
     lastExpAt: 0,
@@ -68,7 +68,7 @@ export async function createPlayer({ userId, login, displayName, className }) {
  * @param {{ rng?: () => number }} [opts]
  * @returns {Promise<null | { player: object, leveledUp: boolean, fromLevel: number, toLevel: number }>}
  */
-export async function applyChatTick(userId, { rng = Math.random } = {}) {
+export async function applyChatTick(userId, { rng = Math.random, isSubscriber } = {}) {
   const ref = database().ref(PATHS.player(userId));
   let result = null;
 
@@ -77,7 +77,16 @@ export async function applyChatTick(userId, { rng = Math.random } = {}) {
     // (NOT undefined) so it fetches server data and retries; a truly-absent
     // player commits a null no-op and is filtered out below.
     if (curr == null) return null;
-    const mult = engagementMultiplier(curr, config);
+    // Keep subTier current from live chat status: any active sub gets at least
+    // tier 1 (preserving a higher exact tier learned from a sub event); a lapsed
+    // sub drops to 0. `undefined` (status unknown this call) leaves it untouched.
+    const subTier =
+      isSubscriber === undefined
+        ? curr.subTier || 0
+        : isSubscriber
+          ? Math.max(curr.subTier || 0, 1)
+          : 0;
+    const mult = engagementMultiplier({ ...curr, subTier }, config);
     const rolled = applyChatExp(
       { level: curr.level, exp: curr.exp, levelPressure: curr.levelPressure },
       { engagementMult: mult, rng, config },
@@ -90,6 +99,7 @@ export async function applyChatTick(userId, { rng = Math.random } = {}) {
     const stats = curr.stats || { messages: 0, lootClaimed: 0, raidsParticipated: 0 };
     return {
       ...curr,
+      subTier,
       level: rolled.level,
       exp: rolled.exp,
       levelPressure: rolled.levelPressure,
@@ -138,6 +148,36 @@ export async function equipItem(userId, itemId) {
   if (outcome.ok && res.committed) {
     return { ok: true, player: res.snapshot.val(), item };
   }
+  return outcome;
+}
+
+/**
+ * Bare an equipped slot — by slot name (weapon/armor/trinket) or by the equipped
+ * item's name — returning the item to the bag. Atomic.
+ * @returns {Promise<{ ok: boolean, reason?: string, item?: {name:string,slot:string}, player?: object }>}
+ */
+export async function unequipItem(userId, slotOrName) {
+  const input = String(slotOrName || '').trim().toLowerCase();
+  const ref = database().ref(PATHS.player(userId));
+  let outcome = { ok: false, reason: 'unknown' };
+
+  const res = await ref.transaction((curr) => {
+    if (curr == null) { outcome = { ok: false, reason: 'no-character' }; return null; }
+    const equipped = { ...(curr.equipped || {}) };
+    let slot = SLOTS.includes(input) ? input : null;
+    if (!slot) slot = SLOTS.find((s) => equipped[s] && String(equipped[s].name || '').toLowerCase() === input) || null;
+    if (!slot) { outcome = { ok: false, reason: 'not-found' }; return; } // abort
+    const item = equipped[slot];
+    if (!item) { outcome = { ok: false, reason: 'empty' }; return; } // abort
+
+    const inventory = Array.isArray(curr.inventory) ? [...curr.inventory] : [];
+    inventory.push(typeof item === 'string' ? item : item.id);
+    equipped[slot] = null;
+    outcome = { ok: true, item: { name: typeof item === 'string' ? item : item.name, slot } };
+    return { ...curr, equipped, inventory };
+  });
+
+  if (outcome.ok && res.committed) return { ...outcome, player: res.snapshot.val() };
   return outcome;
 }
 

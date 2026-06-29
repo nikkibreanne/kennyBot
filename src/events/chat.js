@@ -62,7 +62,9 @@ export function createMessageHandler({ chat, channel, botUserId, logger, onActiv
 
     let tick;
     try {
-      tick = await applyChatTick(user.id);
+      // Pass live sub status so the engagement boost reflects it (any active sub
+      // ≥ tier 1; exact 2/3 still come from sub events).
+      tick = await applyChatTick(user.id, { isSubscriber: user.isSubscriber });
     } catch (err) {
       logger.error('exp tick failed', { userId: user.id, err: String(err) });
       return;
