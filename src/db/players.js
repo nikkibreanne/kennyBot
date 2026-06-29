@@ -5,7 +5,7 @@
 
 import { database, increment, PATHS } from './firebase.js';
 import { roleForClass, CLASSES } from '../content/classes.js';
-import { starterEquipped, itemObject, getItem, SLOTS } from '../content/items.js';
+import { rollStarterEquipped, itemObject, getItem, SLOTS } from '../content/items.js';
 import { applyChatExp } from '../rules/leveling.js';
 import { engagementMultiplier, roleRating, contribution } from '../rules/rating.js';
 import { config } from '../config.js';
@@ -40,10 +40,11 @@ export async function createPlayer({ userId, login, displayName, className }) {
     levelPressure: 0,
     subTier: 0,
     subMonths: 0,
+    renown: 0, // veteran reputation (persists across seasons; §5.6)
     lastExpAt: 0,
-    equipped: starterEquipped(role),
+    equipped: rollStarterEquipped(role),
     inventory: [],
-    stats: { messages: 0, lootClaimed: 0, raidsParticipated: 0 },
+    stats: { messages: 0, lootClaimed: 0, raidsParticipated: 0, seasonsPlayed: 0 },
   };
 
   const ref = database().ref(PATHS.player(userId));
@@ -156,6 +157,30 @@ export async function addLoot(userId, itemId) {
   });
   if (!res.committed || !res.snapshot.exists()) return null;
   return lootClaimed;
+}
+
+/**
+ * Season rollover (spec §5.6): reset every hero's GEAR (re-roll starter, clear
+ * the bag) so a new tier starts fresh and newcomers aren't behind — but KEEP
+ * level + renown, and award prestige renown for the season cleared. Returns the
+ * number of heroes rolled over.
+ * @param {{ prestigeRenown?: number }} [opts]
+ */
+export async function rolloverAllPlayers({ prestigeRenown = 3 } = {}) {
+  const snap = await database().ref('players').get();
+  const players = snap.val() || {};
+  let count = 0;
+  for (const [uid, p] of Object.entries(players)) {
+    if (!p?.role) continue;
+    await database().ref(PATHS.player(uid)).update({
+      equipped: rollStarterEquipped(p.role),
+      inventory: [],
+      renown: (p.renown || 0) + prestigeRenown,
+      'stats/seasonsPlayed': (p.stats?.seasonsPlayed || 0) + 1,
+    });
+    count += 1;
+  }
+  return count;
 }
 
 /**

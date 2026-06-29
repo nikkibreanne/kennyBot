@@ -58,11 +58,23 @@ test('a strong roster vs low HP → victory; HP fully burned', () => {
   assert.ok(result.mvp, 'an MVP is named');
 });
 
-test('a huge-HP boss within the turn cap → defeat (enrage-style)', () => {
+test('a huge-HP boss → enrage forces a real wipe, not a cap cutoff', () => {
   const { result, events } = simulateBattle(roster(), boss(10_000_000), 3, config);
   assert.equal(result.downed, false);
   assert.ok(result.bossHpRemaining > 0);
   assert.equal(events.at(-1).outcome, 'defeat');
+  // The fight ends by an actual wipe well before the hard backstop cap…
+  const lastTurn = events.filter((e) => e.type === 'turn').at(-1).n;
+  assert.ok(lastTurn < config.combat.turnCap, 'enrage ends it before the backstop cap');
+  // …and the boss did enrage at some point.
+  assert.ok(events.some((e) => e.enraged === true), 'boss enraged');
+});
+
+test('healers heal hurt allies, not the boss (context-aware)', () => {
+  const { events } = simulateBattle(roster(), boss(200_000), 5, config);
+  const heals = events.filter((e) => e.kind === 'heal');
+  assert.ok(heals.length > 0, 'the Mender heals during the fight');
+  assert.ok(heals.every((e) => e.target !== 'boss'), 'heals target allies');
 });
 
 test('turn count never exceeds the configured cap', () => {

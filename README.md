@@ -67,10 +67,11 @@ scripts/synthetic-chat.js no-stream harness that drives the whole loop
 | `!grab` / `!loot` | **subs** | roll for the active drop (independent rolls within the window) |
 | `!raid` | everyone* | sign up for this week's raid (during muster) / see status |
 | `!exp on\|off\|auto\|status` | mod | control the EXP gate (`on` bypasses live for testing) |
-| `!drop [item]` | mod | force a loot drop |
-| `!boss set <name>` | mod | schedule the next boss + open muster |
+| `!drop [item]` | mod | force a single loot drop |
+| `!drops on\|off\|every <min>` | mod | auto chat-drop scheduler (rarity-weighted, while live) |
+| `!boss set <name>` / `!boss next` | mod | custom boss / advance to the next scripted season boss |
 | `!raidnight` | mod | lock the roster and run the battle now |
-| `!season start <id> [name]` | mod | start a new 6-week raid tier (opens week 1) |
+| `!season start <id>` / `!season rollover <id>` | mod | start a tier / roll to the next (gear reset, renown kept) |
 
 \* A lapsed sub keeps the hero they built and can still muster + fight; only
 `!create` and `!grab` need an active sub.
@@ -188,7 +189,9 @@ inclusive rolls · slots = weapon/armor/trinket · season = **6 weeks** · EXP =
 `auto`. Repo is intended **open source** (security rests on locked RTDB rules +
 runtime-injected secrets, not code secrecy).
 
-**Still to build:** season rollover (gear reset + prestige/subscriber reputation
-buffs — the 6-week machine runs, but cross-season carryover isn't wired yet),
-leaderboard/inventory views on the site, and balance tuning of the combat
-constants in `src/config.js`.
+**Content:** 72 items / 18 bosses (3 seasons) / per-class + boss ability kits live
+in `src/content/`; boss HP scales to the mustered roster (`scaleBossHp`).
+Sub-tier boosts combat power + EXP; victory loot rewards participants + survivors
++ MVP; veteran **renown** persists across `!season rollover`. Design rationale and
+the future backlog (set bonuses, affixes, DoT/shields/taunt, multi-phase finales,
+big-raid log compaction) are in [`docs/design/`](docs/design/).

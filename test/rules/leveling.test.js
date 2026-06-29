@@ -21,14 +21,14 @@ function seeded(seed) {
 }
 
 test('levelThreshold grows geometrically and is rounded', () => {
-  assert.equal(levelThreshold(1, config), 100);
-  assert.equal(levelThreshold(2, config), Math.round(100 * 1.35));
+  assert.equal(levelThreshold(1, config), config.exp.threshold.base);
+  assert.equal(levelThreshold(2, config), Math.round(config.exp.threshold.base * config.exp.threshold.growth));
   assert.ok(levelThreshold(10, config) > levelThreshold(9, config));
 });
 
 test('xpForMessage scales with engagement and rounds', () => {
-  assert.equal(xpForMessage(1, config), 10);
-  assert.equal(xpForMessage(1.5, config), 15);
+  assert.equal(xpForMessage(1, config), config.exp.perMessage);
+  assert.equal(xpForMessage(1.5, config), Math.round(config.exp.perMessage * 1.5));
   assert.equal(xpForMessage(0, config), 0);
 });
 
@@ -86,7 +86,7 @@ test('applyChatExp reports gainedExp and from/to levels', () => {
     rng: () => 0,
     config,
   });
-  assert.equal(out.gainedExp, 10);
+  assert.equal(out.gainedExp, config.exp.perMessage);
   assert.equal(out.fromLevel, 1);
   assert.equal(out.leveledUp, true);
   assert.equal(out.toLevel, 2);

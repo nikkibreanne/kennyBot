@@ -6,12 +6,13 @@
 import { database, PATHS, SERVER_TIMESTAMP } from './firebase.js';
 import { config as gameConfig } from '../config.js';
 
-/** @type {{ live: boolean, expMode: string, season: any, raid: any }} */
+/** @type {{ live: boolean, expMode: string, season: any, raid: any, dropScheduler: any }} */
 const mirror = {
   live: false,
   expMode: gameConfig.liveGate.defaultExpMode,
   season: null,
   raid: null, // config/raid: { seasonId, weekId, phase, locksAt, startsAt }
+  dropScheduler: { enabled: gameConfig.loot.scheduler.enabled, intervalSec: gameConfig.loot.scheduler.intervalSec },
 };
 
 let started = false;
@@ -33,20 +34,26 @@ export async function startConfigMirror(logger = console) {
   const expRef = db.ref(PATHS.configExpMode());
   const seasonRef = db.ref(PATHS.seasonCurrent());
   const raidRef = db.ref(PATHS.configRaid());
+  const dropRef = db.ref(PATHS.configDropScheduler());
+
+  // Seed drop-scheduler defaults once (never clobber a mod's settings).
+  await dropRef.transaction((v) => (v == null ? { enabled: gameConfig.loot.scheduler.enabled, intervalSec: gameConfig.loot.scheduler.intervalSec } : v));
 
   liveRef.on('value', (s) => { mirror.live = Boolean(s.val()); });
   expRef.on('value', (s) => { mirror.expMode = s.val() || gameConfig.liveGate.defaultExpMode; });
   seasonRef.on('value', (s) => { mirror.season = s.val(); });
   raidRef.on('value', (s) => { mirror.raid = s.val(); });
+  dropRef.on('value', (s) => { if (s.val()) mirror.dropScheduler = s.val(); });
 
   // Wait for the initial reads so the mirror is warm before chat starts.
-  const [liveSnap, expSnap, seasonSnap, raidSnap] = await Promise.all([
-    liveRef.get(), expRef.get(), seasonRef.get(), raidRef.get(),
+  const [liveSnap, expSnap, seasonSnap, raidSnap, dropSnap] = await Promise.all([
+    liveRef.get(), expRef.get(), seasonRef.get(), raidRef.get(), dropRef.get(),
   ]);
   mirror.live = Boolean(liveSnap.val());
   mirror.expMode = expSnap.val() || gameConfig.liveGate.defaultExpMode;
   mirror.season = seasonSnap.val();
   mirror.raid = raidSnap.val();
+  if (dropSnap.val()) mirror.dropScheduler = dropSnap.val();
   logger.info?.('config mirror warm', { live: mirror.live, expMode: mirror.expMode });
 }
 
@@ -63,6 +70,17 @@ export function getSeason() {
 /** Active raid pointer { seasonId, weekId, phase, locksAt, startsAt } or null. */
 export function getRaidPointer() {
   return mirror.raid;
+}
+
+/** Auto chat-drop scheduler settings { enabled, intervalSec }. */
+export function getDropScheduler() {
+  return mirror.dropScheduler;
+}
+
+/** Mod-controlled update of the drop-scheduler settings (persisted + mirrored). */
+export async function setDropScheduler(patch) {
+  await database().ref(PATHS.configDropScheduler()).update(patch);
+  return { ...mirror.dropScheduler, ...patch };
 }
 
 /**

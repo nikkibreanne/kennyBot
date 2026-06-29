@@ -23,13 +23,15 @@ export function weightedPick(weights, rng) {
 }
 
 /**
- * Roll a rarity off the configured ladder.
+ * Roll a rarity off a weight table. Defaults to the chat-drop ladder; pass
+ * `weights` (e.g. config.loot.bossRarityWeights) for richer boss-battle loot.
  * @param {() => number} rng
  * @param {{ loot: { rarityWeights: Record<Rarity, number> } }} config
+ * @param {Record<Rarity, number>} [weights]
  * @returns {Rarity}
  */
-export function rollRarity(rng, config) {
-  return /** @type {Rarity} */ (weightedPick(config.loot.rarityWeights, rng));
+export function rollRarity(rng, config, weights) {
+  return /** @type {Rarity} */ (weightedPick(weights || config.loot.rarityWeights, rng));
 }
 
 /**
@@ -42,13 +44,14 @@ export function rollRarity(rng, config) {
  * @param {(itemId: string) => ({ rarity: Rarity }|null)} getItem
  * @param {() => number} rng
  * @param {object} config
+ * @param {Record<string, number>} [weights]  rarity weight override (boss loot)
  * @returns {string|null} chosen item id, or null if the table is empty
  */
-export function pickDrop(lootTable, getItem, rng, config) {
+export function pickDrop(lootTable, getItem, rng, config, weights) {
   const pool = (lootTable || []).filter((id) => getItem(id));
   if (pool.length === 0) return null;
 
-  const rarity = rollRarity(rng, config);
+  const rarity = rollRarity(rng, config, weights);
   const ofRarity = pool.filter((id) => getItem(id).rarity === rarity);
   const choices = ofRarity.length > 0 ? ofRarity : pool;
   const idx = Math.floor(rng() * choices.length);

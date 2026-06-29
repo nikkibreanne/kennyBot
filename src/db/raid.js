@@ -7,8 +7,9 @@
 
 import { database, increment, PATHS, SERVER_TIMESTAMP } from './firebase.js';
 import { getRaidPointer, setRaidPointer, getSeason } from './configStore.js';
-import { roleRating } from '../rules/rating.js';
+import { roleRating, engagementMultiplier } from '../rules/rating.js';
 import { combatStats, simulateBattle } from '../rules/combat.js';
+import { scaleBossHp } from '../content/bosses.js';
 import { getItem, DEFAULT_LOOT_TABLE } from '../content/items.js';
 import { pickDrop } from '../rules/loot.js';
 import { addLoot } from './players.js';
@@ -19,7 +20,8 @@ import { config } from '../config.js';
 /** Build a signup loadout snapshot from a player record (UI contract shapes). */
 export function buildSnapshot(player) {
   const role = player.role;
-  const rr = roleRating(player, config, getItem);
+  // Engagement-scaled at raid time (spec §4): sub tier boosts combat power.
+  const rr = Math.round(roleRating(player, config, getItem) * engagementMultiplier(player, config));
   const cs = combatStats(rr, role, config);
   return {
     displayName: player.displayName || 'Hero',
@@ -65,13 +67,17 @@ export function computeTeam(signups) {
  * @param {{ seasonId: string, weekId: string, boss: object, locksAt: number, startsAt: number }} args
  */
 export async function setupRaidWeek({ seasonId, weekId, boss, locksAt, startsAt }) {
+  const baseHp = boss.baseHp ?? boss.hp ?? config.raid.defaultBossHp;
   const bossRecord = {
     name: boss.name,
-    hp: boss.hp,
-    atk: boss.atk,
+    baseHp,
+    hp: baseHp, // placeholder; scaled to the mustered roster at lock
+    atk: boss.atk ?? config.raid.defaultBossAtk,
     thresholds: boss.thresholds,
     affix: boss.affix ?? null,
     abilities: boss.abilities ?? null,
+    abilitySet: boss.abilitySet ?? null,
+    recommended: boss.recommended ?? null,
     status: 'signup',
   };
   await database().ref().update({
@@ -122,10 +128,19 @@ export async function lockRaid(seasonId, weekId) {
     const player = pSnap.val();
     frozen[uid] = player ? buildSnapshot(player) : signups[uid]; // fall back to preview
   }
+  const count = Object.keys(frozen).length;
+
+  // Scale boss HP to the mustered roster so the fight lasts ~12–20 turns whether
+  // 8 or 40 show up (boss ATK stays absolute, so a thin/underpowered raid can
+  // still genuinely fail the harder bosses — owner decision).
+  const bossSnap = await db.ref(PATHS.boss(seasonId, weekId)).get();
+  const boss = bossSnap.val() || {};
+  const scaledHp = scaleBossHp(boss.baseHp ?? boss.hp ?? config.raid.defaultBossHp, count);
+
   await db.ref(PATHS.raid(seasonId, weekId)).update({ signups: frozen, team: computeTeam(frozen) });
-  await db.ref(`${PATHS.boss(seasonId, weekId)}/status`).set('locked');
+  await db.ref(PATHS.boss(seasonId, weekId)).update({ status: 'locked', hp: scaledHp });
   await setRaidPointer({ phase: 'locked' });
-  return { count: Object.keys(frozen).length };
+  return { count };
 }
 
 /** Deterministic 32-bit seed from the week id + a salt (stored for reproducibility). */
@@ -160,8 +175,10 @@ export async function runBattle(seasonId, weekId, { now = Date.now(), seed } = {
     uid, name: s.displayName, class: s.class, role: s.role, maxHp: s.maxHp, atk: s.power, heal: s.healing,
   }));
 
+  // boss.hp was scaled to the roster at lock; fall back defensively.
+  const effectiveHp = boss.hp ?? scaleBossHp(boss.baseHp ?? config.raid.defaultBossHp, party.length);
   const theSeed = seed ?? deriveSeed(seasonId, weekId, now);
-  const { events, result, bossMaxHp } = simulateBattle(party, boss, theSeed, config);
+  const { events, result, bossMaxHp } = simulateBattle(party, { ...boss, hp: effectiveHp }, theSeed, config);
 
   // Event array → object keyed by ascending integers (UI sorts numerically).
   const log = {};
@@ -209,25 +226,32 @@ export async function finishBattle(seasonId, weekId, { now = Date.now() } = {}) 
   const downed = combat.result?.downed;
   const dmg = damageByUid(combat.log);
 
-  // Leaderboard + participation (atomic increments).
+  // Leaderboard + participation (atomic increments). A clear also grants +1
+  // renown (veteran reputation that persists across seasons, §5.6).
   const updates = {};
   for (const uid of Object.keys(signups)) {
     updates[`${PATHS.leaderboardEntry(seasonId, uid)}/damage`] = increment(dmg[uid] || 0);
     updates[`${PATHS.player(uid)}/stats/raidsParticipated`] = increment(1);
+    if (downed) updates[`${PATHS.player(uid)}/renown`] = increment(1);
   }
   if (Object.keys(updates).length) await db.ref().update(updates);
 
-  // Loot distribution: victory rewards every participant; MVP gets a bonus roll.
+  // Loot on victory (richer boss-rarity table): every participant gets a roll;
+  // SURVIVORS get a bonus roll; the MVP gets an extra. Stacks for an MVP who
+  // lived. Loot rolls are independent — not tied to sub tier.
   if (downed) {
     const lootTable = getSeason()?.lootTable?.length ? getSeason().lootTable : DEFAULT_LOOT_TABLE;
+    const weights = config.loot.bossRarityWeights;
+    const survivors = new Set(combat.result?.survivors || []);
+    const roll = (uid) => {
+      const id = pickDrop(lootTable, getItem, Math.random, config, weights);
+      return id ? addLoot(uid, id) : Promise.resolve();
+    };
     for (const uid of Object.keys(signups)) {
-      const itemId = pickDrop(lootTable, getItem, Math.random, config);
-      if (itemId) await addLoot(uid, itemId);
+      await roll(uid); // participation reward
+      if (survivors.has(uid)) await roll(uid); // survived the fight → bonus
     }
-    if (combat.result?.mvp) {
-      const bonus = pickDrop(lootTable, getItem, Math.random, config);
-      if (bonus) await addLoot(combat.result.mvp, bonus);
-    }
+    if (combat.result?.mvp) await roll(combat.result.mvp); // MVP bonus
   }
 
   await db.ref(`${PATHS.combat(seasonId, weekId)}/status`).set('done');

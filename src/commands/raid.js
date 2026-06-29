@@ -51,10 +51,11 @@ export default {
     const already = await getSignup(seasonId, weekId, user.id);
     await enlist({ seasonId, weekId, userId: user.id, player });
     const when = whenHtmlSafe(pointer.startsAt);
+    const rec = boss.recommended ? ` ${boss.name} wants ~${boss.recommended} heroes —` : '';
     reply(
       already
-        ? `@${user.displayName} your ${player.class} is mustered (updated). Raid night in ${when} → ${config.siteUrl}/raid/`
-        : `@${user.displayName} ✅ mustered as ${player.class} (${player.role}, Lv ${player.level})! Raid night in ${when} → ${config.siteUrl}/raid/`,
+        ? `@${user.displayName} your ${player.class} is mustered (updated).${rec} raid night in ${when} → ${config.siteUrl}/raid/`
+        : `@${user.displayName} ✅ mustered as ${player.class} (${player.role}, Lv ${player.level})!${rec} raid night in ${when} → ${config.siteUrl}/raid/`,
     );
   },
 };

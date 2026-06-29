@@ -54,7 +54,19 @@ export function roleRating(player, config, getItem) {
   const role = player.role;
   const level = Math.max(1, Math.floor(player?.level || 1));
   const base = config.rating.classBase[role] ?? 0;
-  return Math.round(base + level * config.rating.perLevel + gearBonus(player, getItem));
+  return Math.round(base + level * config.rating.perLevel + gearBonus(player, getItem) + renownBonus(player, config));
+}
+
+/**
+ * Persistent veteran-reputation bonus (spec §5.6). Renown is earned by clearing
+ * raids and survives season gear resets, so returning subscribers stay a step
+ * ahead. Capped so it's a perk, never dominant.
+ * @param {{ renown?: number }} player
+ * @param {{ rating: { renownCap: number, renownPerPoint: number } }} config
+ */
+export function renownBonus(player, config) {
+  const r = Math.min(Math.max(0, player?.renown || 0), config.rating.renownCap);
+  return r * config.rating.renownPerPoint;
 }
 
 /**

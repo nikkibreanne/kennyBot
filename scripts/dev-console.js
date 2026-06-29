@@ -11,11 +11,14 @@
 // Lines starting with "/" are console meta-commands (see /help).
 
 import { createInterface } from 'node:readline';
-import { initFirebase, closeFirebase } from '../src/db/firebase.js';
-import { startConfigMirror, setExpMode, getRaidPointer } from '../src/db/configStore.js';
+import { initFirebase, closeFirebase, database, PATHS } from '../src/db/firebase.js';
+import { startConfigMirror, setExpMode, getRaidPointer, setSeason } from '../src/db/configStore.js';
 import { createMessageHandler } from '../src/events/chat.js';
-import { applyChatTick } from '../src/db/players.js';
-import { getActiveRaid, advanceRaidPhases } from '../src/db/raid.js';
+import { applyChatTick, createPlayer, getPlayer } from '../src/db/players.js';
+import { getActiveRaid, advanceRaidPhases, setupRaidWeek, enlist, computeNextRaidNight } from '../src/db/raid.js';
+import { seasonBoss } from '../src/content/bosses.js';
+import { SEASON_LOOT } from '../src/content/items.js';
+import { config } from '../src/config.js';
 
 const CHANNEL = process.env.TWITCH_CHANNEL || 'scasplte2';
 const quietLogger = { debug() {}, info() {}, warn() {}, error: (m, x) => console.error('[err]', m, x?.err || '') };
@@ -44,12 +47,63 @@ Console meta-commands:
   /as <name> [sub] [mod] [bc]   switch identity (flags grant sub/mod/broadcaster)
   /whoami                       show current identity
   /grind [n]                    grant EXP n times to current user (bypass cooldown)
+  /scenario list                list preset scenarios
+  /scenario <name>              load a preset (season + boss + a mustered roster)
   /advance                      run the raid phase machine once (lock/run/finish)
   /state                        show the active raid pointer + phase
   /help                         this help
   /quit                         exit
 Anything starting with ! is a chat command (e.g. !create Guardian, !raid, !raidnight).
 `;
+
+// Preset scenarios so you don't rebuild setup each run. Each loads a season +
+// boss and a roster of created/leveled/mustered heroes — then type !raidnight.
+const DPS = ['Berserker', 'Arcanist', 'Ranger'];
+// Build a [class, level] roster: t tanks, h healers, rest dps, all at `level`.
+function roster({ tanks = 0, healers = 0, dps = 0, level = 10 }) {
+  const out = [];
+  for (let i = 0; i < tanks; i++) out.push(['Guardian', level]);
+  for (let i = 0; i < healers; i++) out.push(['Mender', level]);
+  for (let i = 0; i < dps; i++) out.push([DPS[i % 3], level]);
+  return out;
+}
+
+// Scenarios use the REAL calibrated season bosses (HP scales to the roster), so
+// outcomes reflect actual content. Reference roster is ~15 heroes at season level.
+const SCENARIOS = {
+  winnable: { desc: '12 heroes ~Lv10 vs an early-season boss → victory',
+    season: 1, week: 2, heroes: roster({ tanks: 3, healers: 2, dps: 7, level: 10 }) },
+  wipe: { desc: 'undermanned 5 heroes ~Lv8 vs the SEASON FINALE → wipe',
+    season: 1, week: 6, heroes: roster({ tanks: 1, healers: 1, dps: 3, level: 8 }) },
+  nohealer: { desc: 'no healer vs an AoE caster boss → wipe (readiness flags it)',
+    season: 1, week: 5, heroes: roster({ tanks: 2, healers: 0, dps: 4, level: 10 }) },
+  big: { desc: '25 heroes ~Lv10 → big-raid stress test (HP scales up)',
+    season: 1, week: 3, heroes: roster({ tanks: 5, healers: 4, dps: 16, level: 10 }) },
+};
+
+async function loadScenario(name) {
+  if (name === 'list' || !name) {
+    for (const [k, v] of Object.entries(SCENARIOS)) console.log(`  ${k.padEnd(10)} — ${v.desc}`);
+    return;
+  }
+  const sc = SCENARIOS[name];
+  if (!sc) { console.log(`  unknown scenario "${name}" (try /scenario list)`); return; }
+  const seasonId = 't1', weekId = 'w1';
+  const boss = seasonBoss(sc.season, sc.week);
+  await setSeason({ id: seasonId, name: 'Tier 1', tier: 1, startsAt: Date.now(), weeks: config.raid.seasonWeeks, lootTable: SEASON_LOOT[0] });
+  const startsAt = computeNextRaidNight();
+  await setupRaidWeek({ seasonId, weekId, boss, locksAt: startsAt - config.raid.lockLeadMs, startsAt });
+  let i = 0;
+  for (const [cls, lvl] of sc.heroes) {
+    const id = `scn_${name}_${i}`;
+    await createPlayer({ userId: id, login: id, displayName: `${cls}${i}`, className: cls });
+    await database().ref(`${PATHS.player(id)}/level`).set(lvl); // set level directly (fast test data)
+    await enlist({ seasonId, weekId, userId: id, player: await getPlayer(id) });
+    i++;
+  }
+  console.log(`  loaded "${name}": ${sc.heroes.length} heroes mustered vs ${boss.name} (rec ~${boss.recommended}).`);
+  console.log('  → type !raidnight (you start as Nikki/mod) or open http://localhost:4000/raid/');
+}
 
 async function main() {
   if (!process.env.FIREBASE_DATABASE_EMULATOR_HOST && !process.env.GOOGLE_APPLICATION_CREDENTIALS) {
@@ -116,6 +170,9 @@ async function meta(input) {
       console.log(`  granted ${n} ticks (${levels} level-ups)`);
       break;
     }
+    case 'scenario':
+      await loadScenario((args[0] || 'list').toLowerCase());
+      break;
     case 'advance': {
       const t = await advanceRaidPhases();
       console.log(t ? `  advanced → ${t.transition}` : '  (no transition due yet)');

@@ -33,6 +33,12 @@ test('pickDrop returns null for an empty/invalid table', () => {
   assert.equal(pickDrop(['itm_nope'], getItem, () => 0, config), null);
 });
 
+test('pickDrop honors a rarity-weight override (boss loot skews rarer)', () => {
+  // Only "epic" weighted → must pick an epic item from the table.
+  const id = pickDrop(DEFAULT_LOOT_TABLE, getItem, () => 0, config, { common: 0, uncommon: 0, rare: 0, epic: 1, legendary: 0 });
+  assert.equal(getItem(id).rarity, 'epic');
+});
+
 test('rollClaim honors the guaranteed first-claim and the chance window', () => {
   assert.equal(rollClaim(() => 0.99, config, { guaranteed: true }), true);
   assert.equal(rollClaim(() => 0, config), true); // 0 < claimChance

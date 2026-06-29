@@ -22,9 +22,14 @@ export default {
       player.role === 'healer'
         ? `HP ${cs.maxHp} · heal ${cs.heal}`
         : `HP ${cs.maxHp} · atk ${cs.atk}`;
+    const g = player.equipped || {};
+    const gname = (slot) => g[slot]?.name || '—';
+    const gear = `${gname('weapon')} / ${gname('armor')} / ${gname('trinket')}`;
+    const ren = player.renown ? ` · renown ${player.renown}` : '';
     reply(
       `@${user.displayName} ${player.class} (${player.role}) · Lv ${player.level} · ` +
-        `EXP ${player.exp}/${need} · rating ${rating} · ${combat}`,
+        `EXP ${player.exp}/${need} · rating ${rating}${ren} · ${combat} · gear: ${gear}. ` +
+        `(!bag for unequipped loot)`,
     );
   },
 };

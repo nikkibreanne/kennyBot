@@ -19,6 +19,7 @@ import { startEventSub } from './src/twitch/eventsub.js';
 import { advanceRaidPhases } from './src/db/raid.js';
 import { createMessageHandler } from './src/events/chat.js';
 import { attachTwitchEvents } from './src/events/twitchEvents.js';
+import { startDropScheduler } from './src/events/dropScheduler.js';
 
 const HEARTBEAT_FILE = process.env.HEARTBEAT_FILE || '/tmp/kennybot.heartbeat';
 
@@ -148,6 +149,9 @@ async function main() {
   shutdownHooks.push(attachTwitchEvents({ chat, channel, logger }));
   await chat.connect();
   shutdownHooks.push(() => chat.quit());
+
+  // Auto chat-drop scheduler (mod-toggled via !drops; fires only while live).
+  shutdownHooks.push(startDropScheduler({ chat, channel, logger }));
 
   // ── Live gate: Helix poll (always) + EventSub (when broadcaster auth fits) ──
   const setLiveBound = (live, source) => setLive(live, source, logger);

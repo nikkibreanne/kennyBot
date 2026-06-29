@@ -2,43 +2,60 @@
 // Roster locks `lockLeadMs` before raid night; the battle then plays out
 // automatically (or force it early with !raidnight).
 import { setupRaidWeek, nextWeekId, computeNextRaidNight } from '../../db/raid.js';
-import { defaultBoss } from '../../content/bosses.js';
+import { defaultBoss, seasonBoss } from '../../content/bosses.js';
 import { getSeason, setSeason } from '../../db/configStore.js';
-import { DEFAULT_LOOT_TABLE } from '../../content/items.js';
+import { SEASON_LOOT } from '../../content/items.js';
 import { config } from '../../config.js';
 
 async function ensureSeason() {
   let season = getSeason();
   if (!season?.id) {
-    season = { id: 't1', name: 'Tier 1', startsAt: Date.now(), weeks: config.raid.seasonWeeks, lootTable: DEFAULT_LOOT_TABLE };
+    season = { id: 't1', name: 'Tier 1', tier: 1, startsAt: Date.now(), weeks: config.raid.seasonWeeks, lootTable: SEASON_LOOT[0] };
     await setSeason(season);
   }
   return season;
+}
+
+async function schedule(seasonId, weekId, boss, reply, lead) {
+  const startsAt = computeNextRaidNight();
+  await setupRaidWeek({ seasonId, weekId, boss, locksAt: startsAt - config.raid.lockLeadMs, startsAt });
+  const when = new Date(startsAt).toLocaleString();
+  const rec = boss.recommended ? ` · recommended ~${boss.recommended} heroes` : '';
+  reply(`📣 ${lead}: ${boss.name}${rec}. Raid night: ${when}. Players: !raid to join.`);
 }
 
 export default {
   names: ['boss'],
   mod: true,
   cooldownMs: 0,
-  help: '!boss set <name> — schedule the next boss + open muster',
+  help: '!boss set <name> (custom) | !boss next (next scripted season boss)',
   async run({ args, reply }) {
     const sub = (args[0] || '').toLowerCase();
-    if (sub !== 'set') {
-      reply('Usage: !boss set <name>  (then players !raid to muster; !raidnight to fight now)');
-      return;
-    }
-    const name = args.slice(1).join(' ').trim();
-    if (!name) {
-      reply('Usage: !boss set <name>');
-      return;
-    }
-    const season = await ensureSeason();
-    const weekId = await nextWeekId(season.id);
-    const startsAt = computeNextRaidNight();
-    const locksAt = startsAt - config.raid.lockLeadMs;
-    await setupRaidWeek({ seasonId: season.id, weekId, boss: defaultBoss(name), locksAt, startsAt });
 
-    const when = new Date(startsAt).toLocaleString();
-    reply(`📣 Muster open for ${name} (${season.id}/${weekId}). Raid night: ${when}. Players: !raid to join.`);
+    if (sub === 'set') {
+      const name = args.slice(1).join(' ').trim();
+      if (!name) {
+        reply('Usage: !boss set <name>');
+        return;
+      }
+      const season = await ensureSeason();
+      const weekId = await nextWeekId(season.id);
+      await schedule(season.id, weekId, defaultBoss(name), reply, `Muster open (${season.id}/${weekId})`);
+      return;
+    }
+
+    if (sub === 'next') {
+      const season = getSeason();
+      if (!season?.id) {
+        reply('Start a season first: !season start <id>');
+        return;
+      }
+      const weekId = await nextWeekId(season.id);
+      const weekNum = parseInt(String(weekId).replace(/\D/g, ''), 10) || 1;
+      await schedule(season.id, weekId, seasonBoss(season.tier || 1, weekNum), reply, `Week ${weekNum}`);
+      return;
+    }
+
+    reply('Usage: !boss set <name> | !boss next');
   },
 };

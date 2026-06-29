@@ -83,6 +83,7 @@ export const PATHS = {
   configExpMode: () => 'config/expMode',
   seasonCurrent: () => 'config/season/current',
   configRaid: () => 'config/raid',
+  configDropScheduler: () => 'config/dropScheduler',
   configLock: () => 'config/lock',
   botToken: () => 'config/secrets/botToken',
   items: () => 'items',

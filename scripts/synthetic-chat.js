@@ -87,9 +87,16 @@ async function main() {
   console.log('  sample log:');
   for (const e of events.slice(0, 6)) console.log('    ' + (e.text || `[${e.type}${e.n ? ' ' + e.n : ''}]`));
 
-  console.log('— closing out (loot + leaderboard) —');
+  console.log('— closing out (loot + leaderboard + renown) —');
   const fin = await finishBattle(seasonId, weekId);
   console.log(`  done: ${fin.downed ? 'victory' : 'defeat'} · mvp ${fin.mvp}`);
+  const heroAfter = await getPlayer(ROSTER[0].id);
+  console.log(`  ${ROSTER[0].name}: bag ${heroAfter.inventory?.length || 0} items · renown ${heroAfter.renown || 0}`);
+  if (fin.downed) {
+    assert.ok((heroAfter.inventory?.length || 0) > 0, 'victory grants loot');
+    assert.ok((heroAfter.renown || 0) > 0, 'victory grants renown');
+    console.log('  ✓ victory loot + renown granted to participants');
+  }
 
   const after = await getCombat(seasonId, weekId);
   assert.equal(after.status, 'done');

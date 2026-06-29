@@ -16,14 +16,15 @@ export const ROLES = /** @type {const} */ (['tank', 'healer', 'dps']);
 export const config = {
   // ── Chat EXP & leveling (spec §5.1) ──────────────────────────────────────
   exp: {
-    perMessage: 10, // base EXP per qualifying chat message (before multipliers)
+    perMessage: 12, // base EXP per qualifying chat message (before multipliers)
     // Per-user cooldown. Does double duty: blocks offline farming AND
     // flood-grinding (spec §6). Enforced in-memory (single instance) and the
     // anchor is persisted to players/<id>.lastExpAt for audit.
     cooldownMs: 30_000,
     // EXP needed to become *eligible* to pity-roll out of a level.
-    // threshold(level) = round(base * growth^(level-1)).
-    threshold: { base: 100, growth: 1.35 },
+    // threshold(level) = round(base * growth^(level-1)). 1.30 keeps a full
+    // season's finale level reachable in ~6 weeks of chatting.
+    threshold: { base: 100, growth: 1.3 },
     // Pity roll: once at/over threshold, each qualifying message rolls
     // p = min(base + k * levelPressure, cap) to level up. levelPressure climbs
     // by 1 per non-popping message and resets on level-up. pressureCap forces a
@@ -37,29 +38,40 @@ export const config = {
   rating: {
     classBase: { tank: 100, healer: 90, dps: 80 },
     perLevel: 10,
+    // Veteran reputation (spec §5.6): renown earned by clearing raids grants a
+    // small role-rating bonus that PERSISTS across seasons (gear resets, renown
+    // doesn't). renownBonus = min(renown, renownCap) * renownPerPoint.
+    renownPerPoint: 2,
+    renownCap: 40, // max +80 rating — meaningful for vets, never dominant
   },
 
   // ── Engagement multipliers (spec §7) ─────────────────────────────────────
   // Levers grant speed/communal benefit, never a guaranteed win.
+  // Applies to BOTH EXP gain and raid COMBAT power (owner decision: sub tier
+  // boosts power). Higher tiers = faster growth + a stronger hero. Chat loot
+  // grabs are deliberately NOT affected (kept tier-fair, see loot.claimChance).
   engagement: {
     base: 1.0,
-    subTier: { 0: 1.0, 1: 1.25, 2: 1.4, 3: 1.6 }, // Twitch sub tiers 1000/2000/3000 → 1/2/3
+    subTier: { 0: 1.0, 1: 1.3, 2: 1.55, 3: 1.8 }, // Twitch sub tiers 1000/2000/3000 → 1/2/3 (Prime = 1)
     cheerPerHundredBits: 0.0, // reserved (Phase 5); kept 0 so bits don't pay-to-win EXP
     max: 2.0, // hard clamp so no stacking lever runs away
   },
 
   // ── Loot (spec §5.2) ─────────────────────────────────────────────────────
   loot: {
-    // Weighted rarity ladder (genre-standard). Weights, not probabilities —
-    // normalized at roll time.
+    // Chat drops: weighted rarity ladder (rarer = much less likely).
     rarityWeights: { common: 60, uncommon: 25, rare: 10, epic: 4, legendary: 1 },
+    // BOSS-battle rewards roll on a HIGHER-rarity table (clearing a raid should
+    // feel better than a chat drop — owner request).
+    bossRarityWeights: { common: 18, uncommon: 34, rare: 28, epic: 14, legendary: 6 },
     // Claim is a WINDOW with independent rolls (inclusive), not first-to-type
-    // (spec §5.2): each claimer rolls claimChance. A newcomer's first claim is
-    // guaranteed (good first impression, spec §5.5) — handled in the command.
+    // (spec §5.2): each claimer rolls claimChance. TIER-FAIR — every sub tier has
+    // equal weight to grab chat loot (owner decision). First claim guaranteed.
     claimChance: 0.6,
     windowMs: 60_000, // how long an active drop stays claimable
-    // Auto drop scheduler while live (Phase 3). Random interval in [min,max].
-    scheduler: { enabled: false, minMs: 8 * 60_000, maxMs: 20 * 60_000 },
+    // Auto chat-drop scheduler while live; mod-tunable at runtime via the
+    // config/drops/scheduler RTDB path (see !drops command).
+    scheduler: { enabled: false, intervalSec: 15 * 60, jitter: 0.3 }, // ~15 min ±30%
   },
 
   // ── Weekly raid: muster → raid night → automated battle (spec §5.8) ───────
@@ -81,12 +93,26 @@ export const config = {
 
   // ── Automated combat engine (spec §5.8 / IMPLEMENTATION §L) ───────────────
   combat: {
-    turnCap: 20,
+    // Hard cap is only a backstop against a pathological infinite loop — the
+    // ENRAGE timer is what actually ends real fights (escalating boss damage
+    // breaks any stalemate), so normal play never reaches this. Set high so long
+    // back-and-forth fights can fully play out.
+    turnCap: 100,
+    // After `startTurn`, boss damage is multiplied by perTurnMult^(turn-startTurn):
+    // a stalemate always resolves into a real victory or wipe, never a cap cutoff.
+    enrage: { startTurn: 12, perTurnMult: 1.18 },
     msPerEvent: 1200, // must match the UI replay player (live.html MS_PER_EVENT)
     variance: 0.2, // ±20% damage/heal variance
     crit: { party: 0.16, boss: 0.12, mult: 1.8, bossMult: 1.7 },
     bossTankTargetChance: 0.6,
     defaultBossAtk: 90,
+    // Context-aware AI: how actors weight ability choice by the fight state.
+    ai: {
+      healAt: 0.6, // healer heals when the lowest ally is below this HP fraction
+      healCritAt: 0.3, // …and uses its strongest heal when below this
+      dpsPowerBias: 1.6, // dps/tank weight damage abilities by power^bias
+      bossAoeBias: 1.0, // boss favors AoE more as more heroes are alive
+    },
     // hero combat stats derived from role rating, per role:
     stats: {
       hpBase: 200,
