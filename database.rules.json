@@ -1,0 +1,48 @@
+{
+  "rules": {
+    ".read": false,
+    ".write": false,
+
+    // Game state is CLIENT-READ-ONLY. All authoritative writes go through the
+    // Firebase Admin SDK (kennyBot), which bypasses these rules. '.write: false'
+    // everywhere is the anti-cheat model (spec §7, IMPLEMENTATION §I).
+    // NOTE: RTDB read grants CASCADE and CANNOT be revoked deeper — so 'config'
+    // is NOT readable at its root; only its public children are, which keeps
+    // config/secrets unreadable.
+
+    "config": {
+      ".write": false,
+      "live": { ".read": true },
+      "expMode": { ".read": true },
+      "season": { ".read": true },
+      "raid": { ".read": true },
+      "lock": { ".read": true },
+
+      // Persisted bot refresh token etc. Reachable by NO client — Admin only.
+      "secrets": {
+        ".read": false,
+        ".write": false
+      }
+    },
+
+    // OKRAMARKET poll: anonymous client voting via runTransaction (the website's
+    // existing wide-open path). Deliberately client-WRITABLE and isolated from
+    // the locked game state above — do NOT fold game paths into this.
+    "polls": { ".read": true, ".write": true },
+
+    "items": { ".read": true, ".write": false },
+    "drops": { ".read": true, ".write": false },
+    "players": { ".read": true, ".write": false },
+    "usernames": { ".read": true, ".write": false },
+    "bosses": { ".read": true, ".write": false },
+    "raids": { ".read": true, ".write": false },
+
+    "leaderboard": {
+      ".read": true,
+      ".write": false,
+      "$seasonId": {
+        ".indexOn": ["damage", "lootClaimed"]
+      }
+    }
+  }
+}

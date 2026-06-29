@@ -1,0 +1,60 @@
+// !raid — muster command (spec §5.8). During the signup phase it ENLISTS your
+// hero into this week's raid; otherwise it reports the current phase + your
+// status and links to the site. Signing up needs a character (which is
+// subscriber-gated at !create), and a lapsed sub can still muster the hero they
+// built — so !raid itself isn't sub-gated.
+import { getActiveRaid, getSignup, enlist } from '../db/raid.js';
+import { getPlayer } from '../db/players.js';
+import { config } from '../config.js';
+
+function whenHtmlSafe(ts) {
+  if (!ts) return 'soon';
+  const ms = ts - Date.now();
+  if (ms <= 0) return 'now';
+  const h = Math.floor(ms / 3_600_000);
+  const m = Math.floor((ms % 3_600_000) / 60_000);
+  return h > 0 ? `${h}h ${m}m` : `${m}m`;
+}
+
+export default {
+  names: ['raid'],
+  mod: false,
+  cooldownMs: 3_000,
+  help: '!raid — sign up for this week’s raid (during muster) / see status',
+  async run({ user, reply }) {
+    const active = await getActiveRaid();
+    if (!active || !active.boss) {
+      reply(`No raid is scheduled yet. Watch ${config.siteUrl} for raid night!`);
+      return;
+    }
+    const { seasonId, weekId, phase, boss, pointer } = active;
+
+    if (phase === 'live') {
+      reply(`⚔️ ${boss.name}: the battle is happening NOW — watch it at ${config.siteUrl}/live/`);
+      return;
+    }
+    if (phase === 'done') {
+      reply(`This week’s raid is over — see the replay + result at ${config.siteUrl}/live/`);
+      return;
+    }
+    if (phase === 'locked') {
+      reply(`🔒 The roster is locked — ${boss.name} battle begins in ${whenHtmlSafe(pointer.startsAt)}. Watch at ${config.siteUrl}/live/`);
+      return;
+    }
+
+    // signup phase → enlist
+    const player = await getPlayer(user.id);
+    if (!player) {
+      reply(`@${user.displayName} you need a hero first — !create <class> (subscribers).`);
+      return;
+    }
+    const already = await getSignup(seasonId, weekId, user.id);
+    await enlist({ seasonId, weekId, userId: user.id, player });
+    const when = whenHtmlSafe(pointer.startsAt);
+    reply(
+      already
+        ? `@${user.displayName} your ${player.class} is mustered (updated). Raid night in ${when} → ${config.siteUrl}/raid/`
+        : `@${user.displayName} ✅ mustered as ${player.class} (${player.role}, Lv ${player.level})! Raid night in ${when} → ${config.siteUrl}/raid/`,
+    );
+  },
+};
