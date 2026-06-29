@@ -149,3 +149,45 @@ export const DEFAULT_BOSS_ABILITIES = BOSS_ABILITY_SETS.warden;
 export function abilitiesFor(className) {
   return ABILITIES[className] || [{ name: 'Strike', kind: 'damage', power: 1.0, cooldown: 0 }];
 }
+
+/**
+ * Per-ability combat-log icons (flavor only — the engine prepends these to each
+ * log line so different attacks read distinctly). Campy garden theme; edit
+ * freely. Falls back to a kind-based default for anything unmapped.
+ * @type {Record<string, string>}
+ */
+export const ABILITY_ICONS = {
+  // Guardian (tank)
+  'Thorn Jab': '🌵', 'Compost Crusher': '🪨',
+  // Mender (healer)
+  'Quick Sprout': '🌱', 'Bloom of Renewal': '🌸', 'Okra Lash': '🌿',
+  // Berserker (melee dps)
+  'Hack & Harvest': '🪓', 'Reckless Reaping': '🩸',
+  // Arcanist (magic dps)
+  'Spore Bolt': '🍄', 'Garden Nova': '☄️',
+  // Ranger (physical dps)
+  'Seed Shot': '🎯', 'Bramble Volley': '🏹',
+  // Boss — bruiser
+  'Bramble Backhand': '👊', 'Rootquake Slam': '🪨',
+  // Boss — caster
+  'Witherbolt': '🔮', 'Pollen Storm': '🌪️',
+  // Boss — swarmer
+  'Aphid Skitter': '🐛', 'Locust Tide': '🦗',
+  // Boss — executioner
+  'Creeping Vine': '🪻', 'Harvest Reckoning': '⚰️',
+  // Boss — warden
+  'Thorned Lash': '🌹', 'Bramble Nova': '💥',
+  // Boss — tyrant (finale)
+  'Verdant Wrath': '👑', 'Crushing Bloom': '🌺', 'Blightfall': '🌑',
+};
+
+/**
+ * Icon for an ability by name, with a kind-based fallback.
+ * @param {string} name
+ * @param {'damage'|'heal'|'aoe'} kind
+ * @param {{ side?: 'party'|'enemy', crit?: boolean }} [opts]
+ */
+export function iconFor(name, kind, opts = {}) {
+  const base = ABILITY_ICONS[name] || (kind === 'heal' ? '✚' : kind === 'aoe' ? '💥' : opts.side === 'enemy' ? '🔥' : '⚔️');
+  return opts.crit ? `${base}⚡` : base;
+}

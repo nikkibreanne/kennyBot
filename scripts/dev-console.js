@@ -14,6 +14,7 @@ import { createInterface } from 'node:readline';
 import { initFirebase, closeFirebase, database, PATHS } from '../src/db/firebase.js';
 import { startConfigMirror, setExpMode, getRaidPointer, setSeason } from '../src/db/configStore.js';
 import { createMessageHandler } from '../src/events/chat.js';
+import { listCommands } from '../src/commands/registry.js';
 import { applyChatTick, createPlayer, getPlayer } from '../src/db/players.js';
 import { getActiveRaid, advanceRaidPhases, setupRaidWeek, enlist, computeNextRaidNight } from '../src/db/raid.js';
 import { seasonBoss } from '../src/content/bosses.js';
@@ -49,12 +50,25 @@ Console meta-commands:
   /grind [n]                    grant EXP n times to current user (bypass cooldown)
   /scenario list                list preset scenarios
   /scenario <name>              load a preset (season + boss + a mustered roster)
-  /advance                      run the raid phase machine once (lock/run/finish)
+  /commands                     list all ! chat commands
+  /advance                      tick the SCHEDULED phase machine (only acts when a
+                                lock/start/close time has passed; for on-demand
+                                testing use !raidnight instead)
   /state                        show the active raid pointer + phase
-  /help                         this help
+  /help                         this help (+ the ! command list)
   /quit                         exit
-Anything starting with ! is a chat command (e.g. !create Guardian, !raid, !raidnight).
+
+To run a raid NOW: load a roster (/scenario winnable) then !raidnight as a mod.
 `;
+
+/** Print every registered ! command with a [mod]/[sub] tag (from the registry). */
+function printCommands() {
+  console.log('\nChat commands (prefix with !):');
+  for (const def of listCommands()) {
+    const tag = def.mod ? '[mod]' : def.subOnly ? '[sub]' : '     ';
+    console.log(`  ${tag} ${def.help}`);
+  }
+}
 
 // Preset scenarios so you don't rebuild setup each run. Each loads a season +
 // boss and a roster of created/leveled/mustered heroes — then type !raidnight.
@@ -185,7 +199,8 @@ async function meta(input) {
       if (active?.boss) console.log(`  boss: ${active.boss.name} (${active.boss.hp} HP) · phase ${active.phase} · heroes ${active.team?.count ?? 0}`);
       break;
     }
-    case 'help': console.log(HELP); break;
+    case 'help': console.log(HELP); printCommands(); break;
+    case 'commands': printCommands(); break;
     case 'quit': case 'exit': process.exit(0); break;
     default: console.log(`  unknown meta-command: /${cmd} (try /help)`);
   }

@@ -10,7 +10,7 @@
 // escalates boss damage so every fight ends in a real victory or wipe; the hard
 // turn cap is only a far backstop against a pathological infinite loop.
 
-import { abilitiesFor, DEFAULT_BOSS_ABILITIES } from '../content/abilities.js';
+import { abilitiesFor, DEFAULT_BOSS_ABILITIES, iconFor } from '../content/abilities.js';
 
 /** Seeded PRNG (mulberry32) — same family the UI demo uses. */
 export function mulberry32(seed) {
@@ -118,11 +118,12 @@ export function simulateBattle(roster, boss, seed, config) {
       if (abil.kind === 'heal') {
         const amount = Math.max(1, vary((p.heal || 0) * abil.power));
         hp[lowest.uid] = Math.min(lowest.maxHp, hp[lowest.uid] + amount);
+        const icon = iconFor(abil.name, 'heal');
         events.push({
           type: 'action', side: 'party', actor: p.uid, actorName: p.name, ability: abil.name,
-          kind: 'heal', target: lowest.uid, targetName: lowest.name, amount, crit: false,
+          kind: 'heal', target: lowest.uid, targetName: lowest.name, amount, crit: false, icon,
           targetHpAfter: hp[lowest.uid],
-          text: `✚ ${p.name} casts ${abil.name} on ${lowest.name} (+${amount} HP)`,
+          text: `${icon} ${p.name} casts ${abil.name} on ${lowest.name} (+${amount} HP)`,
         });
       } else {
         let amount = Math.max(1, vary(p.atk * abil.power));
@@ -130,10 +131,11 @@ export function simulateBattle(roster, boss, seed, config) {
         if (crit) amount = Math.round(amount * c.crit.mult);
         bossHp = Math.max(0, bossHp - amount);
         dmgByUid[p.uid] = (dmgByUid[p.uid] || 0) + amount;
+        const icon = iconFor(abil.name, 'damage', { crit });
         events.push({
           type: 'action', side: 'party', actor: p.uid, actorName: p.name, ability: abil.name,
-          kind: 'damage', target: 'boss', targetName: boss.name, amount, crit, bossHpAfter: bossHp,
-          text: `⚔️ ${p.name} uses ${abil.name}${crit ? ' — CRIT!' : ''} on ${boss.name} for ${amount}!`,
+          kind: 'damage', target: 'boss', targetName: boss.name, amount, crit, icon, bossHpAfter: bossHp,
+          text: `${icon} ${p.name} uses ${abil.name}${crit ? ' — CRIT!' : ''} on ${boss.name} for ${amount}!`,
         });
       }
     }
@@ -163,13 +165,14 @@ export function simulateBattle(roster, boss, seed, config) {
           if (hp[q.uid] <= 0) fallen.push(q);
         }
       });
+      const icon = iconFor(babil.name, 'aoe', { side: 'enemy' });
       events.push({
         type: 'action', side: 'enemy', actor: 'boss', actorName: boss.name, ability: babil.name,
-        kind: 'aoe', target: 'party', targetName: 'the party', amount, crit: false, enraged,
-        text: `💥 ${boss.name} unleashes ${babil.name}${enraged ? ' (ENRAGED)' : ''} — ${amount} to ALL heroes!`,
+        kind: 'aoe', target: 'party', targetName: 'the party', amount, crit: false, enraged, icon,
+        text: `${icon} ${boss.name} unleashes ${babil.name}${enraged ? ' (ENRAGED)' : ''} — ${amount} to ALL heroes!`,
       });
       for (const q of fallen) {
-        events.push({ type: 'action', side: 'enemy', actor: 'boss', kind: 'buff', target: q.uid, targetName: q.name, text: `☠️ ${q.name} has fallen!` });
+        events.push({ type: 'action', side: 'enemy', actor: 'boss', kind: 'buff', target: q.uid, targetName: q.name, icon: '☠️', text: `☠️ ${q.name} has fallen!` });
       }
     } else {
       const alive = aliveParty();
@@ -179,13 +182,14 @@ export function simulateBattle(roster, boss, seed, config) {
       const crit = rng() < c.crit.boss;
       if (crit) amount = Math.round(amount * c.crit.bossMult);
       hp[tgt.uid] = Math.max(0, hp[tgt.uid] - amount);
+      const icon = iconFor(babil.name, 'damage', { side: 'enemy', crit });
       events.push({
         type: 'action', side: 'enemy', actor: 'boss', actorName: boss.name, ability: babil.name,
-        kind: 'damage', target: tgt.uid, targetName: tgt.name, amount, crit, enraged, targetHpAfter: hp[tgt.uid],
-        text: `🔥 ${boss.name} hits ${tgt.name} with ${babil.name}${crit ? ' — CRIT!' : ''}${enraged ? ' (ENRAGED)' : ''} for ${amount}!`,
+        kind: 'damage', target: tgt.uid, targetName: tgt.name, amount, crit, enraged, icon, targetHpAfter: hp[tgt.uid],
+        text: `${icon} ${boss.name} hits ${tgt.name} with ${babil.name}${crit ? ' — CRIT!' : ''}${enraged ? ' (ENRAGED)' : ''} for ${amount}!`,
       });
       if (hp[tgt.uid] <= 0) {
-        events.push({ type: 'action', side: 'enemy', actor: 'boss', kind: 'buff', target: tgt.uid, targetName: tgt.name, text: `☠️ ${tgt.name} has fallen!` });
+        events.push({ type: 'action', side: 'enemy', actor: 'boss', kind: 'buff', target: tgt.uid, targetName: tgt.name, icon: '☠️', text: `☠️ ${tgt.name} has fallen!` });
       }
     }
   }
