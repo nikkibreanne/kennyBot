@@ -82,7 +82,10 @@ export async function setupRaidWeek({ seasonId, weekId, boss, locksAt, startsAt 
   };
   await database().ref().update({
     [PATHS.boss(seasonId, weekId)]: bossRecord,
-    [PATHS.raid(seasonId, weekId)]: { signups: {}, team: computeTeam({}) },
+    // Reset the raid node for muster. Do NOT seed a zeros `team` — the website
+    // computes team stats from `signups` until lock writes the real aggregate;
+    // a zeros object is truthy and would shadow that fallback (showing 0s).
+    [PATHS.raid(seasonId, weekId)]: { signups: {} },
     [PATHS.configRaid()]: { seasonId, weekId, phase: 'signup', locksAt, startsAt, doneAt: null },
   });
   return { seasonId, weekId, boss: bossRecord };

@@ -4,9 +4,10 @@
 // replays. No I/O, no clock, no Math.random — deterministic, unit-testable,
 // auditable, reproducible. Round-based (D&D-style) logging.
 //
-// Each round: every hero acts, then the boss, then any affix CRITTERS (adds),
-// then affix area effects. Actors choose by CONTEXT (healers heal the hurt, dps
-// swing their hardest hit or clear adds, the boss favors AoE when grouped and
+// INITIATIVE: each round, heroes and affix CRITTERS act in a SHUFFLED, seeded
+// order (interleaved — not a fixed party-then-enemy block), and the boss acts at
+// the END of the round. Actors choose by CONTEXT (healers heal the hurt, dps
+// swing their hardest hit or clear adds; the boss favors AoE when grouped and
 // spreads its single-target hits across the party — not just the tank). An
 // ENRAGE timer escalates enemy damage so fights end in a real victory or wipe.
 // Affixes (content/affixes.js) add real mechanics: critters, party DoT, reduced
@@ -105,6 +106,17 @@ export function simulateBattle(roster, boss, seed, config) {
     return k;
   }
 
+  const fall = (q, by) => events.push({ type: 'action', side: 'enemy', actor: by, kind: 'buff', target: q.uid, targetName: q.name, icon: '☠️', text: `☠️ ${q.name} has fallen!` });
+
+  /** Seeded Fisher–Yates shuffle (in place). */
+  function shuffle(arr) {
+    for (let i = arr.length - 1; i > 0; i--) {
+      const j = Math.floor(rng() * (i + 1));
+      [arr[i], arr[j]] = [arr[j], arr[i]];
+    }
+    return arr;
+  }
+
   /** Pick n distinct alive heroes for a boss hit; first favors the tank. */
   function pickBossTargets(n) {
     const pool = aliveParty();
@@ -119,81 +131,76 @@ export function simulateBattle(roster, boss, seed, config) {
     return chosen;
   }
 
-  const fall = (q, by) => events.push({ type: 'action', side: 'enemy', actor: by, kind: 'buff', target: q.uid, targetName: q.name, icon: '☠️', text: `☠️ ${q.name} has fallen!` });
+  /** One hero's action: frost skip, then heal the hurt or strike (boss/add) + recoil. */
+  function heroAct(p) {
+    if (hp[p.uid] <= 0 || bossHp <= 0) return;
+    if (af.frost && rng() < af.frost) {
+      events.push({ type: 'action', side: 'enemy', actor: 'affix', kind: 'buff', target: p.uid, targetName: p.name, icon: '❄️', text: `❄️ ${p.name} is frozen solid and loses a turn!` });
+      return;
+    }
+    const avail = abilitiesFor(p.class).filter((a) => ready(p.uid, a));
+    const pool = avail.length ? avail : [abilitiesFor(p.class)[0]];
+    const allies = aliveParty();
+    const lowest = allies.slice().sort((a, b) => hp[a.uid] / a.maxHp - hp[b.uid] / b.maxHp)[0];
+    const lowestPct = lowest ? hp[lowest.uid] / lowest.maxHp : 1;
+    const heals = pool.filter((a) => a.kind === 'heal');
+    const strikes = pool.filter((a) => a.kind !== 'heal');
 
-  events.push({ type: 'start', text: `${boss.name} awakens — the raid begins!${af.label ? ` [${af.label}]` : ''}` });
-  if (af.adds) {
-    const k = spawnAdds(af.adds.count);
-    if (k) events.push({ type: 'action', side: 'enemy', actor: 'boss', kind: 'summon', icon: critterIcon, text: `${critterIcon} ${k} ${critterName}${k > 1 ? 's' : ''} skitter in!` });
+    let abil;
+    if (heals.length && lowestPct < ai.healAt) {
+      const critHeal = lowestPct < ai.healCritAt;
+      abil = weightedPick(heals.map((a) => ({ value: a, weight: critHeal ? a.power ** 2 : a.power })), rng);
+    } else {
+      abil = weightedPick((strikes.length ? strikes : pool).map((a) => ({ value: a, weight: a.power ** ai.dpsPowerBias })), rng);
+    }
+    cd[p.uid + abil.name] = abil.cooldown;
+
+    if (abil.kind === 'heal') {
+      let amount = Math.max(1, vary((p.heal || 0) * abil.power));
+      if (af.lessHealing) amount = Math.max(1, Math.round(amount * af.lessHealing));
+      hp[lowest.uid] = Math.min(lowest.maxHp, hp[lowest.uid] + amount);
+      const icon = iconFor(abil.name, 'heal');
+      events.push({ type: 'action', side: 'party', actor: p.uid, actorName: p.name, ability: abil.name, kind: 'heal', target: lowest.uid, targetName: lowest.name, amount, crit: false, icon, targetHpAfter: hp[lowest.uid], text: `${icon} ${p.name} casts ${abil.name} on ${lowest.name} (+${amount} HP)` });
+      return;
+    }
+
+    const targetsAdd = liveAdds().length > 0 && p.role === 'dps' && rng() < c.adds.focusChance;
+    let amount = Math.max(1, vary(p.atk * abil.power));
+    const crit = rng() < c.crit.party;
+    if (crit) amount = Math.round(amount * c.crit.mult);
+    const icon = iconFor(abil.name, 'damage', { crit });
+    if (targetsAdd) {
+      const add = liveAdds().sort((a, b) => a.hp - b.hp)[0];
+      add.hp = Math.max(0, add.hp - amount);
+      events.push({ type: 'action', side: 'party', actor: p.uid, actorName: p.name, ability: abil.name, kind: 'damage', target: add.id, targetName: add.name, amount, crit, icon, text: `${icon} ${p.name} strikes ${add.name} with ${abil.name}${crit ? ' — CRIT!' : ''} for ${amount}!` });
+      if (add.hp <= 0) events.push({ type: 'action', side: 'party', actor: p.uid, kind: 'buff', target: add.id, targetName: add.name, icon: '💥', text: `💥 ${add.name} is crushed!` });
+    } else {
+      bossHp = Math.max(0, bossHp - amount);
+      dmgByUid[p.uid] = (dmgByUid[p.uid] || 0) + amount;
+      events.push({ type: 'action', side: 'party', actor: p.uid, actorName: p.name, ability: abil.name, kind: 'damage', target: 'boss', targetName: boss.name, amount, crit, icon, bossHpAfter: bossHp, text: `${icon} ${p.name} uses ${abil.name}${crit ? ' — CRIT!' : ''} on ${boss.name} for ${amount}!` });
+    }
+    if (af.recoil && hp[p.uid] > 0) {
+      const r = Math.max(1, Math.round(p.atk * af.recoil));
+      hp[p.uid] = Math.max(0, hp[p.uid] - r);
+      events.push({ type: 'action', side: 'enemy', actor: 'affix', kind: 'damage', target: p.uid, targetName: p.name, amount: r, icon: '🥀', text: `🥀 ${af.label || 'Thorns'} rake ${p.name} for ${r}!` });
+      if (hp[p.uid] <= 0) fall(p, 'affix');
+    }
   }
 
-  let turn = 0;
-  while (bossHp > 0 && aliveParty().length > 0 && turn < c.turnCap) {
-    turn += 1;
-    events.push({ type: 'turn', n: turn });
+  /** One critter's action: bite a random alive hero. */
+  function addAct(add, enrageMult) {
+    if (add.hp <= 0) return;
+    const alive = aliveParty();
+    if (!alive.length) return;
+    const tgt = alive[Math.floor(rng() * alive.length)];
+    const amount = Math.max(1, Math.round(vary(add.atk) * enrageMult));
+    hp[tgt.uid] = Math.max(0, hp[tgt.uid] - amount);
+    events.push({ type: 'action', side: 'enemy', actor: add.id, actorName: add.name, kind: 'damage', target: tgt.uid, targetName: tgt.name, amount, crit: false, icon: add.icon, text: `${add.icon} ${add.name} bites ${tgt.name} for ${amount}!` });
+    if (hp[tgt.uid] <= 0) fall(tgt, add.id);
+  }
 
-    // ── party acts ──
-    for (const p of party) {
-      if (hp[p.uid] <= 0) continue;
-      if (bossHp <= 0) break;
-      if (af.frost && rng() < af.frost) {
-        events.push({ type: 'action', side: 'enemy', actor: 'affix', kind: 'buff', target: p.uid, targetName: p.name, icon: '❄️', text: `❄️ ${p.name} is frozen solid and loses a turn!` });
-        continue;
-      }
-
-      const avail = abilitiesFor(p.class).filter((a) => ready(p.uid, a));
-      const pool = avail.length ? avail : [abilitiesFor(p.class)[0]];
-      const allies = aliveParty();
-      const lowest = allies.slice().sort((a, b) => hp[a.uid] / a.maxHp - hp[b.uid] / b.maxHp)[0];
-      const lowestPct = lowest ? hp[lowest.uid] / lowest.maxHp : 1;
-      const heals = pool.filter((a) => a.kind === 'heal');
-      const strikes = pool.filter((a) => a.kind !== 'heal');
-
-      let abil;
-      if (heals.length && lowestPct < ai.healAt) {
-        const critHeal = lowestPct < ai.healCritAt;
-        abil = weightedPick(heals.map((a) => ({ value: a, weight: critHeal ? a.power ** 2 : a.power })), rng);
-      } else {
-        abil = weightedPick((strikes.length ? strikes : pool).map((a) => ({ value: a, weight: a.power ** ai.dpsPowerBias })), rng);
-      }
-      cd[p.uid + abil.name] = abil.cooldown;
-
-      if (abil.kind === 'heal') {
-        let amount = Math.max(1, vary((p.heal || 0) * abil.power));
-        if (af.lessHealing) amount = Math.max(1, Math.round(amount * af.lessHealing));
-        hp[lowest.uid] = Math.min(lowest.maxHp, hp[lowest.uid] + amount);
-        const icon = iconFor(abil.name, 'heal');
-        events.push({ type: 'action', side: 'party', actor: p.uid, actorName: p.name, ability: abil.name, kind: 'heal', target: lowest.uid, targetName: lowest.name, amount, crit: false, icon, targetHpAfter: hp[lowest.uid], text: `${icon} ${p.name} casts ${abil.name} on ${lowest.name} (+${amount} HP)` });
-      } else {
-        const targetsAdd = liveAdds().length > 0 && p.role === 'dps' && rng() < c.adds.focusChance;
-        let amount = Math.max(1, vary(p.atk * abil.power));
-        const crit = rng() < c.crit.party;
-        if (crit) amount = Math.round(amount * c.crit.mult);
-        const icon = iconFor(abil.name, 'damage', { crit });
-        if (targetsAdd) {
-          const add = liveAdds().sort((a, b) => a.hp - b.hp)[0];
-          add.hp = Math.max(0, add.hp - amount);
-          events.push({ type: 'action', side: 'party', actor: p.uid, actorName: p.name, ability: abil.name, kind: 'damage', target: add.id, targetName: add.name, amount, crit, icon, text: `${icon} ${p.name} strikes ${add.name} with ${abil.name}${crit ? ' — CRIT!' : ''} for ${amount}!` });
-          if (add.hp <= 0) events.push({ type: 'action', side: 'party', actor: p.uid, kind: 'buff', target: add.id, targetName: add.name, icon: '💥', text: `💥 ${add.name} is crushed!` });
-        } else {
-          bossHp = Math.max(0, bossHp - amount);
-          dmgByUid[p.uid] = (dmgByUid[p.uid] || 0) + amount;
-          events.push({ type: 'action', side: 'party', actor: p.uid, actorName: p.name, ability: abil.name, kind: 'damage', target: 'boss', targetName: boss.name, amount, crit, icon, bossHpAfter: bossHp, text: `${icon} ${p.name} uses ${abil.name}${crit ? ' — CRIT!' : ''} on ${boss.name} for ${amount}!` });
-        }
-        if (af.recoil && hp[p.uid] > 0) {
-          const r = Math.max(1, Math.round(p.atk * af.recoil));
-          hp[p.uid] = Math.max(0, hp[p.uid] - r);
-          events.push({ type: 'action', side: 'enemy', actor: 'affix', kind: 'damage', target: p.uid, targetName: p.name, amount: r, icon: '🥀', text: `🥀 ${af.label || 'Thorns'} rake ${p.name} for ${r}!` });
-          if (hp[p.uid] <= 0) fall(p, 'affix');
-        }
-      }
-    }
-    if (bossHp <= 0) break;
-
-    // ── boss acts (enrage escalates; single-target spreads / cleaves) ──
-    tickCd();
-    const enrageMult = turn > c.enrage.startTurn ? c.enrage.perTurnMult ** (turn - c.enrage.startTurn) : 1;
-    const enraged = enrageMult > 1.0001;
+  /** The boss's action (end of round): AoE or a single-target hit that may cleave. */
+  function bossAct(enrageMult, enraged) {
     const bossPool = bossAbilities.filter((a) => ready('boss', a));
     const usable = bossPool.length ? bossPool : bossAbilities;
     const aliveFrac = aliveParty().length / Math.max(1, party.length);
@@ -219,32 +226,53 @@ export function simulateBattle(roster, boss, seed, config) {
         if (hp[tgt.uid] <= 0) fall(tgt, 'boss');
       }
     }
+  }
 
-    // ── adds act ──
-    for (const add of liveAdds()) {
-      const alive = aliveParty();
-      if (!alive.length) break;
-      const tgt = alive[Math.floor(rng() * alive.length)];
-      const amount = Math.max(1, Math.round(vary(add.atk) * enrageMult));
-      hp[tgt.uid] = Math.max(0, hp[tgt.uid] - amount);
-      events.push({ type: 'action', side: 'enemy', actor: add.id, actorName: add.name, kind: 'damage', target: tgt.uid, targetName: tgt.name, amount, crit: false, icon: add.icon, text: `${add.icon} ${add.name} bites ${tgt.name} for ${amount}!` });
-      if (hp[tgt.uid] <= 0) fall(tgt, add.id);
+  /** End-of-round affix damage-over-time on the whole party. */
+  function affixDot() {
+    if (!af.dot || !aliveParty().length) return;
+    const amount = Math.max(1, Math.round(bossAtk * af.dot));
+    const fallen = [];
+    party.forEach((q) => { if (hp[q.uid] > 0) { hp[q.uid] = Math.max(0, hp[q.uid] - amount); if (hp[q.uid] <= 0) fallen.push(q); } });
+    events.push({ type: 'action', side: 'enemy', actor: 'affix', actorName: af.label, kind: 'aoe', target: 'party', targetName: 'the party', amount, crit: false, icon: '🍂', text: `🍂 ${af.label} withers the patch — ${amount} to all!` });
+    for (const q of fallen) fall(q, 'affix');
+  }
+
+  // ── opening ──
+  events.push({ type: 'start', text: `${boss.name} awakens — the raid begins!${af.label ? ` [${af.label}]` : ''}` });
+  if (af.adds) {
+    const k = spawnAdds(af.adds.count);
+    if (k) events.push({ type: 'action', side: 'enemy', actor: 'boss', kind: 'summon', icon: critterIcon, text: `${critterIcon} ${k} ${critterName}${k > 1 ? 's' : ''} skitter in!` });
+  }
+
+  let turn = 0;
+  while (bossHp > 0 && aliveParty().length > 0 && turn < c.turnCap) {
+    turn += 1;
+    events.push({ type: 'turn', n: turn });
+    const enrageMult = turn > c.enrage.startTurn ? c.enrage.perTurnMult ** (turn - c.enrage.startTurn) : 1;
+    const enraged = enrageMult > 1.0001;
+
+    // Interleaved initiative: heroes + critters in a shuffled order; boss last.
+    const order = shuffle([
+      ...aliveParty().map((h) => ({ t: 'hero', h })),
+      ...liveAdds().map((a) => ({ t: 'add', a })),
+    ]);
+    for (const actor of order) {
+      if (bossHp <= 0 || aliveParty().length === 0) break;
+      if (actor.t === 'hero') heroAct(actor.h);
+      else addAct(actor.a, enrageMult);
     }
+    if (bossHp <= 0 || aliveParty().length === 0) break;
 
-    // ── affix damage-over-time ──
-    if (af.dot && aliveParty().length) {
-      const amount = Math.max(1, Math.round(bossAtk * af.dot));
-      const fallen = [];
-      party.forEach((q) => { if (hp[q.uid] > 0) { hp[q.uid] = Math.max(0, hp[q.uid] - amount); if (hp[q.uid] <= 0) fallen.push(q); } });
-      events.push({ type: 'action', side: 'enemy', actor: 'affix', actorName: af.label, kind: 'aoe', target: 'party', targetName: 'the party', amount, crit: false, icon: '🍂', text: `🍂 ${af.label} withers the patch — ${amount} to all!` });
-      for (const q of fallen) fall(q, 'affix');
-    }
+    bossAct(enrageMult, enraged);
+    affixDot();
 
-    // ── respawn adds ──
     if (af.adds?.respawnEvery && turn % af.adds.respawnEvery === 0 && bossHp > 0 && aliveParty().length) {
       const k = spawnAdds(af.adds.count);
       if (k) events.push({ type: 'action', side: 'enemy', actor: 'boss', kind: 'summon', icon: critterIcon, text: `${critterIcon} ${k} more ${critterName}${k > 1 ? 's' : ''} swarm in!` });
     }
+
+    tickCd(); // cooldowns tick once per round
   }
 
   const downed = bossHp <= 0;
