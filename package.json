@@ -30,10 +30,13 @@
     "@twurple/auth": "^8.1.4",
     "@twurple/chat": "^8.1.4",
     "@twurple/eventsub-ws": "^8.1.4",
-    "dotenv": "^16.4.5",
+    "dotenv": "^17.4.2",
     "firebase-admin": "^14.1.0"
   },
   "devDependencies": {
-    "firebase-tools": "^14.0.0"
+    "firebase-tools": "^15.22.3"
+  },
+  "overrides": {
+    "uuid": "^11.1.1"
   }
 }
