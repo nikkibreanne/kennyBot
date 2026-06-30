@@ -64,7 +64,7 @@ export function attachTwitchEvents({ chat, channel, logger }) {
       const drop = await setDrop(itemId);
       chat.say(
         channel,
-        `Raid incoming (${raidInfo?.viewerCount ?? '?'})! A ${drop.rarity} ${drop.name} dropped for everyone — !grab!`,
+        `Raid incoming (${raidInfo?.viewerCount ?? '?'})! A ${drop.rarity} ${drop.name} dropped — !grab to enter the draw!`,
       ).catch(() => {});
     } catch (err) {
       logger.error('raid handler failed', { err: String(err) });
@@ -82,7 +82,7 @@ export function attachTwitchEvents({ chat, channel, logger }) {
       const itemId = pickDrop(lootTable(), getItem, Math.random, config);
       if (!itemId) return;
       const drop = await setDrop(itemId);
-      chat.say(channel, `${bits} bits! A ${drop.rarity} ${drop.name} dropped for chat — !grab!`).catch(() => {});
+      chat.say(channel, `${bits} bits! A ${drop.rarity} ${drop.name} dropped — !grab to enter the draw!`).catch(() => {});
     } catch (err) {
       logger.error('cheer handler failed', { err: String(err) });
     }

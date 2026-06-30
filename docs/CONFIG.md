@@ -112,14 +112,16 @@ tier-fair — see `loot.claimChance`).
 
 ## `loot` — drops & claiming
 
-Controls what drops, how rare it is, and how players claim it.
+Controls what drops, how rare it is, and the claim **lottery**. Each drop is a
+drawing: everyone who `!grab`s within the window is entered, then **one** winner
+is drawn for the **one** item — a drop never mints duplicates, and every entrant
+has equal odds (tier-fair, no sub-tier loot edge).
 
 | Key | Default | What it controls | Effect of changing it |
 |---|---|---|---|
 | `rarityWeights` | `common 60, uncommon 25, rare 10, epic 4, legendary 1` | Relative odds of each rarity for **chat drops**. Bigger weight = more common. | Tilt toward rarer items by raising the high-rarity weights. These are *weights*, not percentages — they're normalized against each other. |
 | `bossRarityWeights` | `common 18, uncommon 34, rare 28, epic 14, legendary 6` | Same idea but for **boss-battle rewards** — a deliberately richer table so clearing a raid feels better than a chat grab. | Make raid clears more/less rewarding relative to chat drops. |
-| `claimChance` | `0.6` | When a drop is live, each player who `!grab`s rolls this chance to get a copy (independent rolls — it's a window, not first-to-type). The very first claim is always guaranteed. **Tier-fair: every sub tier has equal odds.** | Higher = more people walk away with the item per drop. Lower = drops are scarcer/more contested. |
-| `windowMs` | `60000` (60 s) | How long a drop stays grabbable after it appears. | Longer = more people get a chance to `!grab`. Shorter = snappier, more exclusive. |
+| `windowMs` | `60000` (60 s) | How long a drop stays **open for entries** before the winner is drawn. | Longer = more time for people to `!grab` into the draw. Shorter = snappier, more exclusive. |
 | `scheduler.enabled` | `false` | Whether the **automatic** chat-drop loop runs while live. **Runtime-tunable** via `!drops on/off` (RTDB-seeded — see the seeding caveat above). | Turn on to have loot rain on a timer without a mod forcing each `!drop`. Default off so it starts quiet. |
 | `scheduler.intervalSec` | `900` (15 min) | Average gap between auto drops. **Runtime-tunable** via `!drops every <min>` (1–240). Enforced floor of 60 s. | Lower = more frequent loot (good for big, gear-hungry chats). |
 | `scheduler.jitter` | `0.3` (±30%) | Randomizes the interval so drops aren't clockwork. **Edit-and-restart only** (not stored in RTDB). | Higher = more unpredictable timing; `0` = exact interval. |

@@ -59,15 +59,17 @@ export function pickDrop(lootTable, getItem, rng, config, weights) {
 }
 
 /**
- * One claimer's independent roll within the claim window (spec §5.2): not
- * first-to-type. `guaranteed` forces success for a player's very first claim
- * (good first impression, spec §5.5).
- * @param {() => number} rng
- * @param {{ loot: { claimChance: number } }} config
- * @param {{ guaranteed?: boolean }} [opts]
- * @returns {boolean}
+ * Draw exactly ONE winner uniformly from a drop's entrants (spec §5.2). The claim
+ * window is a LOTTERY, not per-user rolls: everyone who !grabs in the window is
+ * entered, then a single winner takes the single item — so a drop never mints
+ * duplicates no matter how many people grab. Pure + RNG-injected for testing.
+ * @param {Record<string, unknown>} entries  map of entrant userId → entry
+ * @param {() => number} rng  in [0,1)
+ * @returns {string|null} the winning userId, or null if there were no entrants
  */
-export function rollClaim(rng, config, opts = {}) {
-  if (opts.guaranteed) return true;
-  return rng() < config.loot.claimChance;
+export function pickWinner(entries, rng) {
+  const ids = Object.keys(entries || {});
+  if (ids.length === 0) return null;
+  const idx = Math.floor(rng() * ids.length);
+  return ids[Math.min(idx, ids.length - 1)];
 }

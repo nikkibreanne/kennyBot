@@ -28,6 +28,6 @@ export default {
 
     const drop = await setDrop(itemId);
     const secs = Math.round(config.loot.windowMs / 1000);
-    reply(`A ${drop.rarity} ${drop.name} dropped! Type !grab within ${secs}s to roll for it.`);
+    reply(`A ${drop.rarity} ${drop.name} dropped! Type !grab within ${secs}s to enter the draw.`);
   },
 };

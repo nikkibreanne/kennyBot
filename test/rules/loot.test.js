@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { weightedPick, rollRarity, pickDrop, rollClaim } from '../../src/rules/loot.js';
+import { weightedPick, rollRarity, pickDrop, pickWinner } from '../../src/rules/loot.js';
 import { config } from '../../src/config.js';
 import { getItem, DEFAULT_LOOT_TABLE } from '../../src/content/items.js';
 
@@ -39,8 +39,10 @@ test('pickDrop honors a rarity-weight override (boss loot skews rarer)', () => {
   assert.equal(getItem(id).rarity, 'epic');
 });
 
-test('rollClaim honors the guaranteed first-claim and the chance window', () => {
-  assert.equal(rollClaim(() => 0.99, config, { guaranteed: true }), true);
-  assert.equal(rollClaim(() => 0, config), true); // 0 < claimChance
-  assert.equal(rollClaim(() => 0.99, config), false); // 0.99 >= claimChance(0.6)
+test('pickWinner draws exactly one entrant uniformly, null when empty', () => {
+  const entries = { a: {}, b: {}, c: {} }; // Object.keys order: a, b, c
+  assert.equal(pickWinner(entries, () => 0), 'a'); // 0   → idx 0
+  assert.equal(pickWinner(entries, () => 0.5), 'b'); // 1.5 → idx 1
+  assert.equal(pickWinner(entries, () => 0.99), 'c'); // 2.97 → idx 2
+  assert.equal(pickWinner({}, () => 0.5), null); // no entrants → no winner
 });
