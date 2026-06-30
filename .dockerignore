@@ -1,0 +1,29 @@
+# Keep secrets, local state, and cruft out of every image layer.
+# Anything copied into a layer is extractable by anyone who can pull the image.
+node_modules
+.git
+.gitignore
+*.env
+.env*
+*.scas
+serviceAccount*.json
+
+# local dev state — real state lives in Firebase
+db.json
+db.json.*
+.tokens
+data
+
+# private working docs (gitignored, but exclude from the image too)
+.workspace
+
+# tests, CI, and docs are not needed at runtime
+test
+.github
+README.md
+
+# Firebase emulator / local config not used inside the container
+.firebase
+firebase.json
+database.rules.json
+*-debug.log

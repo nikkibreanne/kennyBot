@@ -1,10 +1,19 @@
 {
   "name": "kennybot",
-  "version": "1.0.0",
-  "description": "Twitch chat bot for nikkibreanne at https://twitch.tv/nikkibreanne",
+  "version": "2.0.0",
+  "description": "Twitch chat bot + raid-game backend for nikkibreanne (https://twitch.tv/nikkibreanne). Authoritative game state in Firebase RTDB; outbound-only.",
+  "type": "module",
   "main": "index.js",
+  "engines": {
+    "node": ">=20"
+  },
   "scripts": {
-    "test": "echo \"Error: no test specified\" && exit 1"
+    "start": "node index.js",
+    "dev": "node --watch index.js",
+    "test": "node --test \"test/rules/**/*.test.js\"",
+    "test:emulator": "firebase emulators:exec --only database --project okrafans \"node --test test/firebase-rules.test.js\"",
+    "synthetic": "firebase emulators:exec --only database --project okrafans \"node scripts/synthetic-chat.js\"",
+    "dev:console": "firebase emulators:exec --only database --project okrafans \"node scripts/dev-console.js\""
   },
   "repository": {
     "type": "git",
@@ -17,9 +26,17 @@
   },
   "homepage": "https://github.com/nikkibreanne/kennyBot#readme",
   "dependencies": {
-    "dotenv": "^8.1.0",
-    "lodash-id": "^0.14.0",
-    "lowdb": "^1.0.0",
-    "tmi.js": "^1.4.5"
+    "@twurple/api": "^8.1.4",
+    "@twurple/auth": "^8.1.4",
+    "@twurple/chat": "^8.1.4",
+    "@twurple/eventsub-ws": "^8.1.4",
+    "dotenv": "^17.4.2",
+    "firebase-admin": "^14.1.0"
+  },
+  "devDependencies": {
+    "firebase-tools": "^15.22.3"
+  },
+  "overrides": {
+    "uuid": "^11.1.1"
   }
 }

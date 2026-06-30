@@ -1,202 +1,250 @@
-require("dotenv").config();
-const tmi = require("tmi.js");
-const low = require("lowdb");
-const lodashId = require("lodash-id");
-const FileSync = require("lowdb/adapters/FileSync");
+// kennyBot — Twitch chat + raid-game backend (entry point / wiring only).
+// Connects chat (twurple) + the live gate + Firebase, routes events to the
+// command registry and the game engine, and enforces the single-instance lease.
+// Outbound-only: listens on nothing (IMPLEMENTATION §B).
+import 'dotenv/config';
+import { writeFile } from 'node:fs/promises';
+import { ApiClient } from '@twurple/api';
+import { ChatClient } from '@twurple/chat';
 
-// LocalStorage is a lowdb adapter for saving to localStorage
-const adapter = new FileSync("db.json");
-// Create database instance
-const db = low(adapter);
-db._.mixin(lodashId);
+import { logger } from './src/logger.js';
+import { config } from './src/config.js';
+import { initFirebase, closeFirebase } from './src/db/firebase.js';
+import { startConfigMirror, setLive } from './src/db/configStore.js';
+import { acquireLock, startHeartbeat, releaseLock, defaultInstanceId } from './src/db/lock.js';
+import { TokenStore } from './src/db/tokenStore.js';
+import { buildAuth } from './src/twitch/auth.js';
+import { startLivePoll } from './src/twitch/liveGate.js';
+import { startEventSub } from './src/twitch/eventsub.js';
+import { advanceRaidPhases } from './src/db/raid.js';
+import { createMessageHandler } from './src/events/chat.js';
+import { attachTwitchEvents } from './src/events/twitchEvents.js';
+import { startDropScheduler } from './src/events/dropScheduler.js';
 
-// set default options
-const options = {
-  options: {
-    debug: true
-  },
-  connection: {
-    cluster: "aws",
-    reconnect: true,
-    secure: true
-  },
-  identity: {
-    username: "theKennyBot",
-    password: process.env.oauthToken
-  },
-  channels: ["scasplte2"]
-};
+const HEARTBEAT_FILE = process.env.HEARTBEAT_FILE || '/tmp/kennybot.heartbeat';
 
-// Set default database state
-db.defaults({ pokemon: [], users: [], catchablePokemon: "" }).write();
+// Health snapshot written to HEARTBEAT_FILE for the container HEALTHCHECK. More
+// than a liveness ping: it records whether the Twitch chat socket is actually
+// connected, so a "process alive but chat wedged" zombie reads unhealthy and the
+// orchestrator restarts it, rather than the check passing on a dead connection.
+const health = { chatConnected: false, live: false };
 
-// Define functions
-function getRandomInt(max) {
-  return Math.floor(Math.random() * Math.floor(max));
-}
+// Shutdown is wired up inside main(); module scope holds the reference so signal
+// handlers and the lease-lost callback can trigger it cleanly.
+let doShutdown = null;
+let shuttingDown = false;
 
-function getUserRecord(_username) {
-  return db.get("users").find({ username: _username });
-}
-
-function pickPokemon(pokeID) {
-  const poke = db
-    .get("pokemon")
-    .find({ id: pokeID })
-    .value();
-  return poke.name;
-  //   return (str = JSON.stringify(poke.name, null, 2));
-}
-
-function addPokemonToUser(_username, _pokemon) {
-  getUserRecord(_username)
-    .value()
-    .pokemon.push(_pokemon);
-}
-
-function releasePokemon(_username, _pokemon) {
-  getUserRecord(_username)
-    .value()
-    .pokemon.pop(_pokemon);
-}
-
-function updateCatchablePokemon(wildPokemon) {
-  db.set("catchablePokemon", wildPokemon).write();
-}
-
-function getUserPokemon(_username) {
-  let msg = "";
-  if (isUserInDB(_username)) {
-    msg = `${_username} you currently have ${JSON.stringify(
-      getUserRecord(_username).value().pokemon
-    )}`;
-  } else {
-    msg = `Silly ${_username}. You must visit Professor Oak ( !visitprofoak ) to register your Pokedex to have Pokemon.`;
+function requireEnv() {
+  const missing = [];
+  for (const key of ['TWITCH_CLIENT_ID', 'TWITCH_CLIENT_SECRET', 'TWITCH_CHANNEL']) {
+    if (!process.env[key]) missing.push(key);
   }
-  return msg;
-}
-
-function isUserInDB(_username) {
-  let existingUser = false;
-  if (getUserRecord(_username).value()) {
-    existingUser = true;
+  if (!process.env.FIREBASE_DATABASE_EMULATOR_HOST) {
+    if (!process.env.GOOGLE_APPLICATION_CREDENTIALS) missing.push('GOOGLE_APPLICATION_CREDENTIALS');
+    if (!process.env.FIREBASE_DATABASE_URL) missing.push('FIREBASE_DATABASE_URL');
   }
-  return existingUser;
-}
-
-function newUser(_username) {
-  let msg = "";
-  if (isUserInDB(_username)) {
-    msg = `${_username}, you're already registered! Get out there and catch em' all!`;
-  } else {
-    db.get("users")
-      .insert({ username: _username, pokemon: [] })
-      .write();
-    msg = `Thanks for registering your Pokedex ${_username}! You can view it's contents using !pokedex`;
+  if (missing.length) {
+    logger.error('missing required environment', { missing });
+    process.exit(1);
   }
-  return msg;
 }
 
-// function to check if the user is registered and to attempt catch if so
-function allowAttempt(_username) {
-  let msg = "";
-  if (isUserInDB(_username)) {
-    msg = attemptCatch(_username);
-  } else {
-    msg = `Sorry ${_username}, please visit Professor Oak ( !visitprofoak ) to register your Pokedex before attempting to catch Pokemon.`;
+async function touchHeartbeat() {
+  try {
+    await writeFile(HEARTBEAT_FILE, JSON.stringify({ ts: Date.now(), ...health }));
+  } catch {
+    /* best effort */
   }
-  return msg;
 }
 
-// function to compute the catch attempt
-function attemptCatch(_username) {
-  // Retrieve catchable pokemon for convenience
-  const wildPokemon = db.get("catchablePokemon").value();
-  // calculate normalization (makes catching more variable)
-  //const normalization = getRandomInt(12);
-  const normalization = 1;
-  // calculate attempt
-  const attempt = getRandomInt(100);
-  // check if the pokemon was caught
-  let msg = "";
-  if (wildPokemon) {
-    if (attempt < 100 / normalization) {
-      msg = `Congratulations ${_username}! You caught a ${wildPokemon}.`;
-      addPokemonToUser(_username, wildPokemon);
-    } else {
-      msg = `Your pokeball missed ${_username}! You scared away the ${wildPokemon}.`;
-    }
-    // always clear out the wild pokemon after an attempt
-    updateCatchablePokemon("");
-  } else {
-    msg = `Sorry ${_username}. There are currently no wild pokemon around to catch.`;
-  }
-  return msg;
-}
+async function main() {
+  requireEnv();
+  const channel = process.env.TWITCH_CHANNEL;
+  const instanceId = defaultInstanceId();
+  const shutdownHooks = [];
 
-// initialize chat client
-const client = new tmi.client(options);
-
-// connect client
-client.connect();
-
-// define client functionality
-client.on("connected", (address, port) => {
-  client.action("scasplte2", "Hello, kennyBot is now connected");
-});
-
-client.on("chat", (channel, user, message, self) => {
-  switch (message) {
-    case "!pokeball":
-      client.action("scasplte2", allowAttempt(user.username));
-      break;
-
-    case "!visitprofoak":
-      client.action("scasplte2", newUser(user["display-name"]));
-      break;
-
-    case "!pokedex":
-      client.action("scasplte2", getUserPokemon(user["display-name"]));
-      break;
-
-    // A wild pokemon will appear if a chat message has been sent within 1 second of a 15 minute interval
-    default:
-      //if (Date.now() % (0.2 * 60 * 1000) < 1000) {
-      if (user["display-name"] === "scasplte2") {
-        const wildPoke = pickPokemon(getRandomInt(151));
-        updateCatchablePokemon(wildPoke);
-        client.action("scasplte2", `A wild ${wildPoke} appeared!`);
+  doShutdown = async function shutdown(reason) {
+    if (shuttingDown) return;
+    shuttingDown = true;
+    logger.info('shutting down', { reason });
+    // A hung dependency (a wedged socket close, a stuck RTDB op) must not trap
+    // the process — force exit if graceful cleanup overruns. Also keeps us inside
+    // Docker's stop grace period (it SIGKILLs after ~10s).
+    const watchdog = setTimeout(() => {
+      logger.error('shutdown timed out — forcing exit');
+      process.exit(1);
+    }, 5000);
+    watchdog.unref?.();
+    for (const hook of shutdownHooks.reverse()) {
+      try {
+        await hook();
+      } catch (err) {
+        logger.warn('shutdown hook failed', { err: String(err) });
       }
+    }
+    await closeFirebase().catch(() => {});
+    clearTimeout(watchdog);
+    process.exit(0);
+  };
+
+  logger.info('kennyBot starting', {
+    channel,
+    instanceId,
+    emulator: Boolean(process.env.FIREBASE_DATABASE_EMULATOR_HOST),
+  });
+
+  // ── Firebase + config mirror ──
+  initFirebase();
+  await startConfigMirror(logger);
+
+  // ── Single-instance lease (correctness invariant) ──
+  const { acquired, holder } = await acquireLock({ instanceId });
+  if (!acquired) {
+    logger.error('another instance holds the lease — refusing to start', { holder });
+    await closeFirebase();
+    process.exit(1);
   }
+  shutdownHooks.push(
+    startHeartbeat({
+      instanceId,
+      onLost: (h) => {
+        logger.error('lost single-instance lease — shutting down', { holder: h });
+        doShutdown('lease-lost');
+      },
+    }),
+  );
+  shutdownHooks.push(() => releaseLock({ instanceId }));
+
+  // ── Twitch auth (persisted refresh token) ──
+  const tokenStore = new TokenStore(process.env.TOKEN_STORE_DIR || './.tokens');
+  const { authProvider, addRole } = await buildAuth({
+    clientId: process.env.TWITCH_CLIENT_ID,
+    clientSecret: process.env.TWITCH_CLIENT_SECRET,
+    tokenStore,
+    logger,
+  });
+
+  const botUserId = await addRole('bot', process.env.TWITCH_BOT_REFRESH_TOKEN, ['chat']);
+  if (!botUserId) {
+    logger.error('no bot token available (set TWITCH_BOT_REFRESH_TOKEN for first run)');
+    await doShutdown('no-bot-token');
+    return;
+  }
+  const broadcasterUserId = process.env.TWITCH_BROADCASTER_REFRESH_TOKEN
+    ? await addRole('broadcaster', process.env.TWITCH_BROADCASTER_REFRESH_TOKEN, [])
+    : null;
+
+  const apiClient = new ApiClient({ authProvider });
+
+  // Resolve the channel's user id (for live polling + EventSub).
+  const channelUser = await apiClient.users.getUserByName(channel);
+  if (!channelUser) {
+    logger.error('could not resolve channel user', { channel });
+    await doShutdown('bad-channel');
+    return;
+  }
+  const channelUserId = channelUser.id;
+
+  // ── Resolve-on-boot: advance raid phases by stored timestamps, never a timer
+  //    a restart could lose (§H.5 / §L.1). Loop to catch up after downtime
+  //    (e.g. signup→locked→live→done all overdue).
+  for (let i = 0; i < 5; i++) {
+    const t = await advanceRaidPhases();
+    if (!t) break;
+    logger.info('raid phase advanced on boot', t);
+  }
+
+  // ── Chat ──
+  const chat = new ChatClient({ authProvider, channels: [channel] });
+  chat.onMessage(createMessageHandler({ chat, channel, botUserId, logger, onActivity: touchHeartbeat }));
+  chat.onConnect(() => {
+    health.chatConnected = true;
+    touchHeartbeat();
+    logger.info('chat connected', { channel });
+  });
+  chat.onDisconnect((manual, reason) => {
+    health.chatConnected = false;
+    touchHeartbeat();
+    logger.warn('chat disconnected', { manual, reason: String(reason || '') });
+  });
+  shutdownHooks.push(attachTwitchEvents({ chat, channel, logger }));
+  await chat.connect();
+  shutdownHooks.push(() => chat.quit());
+
+  // Auto chat-drop scheduler (mod-toggled via !drops; fires only while live).
+  shutdownHooks.push(startDropScheduler({ chat, channel, logger }));
+
+  // ── Live gate: Helix poll (always) + EventSub (when broadcaster auth fits) ──
+  const setLiveBound = (live, source) => {
+    health.live = live;
+    return setLive(live, source, logger);
+  };
+  shutdownHooks.push(
+    startLivePoll({
+      apiClient,
+      broadcasterUserId: channelUserId,
+      setLive: setLiveBound,
+      pollIntervalMs: config.liveGate.pollIntervalMs,
+      logger,
+    }),
+  );
+
+  const eventSubActive = Boolean(broadcasterUserId && broadcasterUserId === channelUserId);
+  if (eventSubActive) {
+    const { stop } = startEventSub({ apiClient, broadcasterUserId: channelUserId, setLive: setLiveBound, logger });
+    shutdownHooks.push(stop);
+    logger.info('eventsub started (push live detection)');
+  } else {
+    logger.info('eventsub disabled — running on Helix poll only', {
+      reason: broadcasterUserId ? 'broadcaster token is not the channel owner' : 'no broadcaster token',
+    });
+  }
+
+  // ── Periodic phase tick (live cadence; authoritative trigger is stored
+  //    locksAt/startsAt/doneAt compared at boot + here) ──
+  const phaseTimer = setInterval(async () => {
+    try {
+      const t = await advanceRaidPhases();
+      if (t) logger.info('raid phase advanced', t);
+    } catch (err) {
+      logger.error('phase tick failed', { err: String(err) });
+    }
+  }, 30_000);
+  phaseTimer.unref?.();
+  shutdownHooks.push(() => clearInterval(phaseTimer));
+
+  // ── Healthcheck heartbeat (file-based; no listener, §E) ──
+  await touchHeartbeat();
+  const hbTimer = setInterval(touchHeartbeat, 30_000);
+  hbTimer.unref?.();
+  shutdownHooks.push(() => clearInterval(hbTimer));
+
+  logger.info('kennyBot ready', { channel, botUserId, channelUserId, eventsub: eventSubActive });
+}
+
+// First signal → graceful shutdown (itself watchdog-bounded above). A second
+// signal (impatient Ctrl-C, or Docker escalating) → hard exit immediately.
+let signalCount = 0;
+function onSignal() {
+  signalCount += 1;
+  if (signalCount >= 2) {
+    process.stderr.write('forced exit\n');
+    process.exit(1);
+  }
+  if (doShutdown) doShutdown('signal');
+  else process.exit(0);
+}
+process.on('SIGINT', onSignal);
+process.on('SIGTERM', onSignal);
+process.on('unhandledRejection', (err) => logger.error('unhandledRejection', { err: String(err?.stack || err) }));
+process.on('uncaughtException', (err) => {
+  logger.error('uncaughtException', { err: String(err?.stack || err) });
+  if (doShutdown) doShutdown('uncaught');
+  else process.exit(1);
 });
 
-// function add() {
-//     db.get('items')
-//       .push({ time: Date.now() })
-//       .write()
-//   }
-// function read() {
-//   const state = db.getState();
-//   return (str = JSON.stringify(state, null, 2));
-// }
-// function reset() {
-//   db.set("items", []).write();
-// }
-
-//   if (user["display-name"] === "scasplte2") {
-//     client.action(
-//       "scasplte2",
-//       `Hello scasplte2! I hear you are talking about me?`
-//     );
-//   }
-//   if (message === "!add") {
-//     add();
-//   }
-//   if (message === "!reset") {
-//     reset();
-//   }
-// TODO: adding ACTION before the message in IRC chat for some reason
-//   if (message === "!read") {
-//     client.action("scasplte2", `The new db state is: ${read()}`);
-//   }
-//   client.action("scasplte2", `Hello ${user["display-name"]}!`);
+main().catch(async (err) => {
+  logger.error('fatal startup error', { err: String(err?.stack || err) });
+  await closeFirebase().catch(() => {});
+  process.exit(1);
+});

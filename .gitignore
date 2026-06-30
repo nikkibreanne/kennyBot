@@ -1,6 +1,28 @@
 # directories
 /node_modules
 
-#filetypes
+# private working docs / local notes (project standard — never committed)
+.workspace/
+
+# secrets — NEVER commit
 *.env
+.env*
+!.env.example
 *.scas
+serviceAccount*.json
+serviceAccount*.json.*
+
+# persisted Twitch refresh-token store (the writable runtime volume; §F)
+/.tokens/
+/data/
+
+# local Firebase emulator artifacts
+/.firebase/
+firebase-debug.log
+database-debug.log
+ui-debug.log
+firestore-debug.log
+
+# legacy local fixture (state now lives in Firebase)
+db.json
+db.json.*
