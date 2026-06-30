@@ -30,7 +30,9 @@ ENV TOKEN_STORE_DIR=/data
 RUN mkdir -p /data && chown node:node /data
 VOLUME /data
 
-USER node                                  # never run as root
+# never run as root (comment on its own line — Dockerfile does NOT strip inline
+# trailing comments; `USER node # ...` would make the whole string the username)
+USER node
 
 # File-based healthcheck (§E): no HTTP listener exists, so a port probe is
 # meaningless. The bot writes a JSON snapshot {ts, chatConnected, live} to
