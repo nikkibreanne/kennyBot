@@ -79,6 +79,12 @@ scripts/synthetic-chat.js no-stream harness that drives the whole loop
 `!muster`) needs an active sub — same as `!create` and `!grab`. A lapsed sub keeps
 the hero they built and keeps earning EXP, but must re-sub to muster.
 
+Mustering writes a snapshot of your hero onto the roster. While the muster window
+is open, the bot re-snapshots signees from their live record on a timer
+(`raid.rosterRefreshMs`), so leveling or gearing up after you muster keeps showing
+on the site without a re-`!muster`. At **roster lock** (15 min before raid night)
+every card is frozen from the live record — that's the loadout that fights.
+
 ## Local development
 
 Requires **Node ≥ 20** and **Java** (for the Firebase emulator).

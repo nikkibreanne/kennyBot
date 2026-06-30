@@ -145,6 +145,7 @@ The muster → raid-night → battle cycle.
 | `maxRevealMs` | `480000` (8 min) | Upper bound on how long the battle "reveal" plays out before the bot flips the phase to *done*. | Mostly a safety bound on the replay length; rarely needs tuning. |
 | `defaultBossHp` | `6000` | HP for a boss made with `!boss set <name>` that has no explicit HP. Tuned so a modest roster downs it within the turn cap. | Raise for tougher custom bosses, lower for pushovers. (Scripted season bosses carry their own HP from `src/content/`.) |
 | `defaultBossAtk` | `90` | Default attack for such a boss. | Higher = the boss hits harder; raises wipe risk for thin rosters. |
+| `rosterRefreshMs` | `60000` (60 s) | While muster is **open**, how often the bot re-snapshots each signee from their live record so leveling/gearing up after mustering shows on the site without a re-`!muster`. No-op outside the signup phase; only rewrites cards that actually changed. | Lower = the roster page tracks heroes more promptly (more reads during a signup week); raise to ease load. It never needs to be real-time — the battle uses the **lock**-time snapshot regardless. |
 
 ---
 

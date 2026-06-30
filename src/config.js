@@ -97,6 +97,11 @@ export const config = {
     maxRevealMs: 8 * 60 * 1000,
     defaultBossHp: 6000, // tuned so a modest roster downs it within the turn cap
     defaultBossAtk: 90,
+    // While a raid is in the SIGNUP phase, re-snapshot each mustered hero from
+    // their live record on this cadence so leveling / gearing up between muster
+    // and lock shows on the site without a manual re-!muster. Coarse on purpose
+    // (it never needs to be real-time) and a no-op outside the signup phase.
+    rosterRefreshMs: 60_000,
   },
 
   // Fixed weekly raid-night slot, anchored to an explicit IANA time zone (DST-
