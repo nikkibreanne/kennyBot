@@ -149,7 +149,7 @@ export const config = {
     staleMs: 60_000,
   },
 
-  // ── Site link surfaced by !raid / !char ──────────────────────────────────
+  // ── Site link surfaced by !muster / !char ──────────────────────────────────
   siteUrl: 'https://okrafans.com',
 };
 

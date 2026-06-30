@@ -109,11 +109,12 @@ deterministic even if the count is later re-read.
 
 ---
 
-## 3. AFFIX designs (weekly modifiers — NEED ENGINE SUPPORT)
+## 3. AFFIX designs (weekly modifiers — IMPLEMENTED)
 
-Affixes are shipped now as **strings on the boss** and are **flavor-only until the
-engine implements them** (the combat loop ignores unknown affixes — safe). Each
-needs a hook in `simulateBattle`. Ordered roughly by implementation cost.
+Affixes are **live**: the engine implements them in `simulateBattle` (see
+`src/content/affixes.js` — drought, blight, thorns, overgrowth, frost, plus
+summoned adds), so each boss's affixes apply real mechanics. The table below is
+the design reference; rows are ordered roughly by implementation cost.
 
 | affix | flavor | mechanic | engine support needed | cost |
 |-------|--------|----------|-----------------------|------|

@@ -41,7 +41,7 @@ export default {
         return;
       }
       const boss = await openSeason(id, name);
-      reply(`🌱 Season started: ${name} (${id}, ${config.raid.seasonWeeks} weeks). Week 1 boss: ${boss.name}. Players: !raid to muster!`);
+      reply(`🌱 Season started: ${name} (${id}, ${config.raid.seasonWeeks} weeks). Week 1 boss: ${boss.name}. Players: !muster to join!`);
       return;
     }
 

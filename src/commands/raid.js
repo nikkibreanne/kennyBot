@@ -1,4 +1,4 @@
-// !raid — muster command (spec §5.8). During the signup phase it ENLISTS your
+// !muster — muster command (spec §5.8). During the signup phase it ENLISTS your
 // hero into this week's raid; otherwise it reports the current phase + your
 // status and links to the site. Enlisting requires an ACTIVE sub (owner
 // decision: joining a season's raid is subscriber-only, same as !create) — a
@@ -18,10 +18,10 @@ function whenHtmlSafe(ts) {
 }
 
 export default {
-  names: ['raid'],
+  names: ['muster', 'raid'],
   mod: false,
   cooldownMs: 3_000,
-  help: '!raid — sign up for this week’s raid (during muster) / see status',
+  help: '!muster — sign up for this week’s raid / see status',
   async run({ user, reply }) {
     const active = await getActiveRaid();
     if (!active || !active.boss) {

@@ -222,7 +222,7 @@ challenge for *different* rewards. Build only after the core loop ships.
 
 **Two-phase weekly cadence:**
 1. **Muster / prep (most of the week).** Chat to grow your hero (EXP/levels),
-   claim and equip loot, and **sign up** for the raid (`!raid`). The website
+   claim and equip loot, and **sign up** for the raid (`!muster`). The website
    shows a **countdown to raid night**, the **roster** (who's in, their gear),
    and **team readiness** (aggregate power/defense/healing vs. boss thresholds).
 2. **Raid night (scheduled time).** Roster locks; the engine runs the battle;
@@ -444,7 +444,7 @@ for OAuth secrets; channel is configurable.
 | `!char` / `!me` | everyone | view character (class, level, role rating) |
 | `!bag` / `!inventory` | everyone | view unequipped loot |
 | `!equip <item>` | everyone | equip an item into its slot |
-| `!raid` | everyone | current boss + your contribution + link to site |
+| `!muster` | everyone | current boss + your contribution + link to site |
 | `!exp on\|off\|auto\|status` | mod | control the EXP gate (§5.1) |
 | `!drop <item>` | mod | force a loot drop (testing/events) |
 | `!boss set <name>` | mod | set the weekly boss |

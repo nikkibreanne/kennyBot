@@ -22,7 +22,7 @@ ships as a container.
 - `!create <class>` → character + starter gear (subscriber-gated)
 - live-gated chat EXP → seeded, unit-tested level-up (fixed threshold +
   accumulating chance, **no random early levels**)
-- **muster → raid night → automated battle**: `!raid` to sign up, roster locks
+- **muster → raid night → automated battle**: `!muster` to sign up, roster locks
   on schedule, a pure seeded `simulateBattle` writes the combat-event log the
   site replays; **resolve-on-boot** phase machine (signup→locked→live→done)
 - loot drops/`!grab`/`!equip`, sub/cheer/raid levers, EventSub live-detection
@@ -66,7 +66,7 @@ scripts/synthetic-chat.js no-stream harness that drives the whole loop
 | `!bag` / `!inventory` | everyone | view unequipped loot |
 | `!equip <item>` | everyone | equip an owned item into its slot |
 | `!grab` / `!loot` | **subs** | roll for the active drop (independent rolls within the window) |
-| `!raid` | everyone* | sign up for this week's raid (during muster) / see status |
+| `!muster` | everyone* | sign up for this week's raid (during muster) / see status |
 | `!exp on\|off\|auto\|status` | mod | control the EXP gate (`on` bypasses live for testing) |
 | `!drop [item]` | mod | force a single loot drop |
 | `!drops on\|off\|every <min>` | mod | auto chat-drop scheduler (rarity-weighted, while live) |
@@ -75,7 +75,7 @@ scripts/synthetic-chat.js no-stream harness that drives the whole loop
 | `!season start <id>` / `!season rollover <id>` | mod | start a tier / roll to the next (gear reset, renown kept) |
 
 \* Viewing raid status is open to everyone, but **mustering** (signing up with
-`!raid`) needs an active sub — same as `!create` and `!grab`. A lapsed sub keeps
+`!muster`) needs an active sub — same as `!create` and `!grab`. A lapsed sub keeps
 the hero they built and keeps earning EXP, but must re-sub to muster.
 
 ## Local development
@@ -110,7 +110,7 @@ npx firebase emulators:start --only database --project okrafans
 # 2) drive the bot (interactive) against the emulator
 FIREBASE_DATABASE_EMULATOR_HOST=127.0.0.1:9000 node scripts/dev-console.js
 #    e.g.:  !season start t1   ·   /as alice sub   ·   !create Berserker   ·
-#           !raid   ·   /as nikki   ·   !raidnight
+#           !muster   ·   /as nikki   ·   !raidnight
 
 # 3) serve the website (in the nikkibreanne.github.io repo) and open it
 bundle install            # one-time
@@ -118,7 +118,7 @@ bundle exec jekyll serve  # → http://localhost:4000/raid/  and  /live/
 ```
 
 The site auto-detects `localhost` and reads the **same emulator** (a dev-only
-`connectDatabaseEmulator` switch in its Firebase init). So `!raid` fills the
+`connectDatabaseEmulator` switch in its Firebase init). So `!muster` fills the
 muster roster on `/raid/`, and `!raidnight` plays the battle out on `/live/`.
 
 ### Running the bot locally
@@ -187,7 +187,7 @@ path/shape means telling the UI track.**
 Classes = the 5 placeholders · raid resolution = **active automated combat**
 (muster → raid night → seeded battle replay) · participation = **subscriber-only**
 (a lapsed sub keeps their hero + keeps earning EXP, but `!create`, `!grab`, and
-mustering with `!raid` all need an active sub) · loot =
+mustering with `!muster` all need an active sub) · loot =
 inclusive rolls · slots = weapon/armor/trinket · season = **6 weeks** · EXP =
 `auto`. Repo is intended **open source** (security rests on locked RTDB rules +
 runtime-injected secrets, not code secrecy).
