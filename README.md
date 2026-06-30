@@ -68,6 +68,7 @@ scripts/synthetic-chat.js no-stream harness that drives the whole loop
 | `!grab` / `!loot` | **subs** | roll for the active drop (independent rolls within the window) |
 | `!muster` | everyone* | sign up for this week's raid (during muster) / see status |
 | `!exp on\|off\|auto\|status` | mod | control the EXP gate (`on` bypasses live for testing) |
+| `!mute on\|off\|status` | mod | silence the bot's chat output when it gets noisy; it keeps listening, tracking EXP, and holding the lease — bare `!mute` toggles |
 | `!drop [item]` | mod | force a single loot drop |
 | `!drops on\|off\|every <min>` | mod | auto chat-drop scheduler (rarity-weighted, while live) |
 | `!boss set <name>` / `!boss next` | mod | custom boss / advance to the next scripted season boss |

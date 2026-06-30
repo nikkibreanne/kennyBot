@@ -10,7 +10,7 @@ import { ChatClient } from '@twurple/chat';
 import { logger } from './src/logger.js';
 import { config } from './src/config.js';
 import { initFirebase, closeFirebase } from './src/db/firebase.js';
-import { startConfigMirror, setLive } from './src/db/configStore.js';
+import { startConfigMirror, setLive, isChatMuted } from './src/db/configStore.js';
 import { acquireLock, startHeartbeat, releaseLock, defaultInstanceId } from './src/db/lock.js';
 import { TokenStore } from './src/db/tokenStore.js';
 import { buildAuth } from './src/twitch/auth.js';
@@ -157,6 +157,15 @@ async function main() {
 
   // ── Chat ──
   const chat = new ChatClient({ authProvider, channels: [channel] });
+  // Mute-aware sender for spontaneous (non-command) announcements. When a mod
+  // mutes the bot (`!mute`) every outbound send is suppressed while the bot
+  // keeps listening, granting EXP, processing drops, and holding the lease.
+  // Command replies are gated inside the message handler (which also lets the
+  // !mute control itself bypass, so mods still get confirmation).
+  const out = {
+    say: (ch, text) => (isChatMuted() ? Promise.resolve() : chat.say(ch, text)),
+    action: (ch, text) => (isChatMuted() ? Promise.resolve() : chat.action(ch, text)),
+  };
   chat.onMessage(createMessageHandler({ chat, channel, botUserId, logger, onActivity: touchHeartbeat }));
   chat.onConnect(() => {
     health.chatConnected = true;
@@ -173,7 +182,7 @@ async function main() {
   shutdownHooks.push(() => chat.quit());
 
   // Auto chat-drop scheduler (mod-toggled via !drops; fires only while live).
-  shutdownHooks.push(startDropScheduler({ chat, channel, logger }));
+  shutdownHooks.push(startDropScheduler({ chat: out, channel, logger }));
 
   // ── Live gate: Helix poll (always) + EventSub (when broadcaster auth fits) ──
   const setLiveBound = (live, source) => {
@@ -220,7 +229,7 @@ async function main() {
       const { drawResult, activated } = await processDrops();
       if (drawResult) {
         if (drawResult.winner) {
-          chat
+          out
             .say(
               channel,
               `🎉 @${drawResult.winner.name || 'a lucky grabber'} won the ${drawResult.item?.rarity ?? ''} ${drawResult.item?.name ?? 'drop'}! (${drawResult.count} entered) — it's in their !bag.`,
@@ -233,7 +242,7 @@ async function main() {
       }
       if (activated) {
         const secs = Math.round(config.loot.windowMs / 1000);
-        chat
+        out
           .say(channel, `⏭️ Next up — a ${activated.rarity} ${activated.name} is open! !grab within ${secs}s to enter the draw.`)
           .catch(() => {});
       }

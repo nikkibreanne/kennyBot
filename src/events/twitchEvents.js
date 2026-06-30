@@ -7,7 +7,7 @@ import { setSubStatus } from '../db/players.js';
 import { setDrop } from '../db/drops.js';
 import { pickDrop } from '../rules/loot.js';
 import { getItem, DEFAULT_LOOT_TABLE } from '../content/items.js';
-import { getSeason } from '../db/configStore.js';
+import { getSeason, isChatMuted } from '../db/configStore.js';
 import { config } from '../config.js';
 
 /** Twitch sub plan → engagement tier (Prime counts as tier 1). */
@@ -33,6 +33,9 @@ function lootTable() {
  */
 export function attachTwitchEvents({ chat, channel, logger }) {
   const listeners = [];
+  // Outbound mute (`!mute`): these communal-drop announcements are suppressed
+  // while muted, but the drop itself is still created so !grab keeps working.
+  const say = (text) => { if (!isChatMuted()) chat.say(channel, text).catch(() => {}); };
 
   const onSubLike = (label) => async (_ch, _user, info, msg) => {
     const userId = msg?.userInfo?.userId;
@@ -68,7 +71,7 @@ export function attachTwitchEvents({ chat, channel, logger }) {
         drop.status === 'open'
           ? `${lead} A ${drop.rarity} ${drop.name} dropped — !grab to enter the draw!`
           : `${lead} A ${drop.rarity} ${drop.name} is queued up — !grab when it opens!`;
-      chat.say(channel, line).catch(() => {});
+      say(line);
     } catch (err) {
       logger.error('raid handler failed', { err: String(err) });
     }
@@ -90,7 +93,7 @@ export function attachTwitchEvents({ chat, channel, logger }) {
         drop.status === 'open'
           ? `${bits} bits! A ${drop.rarity} ${drop.name} dropped — !grab to enter the draw!`
           : `${bits} bits! A ${drop.rarity} ${drop.name} is queued — !grab when it opens!`;
-      chat.say(channel, line).catch(() => {});
+      say(line);
     } catch (err) {
       logger.error('cheer handler failed', { err: String(err) });
     }
