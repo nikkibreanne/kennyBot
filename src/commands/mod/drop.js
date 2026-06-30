@@ -28,6 +28,8 @@ export default {
 
     const drop = await setDrop(itemId);
     const secs = Math.round(config.loot.windowMs / 1000);
-    reply(`A ${drop.rarity} ${drop.name} dropped! Type !grab within ${secs}s to enter the draw.`);
+    if (drop.status === 'open') reply(`A ${drop.rarity} ${drop.name} dropped! Type !grab within ${secs}s to enter the draw.`);
+    else if (drop.status === 'queued') reply(`A ${drop.rarity} ${drop.name} is queued (#${drop.position}) — it opens when the current drop closes.`);
+    else reply(`Drop queue is full (max ${config.loot.maxQueue}); ${drop.name} was skipped — try again once some resolve.`);
   },
 };

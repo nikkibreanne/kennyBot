@@ -77,6 +77,10 @@ export const config = {
     // a drop never mints duplicates. TIER-FAIR — every entrant has equal odds in
     // the draw (sub tier gives no loot edge; owner decision).
     windowMs: 60_000, // how long a drop stays open for entries before the draw
+    // Overlapping drops QUEUE up (FIFO) instead of clobbering each other; each
+    // resolves in turn, one windowMs apart. At most maxQueue drops can be lined
+    // up at once (the open one + those waiting); drops past that are ignored.
+    maxQueue: 10, // ~10 min of back-to-back drops at a 60s window
     // Auto chat-drop scheduler while live; mod-tunable at runtime via the
     // config/drops/scheduler RTDB path (see !drops command).
     scheduler: { enabled: false, intervalSec: 15 * 60, jitter: 0.3 }, // ~15 min ±30%

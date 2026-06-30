@@ -36,8 +36,12 @@ export function startDropScheduler({ chat, channel, logger }) {
         if (itemId) {
           const drop = await setDrop(itemId);
           const secs = Math.round(config.loot.windowMs / 1000);
-          chat.say(channel, `🎁 A ${drop.rarity} ${drop.name} dropped! Type !grab within ${secs}s to enter the draw — one winner!`).catch(() => {});
-          logger.info?.('auto drop', { item: itemId, rarity: drop.rarity });
+          if (drop.status === 'open') {
+            chat.say(channel, `🎁 A ${drop.rarity} ${drop.name} dropped! Type !grab within ${secs}s to enter the draw — one winner!`).catch(() => {});
+          } else if (drop.status === 'queued') {
+            chat.say(channel, `🎁 A ${drop.rarity} ${drop.name} is queued (#${drop.position}) — opens when the current drop closes.`).catch(() => {});
+          }
+          logger.info?.('auto drop', { item: itemId, rarity: drop.rarity, status: drop.status });
         }
       }
     } catch (err) {
