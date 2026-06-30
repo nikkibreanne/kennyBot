@@ -37,6 +37,28 @@ export function buildSnapshot(player) {
   };
 }
 
+/**
+ * Are two roster snapshots equivalent? Compares the rendered fields, normalizing
+ * `equipped` (RTDB drops an empty object on write, so a stored gearless card has
+ * no `equipped` key while a fresh snapshot carries `{}`). Used to skip redundant
+ * writes during the signup-phase refresh.
+ */
+function sameSnapshot(a, b) {
+  if (!a || !b) return false;
+  return (
+    a.displayName === b.displayName &&
+    a.class === b.class &&
+    a.role === b.role &&
+    a.level === b.level &&
+    a.roleRating === b.roleRating &&
+    a.maxHp === b.maxHp &&
+    a.power === b.power &&
+    a.defense === b.defense &&
+    a.healing === b.healing &&
+    JSON.stringify(a.equipped || {}) === JSON.stringify(b.equipped || {})
+  );
+}
+
 /** Aggregate team stats from the signup roster (written at lock; UI also recomputes). */
 export function computeTeam(signups) {
   const team = {
@@ -94,6 +116,43 @@ export async function setupRaidWeek({ seasonId, weekId, boss, locksAt, startsAt 
 /** Enlist a hero into the muster (a live preview snapshot, frozen again at lock). */
 export async function enlist({ seasonId, weekId, userId, player }) {
   await database().ref(PATHS.signup(seasonId, weekId, userId)).set(buildSnapshot(player));
+}
+
+/**
+ * Keep mustered heroes' roster cards current during the SIGNUP phase: re-snapshot
+ * each signee from their live player record so leveling / gearing up between
+ * muster and lock shows on the site without a manual re-!muster. Driven by a
+ * coarse timer (it needn't be real-time). Strictly a no-op outside the signup
+ * phase — once the roster LOCKS the snapshot is frozen for determinism and must
+ * not be rewritten. Only rewrites entries that actually changed (cheap, and it
+ * deliberately leaves the `team` aggregate alone so the site keeps recomputing
+ * it from the fresh signups until lock writes the real one).
+ * @returns {Promise<number>} how many roster cards were refreshed
+ */
+export async function refreshMusteredRoster() {
+  const p = getRaidPointer();
+  if (!p?.seasonId || !p?.weekId || p.phase !== 'signup') return 0;
+  const db = database();
+  const signupsSnap = await db.ref(PATHS.signups(p.seasonId, p.weekId)).get();
+  const signups = signupsSnap.val();
+  if (!signups) return 0;
+
+  const updates = {};
+  await Promise.all(
+    Object.keys(signups).map(async (uid) => {
+      const playerSnap = await db.ref(PATHS.player(uid)).get();
+      const player = playerSnap.val();
+      if (!player) return; // hero record gone — leave the existing card as-is
+      const fresh = buildSnapshot(player);
+      if (!sameSnapshot(fresh, signups[uid])) {
+        updates[PATHS.signup(p.seasonId, p.weekId, uid)] = fresh;
+      }
+    }),
+  );
+
+  const n = Object.keys(updates).length;
+  if (n) await db.ref().update(updates);
+  return n;
 }
 
 /** Resolve the active raid (pointer + boss + team), or null. */

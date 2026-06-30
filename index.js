@@ -16,7 +16,7 @@ import { TokenStore } from './src/db/tokenStore.js';
 import { buildAuth } from './src/twitch/auth.js';
 import { startLivePoll } from './src/twitch/liveGate.js';
 import { startEventSub } from './src/twitch/eventsub.js';
-import { advanceRaidPhases } from './src/db/raid.js';
+import { advanceRaidPhases, refreshMusteredRoster } from './src/db/raid.js';
 import { createMessageHandler } from './src/events/chat.js';
 import { attachTwitchEvents } from './src/events/twitchEvents.js';
 import { startDropScheduler } from './src/events/dropScheduler.js';
@@ -222,6 +222,19 @@ async function main() {
   }, 30_000);
   phaseTimer.unref?.();
   shutdownHooks.push(() => clearInterval(phaseTimer));
+
+  // ── Muster roster refresh: during signup, keep each hero's card current with
+  //    their live level/gear (frozen again at lock). No-op outside signup. ──
+  const rosterTimer = setInterval(async () => {
+    try {
+      const n = await refreshMusteredRoster();
+      if (n) logger.info('muster roster refreshed', { updated: n });
+    } catch (err) {
+      logger.error('roster refresh failed', { err: String(err) });
+    }
+  }, config.raid.rosterRefreshMs);
+  rosterTimer.unref?.();
+  shutdownHooks.push(() => clearInterval(rosterTimer));
 
   // ── Loot lottery: close expired drops and draw a single winner (spec §5.2) ──
   const drawTimer = setInterval(async () => {
