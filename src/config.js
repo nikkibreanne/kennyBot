@@ -150,7 +150,7 @@ export const config = {
   },
 
   // ── Site link surfaced by !raid / !char ──────────────────────────────────
-  siteUrl: 'https://nikkibreanne.github.io',
+  siteUrl: 'https://okrafans.com',
 };
 
 /**

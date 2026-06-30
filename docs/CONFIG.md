@@ -217,7 +217,7 @@ RTDB enforces this.
 
 | Key | Default | What it controls |
 |---|---|---|
-| `siteUrl` | `'https://nikkibreanne.github.io'` | The website link the bot surfaces in `!raid` / `!char` replies. Set it to your published site. |
+| `siteUrl` | `'https://okrafans.com'` | The website link the bot surfaces in `!raid` / `!char` replies. Set it to your published site. |
 
 ---
 
