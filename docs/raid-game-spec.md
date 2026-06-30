@@ -12,9 +12,10 @@
 > decisions are in **§13** — flag them, don't silently invent answers.
 >
 > **Companion docs:**
-> - `docs/IMPLEMENTATION.md` (this repo) — backend/bot build, Firebase Admin,
->   EventSub-over-WebSocket, command registry, containerized deployment
->   (Docker → GHCR), secrets & token refresh, combat engine, and the POC plan.
+> - **Backend/bot build** (Firebase Admin, EventSub-over-WebSocket, command
+>   registry, Docker → GHCR deploy, secrets & token refresh, combat engine) lives
+>   in this repo — see `src/`, `Dockerfile`, `.github/workflows/publish.yml`, and
+>   `docs/CONFIG.md` for the tunables. (Detailed build/ops notes are kept internal.)
 > - `docs/raid-game-ui.md` (in the **nikkibreanne.github.io** repo) — the
 >   read-only website layer: muster page, live battle replay player, and the
 >   Firebase client read pattern (extends the proven OKRAMARKET poll).
