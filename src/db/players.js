@@ -60,7 +60,7 @@ export async function createPlayer({ userId, login, displayName, className, isSu
 }
 
 /**
- * Apply one qualifying chat message: grant EXP and pity-roll a level-up,
+ * Apply one qualifying chat message: grant EXP and roll a level-up,
  * atomically. Returns null if the user has no character (non-players don't
  * accrue). The cooldown is enforced by the caller (in-memory, single instance).
  *

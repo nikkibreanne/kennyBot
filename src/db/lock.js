@@ -1,5 +1,5 @@
 // Single-instance lease (IMPLEMENTATION §E/§J). Two bot instances = double EXP,
-// double loot, races on the pity roll — a correctness invariant, not tidiness.
+// double loot, races on the level-up roll — a correctness invariant, not tidiness.
 // The spec relies on operational discipline; this ENFORCES it: a second instance
 // transactionally fails to claim the lease and refuses to start. A crashed
 // instance's lease goes stale and can be taken over.

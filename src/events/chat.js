@@ -2,7 +2,7 @@
 //   1. ignore the bot's own echoes / unknown users (idempotency, spec §6);
 //   2. if it's a command, dispatch via the registry (per-user/per-command cd,
 //      mod gate, sub-only gate);
-//   3. run the passive tick — gated EXP + pity level-up — bounded by a per-user
+//   3. run the passive tick — gated EXP + level-up — bounded by a per-user
 //      in-memory cooldown (single instance, so memory is authoritative for
 //      rate-limiting; lastExpAt is persisted for audit).
 //

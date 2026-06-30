@@ -2,9 +2,13 @@
 
 Status: design backlog (no code changed). Targets the live engine in
 `src/config.js`, `src/rules/{leveling,rating,combat}.js`, `src/db/raid.js`,
-`src/content/*`. All numbers below are derived from the *current* committed
-config (perMessage 10, cooldown 30s, threshold base 100 / growth 1.35, pity
-base 0.05 / k 0.02 / cap 0.95 / pressureCap 60, defaultBossHp 6000, turnCap 20).
+`src/content/*`. All numbers below were computed against an **earlier config snapshot**
+(perMessage 10, cooldown 30s, threshold base 100 / growth 1.35, defaultBossHp
+6000, turnCap 20) plus the **current** level-up commit (levelUp base 0 / k 0.34 /
+cap 1.0 / pressureCap 4). The committed engine has since moved on — now
+**perMessage 12, growth 1.30, turnCap 100** — so treat the EXP/timing tables
+below as directional, not exact; the authoritative live values are in
+[`docs/CONFIG.md`](../CONFIG.md).
 
 Design targets: **25–50 active heroes**, **3 seasons × 6 weeks**, gear resets
 per season, veterans keep prestige. Class fixes role (Guardian=tank,
@@ -224,7 +228,7 @@ option): it breaks per-player damage attribution, which the leaderboard
 the *full* roster; only compact the *log*.
 
 > **Contract flag:** event shapes are a hard contract with the website replay
-> player (`_includes/live.html`). Adding `party_round` requires a coordinated UI
+> player (`_includes/arena.html`). Adding `party_round` requires a coordinated UI
 > change. If the UI can't change yet, ship Option B (no new event type) first.
 
 ---
@@ -249,10 +253,11 @@ qualifying msgs / 3 h**.
 | 12 | 7,468  | 747  |
 | 15 | 18,796 | 1,880 |
 
-**Pity tax:** after crossing a threshold you must *roll* out (p climbs
-0.05→0.95, forced at pressure 60). Expected rolls-to-pop ≈ **7.3 messages per
-level**. These messages still bank EXP (the remainder carries), so the tax is
-real but modest — roughly +7 msgs/level early, negligible once thresholds dwarf 7.
+**Level-up tail:** after the bar fills you must *roll* out, but with `base 0` the
+threshold-crossing message can never pop — the chance then climbs (0% → 34% → 68%
+→ forced at pressure 4), so a level lands ~**1–3 messages after the bar fills**:
+no random early levels, just a short predictable tail. These messages still bank
+EXP (the remainder carries), so the tail costs nothing in progress.
 
 ### 2.2 What's reachable
 
@@ -290,8 +295,9 @@ unreachable for anyone but hardcore chatters.
 - **Alternative lever** (if you'd rather not change curve *shape*):
   `perMessage 10 → 12`. Flat +20% to everyone; simpler to reason about but also
   speeds the early game (which is already fast).
-- **Leave pity as-is.** base/k/cap/pressureCap are well-designed; the
-  `pressureCap 60` guarantee correctly prevents anyone getting stuck.
+- **Leave the level-up commit as-is.** base/k/cap/pressureCap are well-designed;
+  `base 0` keeps levels free of lucky early pops and the `pressureCap` guarantee
+  correctly prevents anyone getting stuck below a level.
 - **Leave the 30 s cooldown as-is.** The 360/stream cap is a healthy anti-flood
   ceiling and is not the binding constraint for realistic chatters.
 
@@ -433,7 +439,7 @@ Small, high-leverage set. (Items marked **+** are new keys.)
 **Non-config (flag, do not silently change):**
 - `buildSnapshot()` keeps using raw `roleRating` (no engagement) — confirm this
   is intended (it is, for anti-pay-to-win); update spec §4 text accordingly.
-- Adding `party_round` is a **website replay contract** change (`live.html`);
+- Adding `party_round` is a **website replay contract** change (`arena.html`);
   coordinate or ship Option B (spotlight cap, no new event type) first.
 - Item pool (`content/items.js`) needs a per-role × per-slot rarity ladder +
   week-gated loot tables — content work, tracked separately.
@@ -461,6 +467,7 @@ Small, high-leverage set. (Items marked **+** are new keys.)
 - **MVP/leaderboard invariance:** confirm `damageByUid()` totals are identical
   with round-up vs per-hero logging (the engine's internal `dmgByUid` is the
   source of truth, not the emitted events).
-- **Pity tax:** Monte-Carlo `rollLevelUp` confirms ~7.3 msgs/level avg pop.
+- **Level-up tail:** Monte-Carlo `rollLevelUp` confirms a level pops ~1–3 messages
+  after the bar fills (forced by `pressureCap`), with no early pops at `base 0`.
 </content>
 </invoke>

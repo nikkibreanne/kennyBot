@@ -20,7 +20,8 @@ ships as a container.
 **Implemented and verified locally** against the Firebase emulator:
 
 - `!create <class>` → character + starter gear (subscriber-gated)
-- live-gated chat EXP → seeded, unit-tested **pity-roll** level-up
+- live-gated chat EXP → seeded, unit-tested level-up (fixed threshold +
+  accumulating chance, **no random early levels**)
 - **muster → raid night → automated battle**: `!raid` to sign up, roster locks
   on schedule, a pure seeded `simulateBattle` writes the combat-event log the
   site replays; **resolve-on-boot** phase machine (signup→locked→live→done)
@@ -44,7 +45,7 @@ Twitch (chat WSS, Helix, EventSub WSS)  ──►  kennyBot (Node, twurple)  ─
 ```
 index.js                  wiring: auth, chat, live gate, lock, resolve-on-boot, shutdown
 src/
-  config.js               all game tunables (EXP/pity/rating/loot/raid) — rebalance here
+  config.js               all game tunables (EXP/leveling/rating/loot/raid) — see docs/CONFIG.md
   logger.js               structured JSON logs, secret-scrubbed
   content/                your own data: classes.js (class→role), items.js (catalog + starter gear)
   rules/                  PURE, RNG-injected, unit-tested: leveling, rating, loot, raidResolve
@@ -73,8 +74,9 @@ scripts/synthetic-chat.js no-stream harness that drives the whole loop
 | `!raidnight` | mod | lock the roster and run the battle now |
 | `!season start <id>` / `!season rollover <id>` | mod | start a tier / roll to the next (gear reset, renown kept) |
 
-\* A lapsed sub keeps the hero they built and can still muster + fight; only
-`!create` and `!grab` need an active sub.
+\* Viewing raid status is open to everyone, but **mustering** (signing up with
+`!raid`) needs an active sub — same as `!create` and `!grab`. A lapsed sub keeps
+the hero they built and keeps earning EXP, but must re-sub to muster.
 
 ## Local development
 
@@ -184,7 +186,8 @@ path/shape means telling the UI track.**
 
 Classes = the 5 placeholders · raid resolution = **active automated combat**
 (muster → raid night → seeded battle replay) · participation = **subscriber-only**
-(a lapsed sub keeps playing; only `!create`/`!grab` need an active sub) · loot =
+(a lapsed sub keeps their hero + keeps earning EXP, but `!create`, `!grab`, and
+mustering with `!raid` all need an active sub) · loot =
 inclusive rolls · slots = weapon/armor/trinket · season = **6 weeks** · EXP =
 `auto`. Repo is intended **open source** (security rests on locked RTDB rules +
 runtime-injected secrets, not code secrecy).

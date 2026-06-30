@@ -21,7 +21,7 @@ export const config = {
     // flood-grinding (spec §6). Enforced in-memory (single instance) and the
     // anchor is persisted to players/<id>.lastExpAt for audit.
     cooldownMs: 30_000,
-    // EXP needed to become *eligible* to pity-roll out of a level.
+    // EXP needed to become *eligible* to roll a level-up out of a level.
     // threshold(level) = round(base * growth^(level-1)). 1.30 keeps a full
     // season's finale level reachable in ~6 weeks of chatting.
     threshold: { base: 100, growth: 1.3 },
@@ -111,7 +111,7 @@ export const config = {
     // After `startTurn`, boss damage is multiplied by perTurnMult^(turn-startTurn):
     // a stalemate always resolves into a real victory or wipe, never a cap cutoff.
     enrage: { startTurn: 12, perTurnMult: 1.18 },
-    msPerEvent: 1200, // must match the UI replay player (live.html MS_PER_EVENT)
+    msPerEvent: 1200, // must match the UI replay player (arena.html MS_PER_EVENT)
     variance: 0.2, // ±20% damage/heal variance
     crit: { party: 0.16, boss: 0.12, mult: 1.8, bossMult: 1.7 },
     bossTankTargetChance: 0.4, // boss still favors the tank, but spreads its hits

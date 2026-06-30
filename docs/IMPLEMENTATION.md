@@ -208,7 +208,7 @@ Operational requirements:
 - **No published ports.** Outbound-only — leave port mapping empty.
 - **Single instance — this is a correctness invariant, not tidiness.** Two
   replicas process every chat message twice → double EXP, double loot, races on
-  the pity-roll. Run it in exactly one place; never leave a second copy running
+  the level-up roll. Run it in exactly one place; never leave a second copy running
   "just in case."
 - **Statelessness + one writable volume.** Everything authoritative is in
   Firebase; the only local persistence is the rotating token store (§F). Do not
@@ -216,10 +216,12 @@ Operational requirements:
 - **Least privilege.** Non-root user (set in the image), `--cap-drop ALL`,
   `no-new-privileges`, read-only rootfs. The bot needs no capabilities, no
   privileged access, and no host devices.
-- **Health.** No HTTP endpoint exists, so a port probe is meaningless. Either
-  rely on the process + restart policy (fine for POC), or add a `HEALTHCHECK`
-  that reads a heartbeat file the bot `touch`es on each Twitch keepalive — this
-  catches the "process alive but socket dead" zombie that a restart fixes.
+- **Health.** No HTTP endpoint exists, so a port probe is meaningless. The image
+  ships a **connection-aware** file-based `HEALTHCHECK`: the bot writes a JSON
+  snapshot `{ts, chatConnected, live}` to `HEARTBEAT_FILE` on each activity tick,
+  and the check reports **unhealthy if the heartbeat is stale OR `chatConnected`
+  is false** — so a "process alive but chat socket dead" zombie is restarted
+  rather than trusted on a dead connection.
 - **Logs.** Write structured logs to stdout/stderr; never log tokens, the
   service-account JSON, or full user PII. Scrub secrets from error output.
 - **Updates.** Prefer deliberate, tag-pinned rollouts for a live-stream-facing
@@ -279,13 +281,13 @@ modular**:
 ```
 index.js                 # wiring: connect tmi + eventsub, load config, route events
 src/
-  config.js              # constants (EXP_PER_MSG, cooldowns, pity k/base, drop rates…)
+  config.js              # constants (EXP_PER_MSG, cooldowns, levelUp k/base, drop rates…)
   db/
     firebase.js          # Admin SDK init (GOOGLE_APPLICATION_CREDENTIALS)
     players.js           # get/create/update player (transactions)
     raid.js              # boss + contribution reads/writes
   rules/                 # PURE functions — no I/O, unit-tested, RNG injected
-    leveling.js          # exp grant, pity-roll p = base + k*pressure, level-up
+    leveling.js          # exp grant, level-up roll p = base + k*pressure (fixed threshold, no early levels)
     rating.js            # role rating = base(class,level) + gear, * engagementMult
     loot.js              # rarity roll, drop selection
     raidResolve.js       # aggregate contributions vs thresholds + HP → downed/wiped
@@ -307,7 +309,7 @@ Migrations from the current code:
 - **Channel: hardcoded `scasplte2` → env (`TWITCH_CHANNEL`).** Keep `scasplte2`
   as dev/test, `nikkibreanne` as prod.
 - **RNG injectable.** `rules/*` take an `rng` arg (default `Math.random`) so the
-  pity-roll/loot are deterministic under test.
+  level-up roll/loot are deterministic under test.
 - **Idempotency.** All counters (EXP, loot, raid damage) use RTDB **transactions**
   / atomic increments so a duplicated or echoed Twitch message can't
   double-award. Single instance + transactions = safe.
@@ -329,7 +331,8 @@ the fun.** Skip loot, equip, seasons, channel points for v0. Minimal vertical
 slice:
 
 1. `!create <class>` → writes a character to Firebase (`players/<id>`).
-2. Live-gated chat → EXP grant (per-user cooldown) → pity-roll level-up.
+2. Live-gated chat → EXP grant (per-user cooldown) → level-up (fixed threshold +
+   accumulating chance, no random early levels).
 3. One boss with an HP pool; each chatter's role rating contributes; aggregate
    ticks boss HP down.
 4. The website reads Firebase and renders a **live HP bar + your character card**
@@ -350,7 +353,7 @@ Priorities:
    client write is rejected** before stacking game logic on top. Strongly
    consider a **100% read-only client** for v0 (all writes via chat → Admin SDK):
    simplest, safest, removes a whole class of cheating.
-3. **Keep the engine pure and config-driven.** EXP/cooldown/pity/boss-HP/
+3. **Keep the engine pure and config-driven.** EXP/cooldown/leveling/boss-HP/
    thresholds all live in config so you can rebalance without a redeploy. Pure
    `rules/*` + seeded RNG = test the curves without Twitch.
 4. **Build a no-stream test harness.** Run against the `scasplte2` test channel,
@@ -520,7 +523,7 @@ isolation.
 The weekly raid resolves as an **automated, seeded, turn-based battle** emitted
 as an **append-only event log** that the website replays. This section is the
 authoritative engine + data-model contract. (The website ships a *reference*
-demo generator in `_includes/live.html` — `genDemoBattle()` — that mirrors this
+demo generator in `_includes/arena.html` — `genDemoBattle()` — that mirrors this
 shape for preview; the **authoritative engine lives here in kennyBot.**)
 
 ### L.1 Weekly lifecycle / phase machine

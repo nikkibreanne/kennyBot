@@ -3,7 +3,7 @@
 > **Supersedes v1** (`kennyBot-pokemon-raid-spec.md`). v1 used Pokémon as the
 > creatures; this version drops that entirely in favor of an **original
 > WoW-genre RPG** to avoid the Pokémon/Nintendo IP exposure. The mechanics that
-> tested well (catching→loot, chat-EXP→pity-roll growth, weekly community raid,
+> tested well (catching→loot, chat-EXP→level-up growth, weekly community raid,
 > seasons) are preserved and adapted.
 >
 > **Purpose.** Handoff spec for a Claude Code agent extending
@@ -87,13 +87,16 @@ This is the centerpiece, and it carries a hard requirement: **EXP must only
 accrue when intended** (default: only while the stream is live), so viewers
 can't grind by chatting to an empty offline channel.
 
-**Leveling model** (reuses the pity-roll that tested well):
+**Leveling model** (fixed threshold + accumulating level-up chance — **no random
+early levels**):
 - Each qualifying chat message grants EXP, **rate-limited per user** (see §6).
-- At a level threshold, each qualifying message rolls a **climbing probability**
-  to level up: `p = base + k * levelPressure`, where `levelPressure` accumulates
-  per message past the threshold until it triggers (a cap guarantees it
-  eventually pops). Resets on level-up. Keeps the randomness and the "keep
-  chatting and it'll pop" pull.
+- EXP first fills to a level's threshold with **no chance to level early**. Once
+  the bar is full, each *further* qualifying message rolls a **climbing
+  probability** to level up: `p = base + k * levelPressure`, where `levelPressure`
+  accumulates per message past the threshold until it triggers (a cap guarantees
+  it eventually pops). Resets on level-up. With `base 0` the threshold-crossing
+  message can never pop, so a level lands a few **predictable** messages after the
+  bar fills — earned, never a lucky early jackpot.
 - Subs/bits apply an **EXP multiplier** (§7).
 
 **Live detection** (tmi.js does NOT expose live status — use the Twitch API):
@@ -120,7 +123,7 @@ function onChatMessage(user, config) {
   if (Date.now() - user.lastExpAt < EXP_COOLDOWN_MS) return; // blocks flood + offline farm
   grantExp(user, EXP_PER_MSG * engagementMult(user));
   user.lastExpAt = Date.now();
-  maybeLevelUp(user);                          // the pity roll
+  maybeLevelUp(user);                          // the level-up roll
 }
 ```
 
@@ -291,7 +294,7 @@ standings will be cheated if writable from the client.
    ┌─────────────┴───────────┐        ┌───────────┴────────────────────┐
    │ kennyBot (Node, tmi.js)  │        │ Website (nikkibreanne.github.io) │
    │ - loot drops + !grab      │        │ - async weekly raid UI (HP bar)  │
-   │ - chat EXP + level pity    │        │ - character / gear management    │
+   │ - chat EXP + level-up rolls│        │ - character / gear management    │
    │ - !create / class / equip  │        │ - leaderboards                   │
    │ - sub/bits/raid events      │        └──────────────────────────────────┘
    └─────────────┬───────────┘
@@ -304,7 +307,7 @@ standings will be cheated if writable from the client.
    └─────────────────────────────────────────────┘
 ```
 
-- **kennyBot (tmi.js):** loot drops, claims, chat-EXP, level pity rolls,
+- **kennyBot (tmi.js):** loot drops, claims, chat-EXP, level-up rolls,
   `!create`/class/equip, raid contribution commands; consumes tmi.js
   `subscription`/`cheer`/`raided` for multipliers & communal drops. Writes via
   Admin SDK.
@@ -446,7 +449,7 @@ for OAuth secrets; channel is configurable.
 | `!boss set <name>` | mod | set the weekly boss |
 | `!season start <id>` | mod | start a new raid tier |
 
-(EXP-on-message and level pity rolls are passive — no command.)
+(EXP-on-message and level-up rolls are passive — no command.)
 
 ## 12. Phased roadmap
 
@@ -454,7 +457,7 @@ for OAuth secrets; channel is configurable.
   + class/role + starter gear. Lock RTDB rules.
 - **Phase 1 — Live gate.** EventSub `stream.online`/`stream.offline` → `config/live`
   (Helix poll fallback). `expMode` flag + `!exp` mod command.
-- **Phase 2 — Growth.** Chat-EXP with cooldown + the level pity roll, gated by §5.1.
+- **Phase 2 — Growth.** Chat-EXP with cooldown + the level-up roll, gated by §5.1.
 - **Phase 3 — Loot.** Item catalog, drop scheduler + `!grab` window, `!bag`/`!equip`,
   role-rating from class+level+gear.
 - **Phase 4 — Community raid.** Weekly boss, contribution aggregation, async

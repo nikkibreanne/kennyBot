@@ -6,7 +6,7 @@ each described by `{ name, kind, power, cooldown }`. Damage = `round(atk * power
 variance)` with a flat ±20% variance and a ~16% ×1.8 party crit; healers heal the
 single lowest-HP ally; cooldowns tick once per round. Heroes have **no** mechanic
 beyond "pick an ability and apply it once." The event log is an append-only array
-of typed objects the website replays (`_includes/live.html`); each combat event
+of typed objects the website replays (`_includes/arena.html`); each combat event
 already carries a human `text` string plus structured fields (`actor`, `target`,
 `amount`, `crit`, `*HpAfter`). Anything new has to (a) be expressible as one or
 more `kind` values, (b) stay a **pure function** of `(roster, boss, seed)`, and

@@ -3,7 +3,7 @@
 // The DB layer calls these inside a transaction to apply the result atomically.
 
 /**
- * EXP needed to become *eligible* to pity-roll out of `level`.
+ * EXP needed to become *eligible* to roll a level-up out of `level`.
  * threshold(level) = round(base * growth^(level-1)).
  * @param {number} level  current level (>=1)
  * @param {{ exp: { threshold: { base: number, growth: number } } }} config
@@ -71,7 +71,7 @@ export function rollLevelUp(state, { rng, config }) {
 }
 
 /**
- * Composite applied per qualifying chat message: grant EXP, then pity-roll.
+ * Composite applied per qualifying chat message: grant EXP, then roll a level-up.
  * This is what the player-update transaction runs.
  *
  * @param {{ level: number, exp: number, levelPressure: number }} state

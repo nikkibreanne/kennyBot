@@ -131,7 +131,7 @@ needs a hook in `simulateBattle`. Ordered roughly by implementation cost.
 | `finale` | set-piece marker | enables **multi-phase** handling (see §4) | HP-threshold phase hooks + 'phase' event | L |
 
 **Shared prerequisite:** every affix that mutates combat must emit a new event
-shape so the website replay (`_includes/live.html`) can render it — coordinate the
+shape so the website replay (`_includes/arena.html`) can render it — coordinate the
 event vocabulary with the UI before building any of these. Recommend a generic
 `{ type:'affix', affix, text, ... }` event plus affix-specific fields.
 

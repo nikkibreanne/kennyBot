@@ -53,8 +53,8 @@ throwaway local fixture.
 4. **Live gate:** Helix poll fallback first (cheap safety net), then EventSub-WS
    `stream.online`/`stream.offline` → `config/live`; `!exp on|off|auto` override
    (default `auto`).
-5. **Chat EXP** with per-user cooldown → **pity-roll** level-up (pure,
-   unit-tested, seeded RNG).
+5. **Chat EXP** with per-user cooldown → level-up (fixed threshold +
+   accumulating chance, **no random early levels**; pure, unit-tested, seeded RNG).
 6. **Raid lifecycle + automated battle** (active resolution — spec §5.8,
    `IMPLEMENTATION.md §L`). Phase machine `signup → locked → live → done`:
    `!raid` to enlist; freeze loadout snapshots + team aggregate at `locksAt`; run
@@ -73,7 +73,7 @@ it ships a reference engine `genDemoBattle()` you can mirror — but the
   small script that emits synthetic chat events.
 - **Twitch integration**, when ready, runs against the owner's personal channel
   **twitch.tv/scasplte2** (already the code's default channel).
-- **Engine is pure + seeded** → unit-test the EXP curve, pity roll, loot rolls,
+- **Engine is pure + seeded** → unit-test the EXP curve, level-up roll, loot rolls,
   and raid resolution with no Twitch/Firebase dependency.
 - **Firebase:** prefer the **emulator suite** or a separate test DB path so
   testing doesn't pollute prod game state.
