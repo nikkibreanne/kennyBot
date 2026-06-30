@@ -7,7 +7,7 @@
 // Writes are atomic (tmp + rename) and locked down to 0600. One file per Twitch
 // user id so the bot and broadcaster tokens coexist.
 
-import { readFile, writeFile, rename, mkdir, chmod } from 'node:fs/promises';
+import { readFile, writeFile, rename, mkdir, chmod, rm } from 'node:fs/promises';
 import { dirname, join } from 'node:path';
 
 export class TokenStore {
@@ -45,13 +45,21 @@ export class TokenStore {
   async save(userId, tokenData) {
     const file = this._fileFor(userId);
     await mkdir(dirname(file), { recursive: true });
-    const tmp = `${file}.tmp`;
-    await writeFile(tmp, JSON.stringify(tokenData, null, 2), { mode: 0o600 });
-    await rename(tmp, file);
+    // Unique temp name per write so concurrent saves (e.g. twurple's onRefresh
+    // racing the explicit bootstrap save) can't clobber the same temp + collide
+    // on rename. rename(2) is atomic, so last writer wins on `file`.
+    const tmp = `${file}.${process.pid}.${Math.random().toString(36).slice(2, 8)}.tmp`;
     try {
-      await chmod(file, 0o600);
-    } catch {
-      // best effort on platforms without POSIX perms
+      await writeFile(tmp, JSON.stringify(tokenData, null, 2), { mode: 0o600 });
+      await rename(tmp, file);
+      try {
+        await chmod(file, 0o600);
+      } catch {
+        // best effort on platforms without POSIX perms
+      }
+    } catch (err) {
+      await rm(tmp, { force: true }).catch(() => {}); // clean up a stray temp
+      throw err;
     }
   }
 }

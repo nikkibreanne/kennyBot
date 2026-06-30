@@ -45,42 +45,48 @@ export function attachTwitchEvents({ chat, channel, logger }) {
     }
   };
 
-  listeners.push(chat.onSub(onSubLike('sub')));
-  listeners.push(chat.onResub(onSubLike('resub')));
+  // Attach a handler only if this twurple version exposes it — a missing method
+  // should warn, never crash startup (API drift defense).
+  const attach = (name, handler) => {
+    if (typeof chat[name] === 'function') listeners.push(chat[name](handler));
+    else logger.warn?.('chat event not available in this twurple version', { event: name });
+  };
+
+  attach('onSub', onSubLike('sub'));
+  attach('onResub', onSubLike('resub'));
 
   // Raid-in: welcome the incoming community with a communal drop (spec §5.4 —
   // existing viewers benefit from new arrivals).
-  listeners.push(
-    chat.onRaid(async (_ch, _user, raidInfo) => {
-      try {
-        const itemId = pickDrop(lootTable(), getItem, Math.random, config);
-        if (!itemId) return;
-        const drop = await setDrop(itemId);
-        chat.say(
-          channel,
-          `Raid incoming (${raidInfo?.viewerCount ?? '?'})! A ${drop.rarity} ${drop.name} dropped for everyone — !grab!`,
-        ).catch(() => {});
-      } catch (err) {
-        logger.error('raid handler failed', { err: String(err) });
-      }
-    }),
-  );
+  attach('onRaid', async (_ch, _user, raidInfo) => {
+    try {
+      const itemId = pickDrop(lootTable(), getItem, Math.random, config);
+      if (!itemId) return;
+      const drop = await setDrop(itemId);
+      chat.say(
+        channel,
+        `Raid incoming (${raidInfo?.viewerCount ?? '?'})! A ${drop.rarity} ${drop.name} dropped for everyone — !grab!`,
+      ).catch(() => {});
+    } catch (err) {
+      logger.error('raid handler failed', { err: String(err) });
+    }
+  });
 
-  // Big cheers also pop a communal drop (shared benefit, not private advantage).
-  listeners.push(
-    chat.onCheer(async (_ch, _user, _message, msg) => {
-      try {
-        const bits = msg?.bits || 0;
-        if (bits < 100) return;
-        const itemId = pickDrop(lootTable(), getItem, Math.random, config);
-        if (!itemId) return;
-        const drop = await setDrop(itemId);
-        chat.say(channel, `${bits} bits! A ${drop.rarity} ${drop.name} dropped for chat — !grab!`).catch(() => {});
-      } catch (err) {
-        logger.error('cheer handler failed', { err: String(err) });
-      }
-    }),
-  );
+  // Cheers/bits are NOT a dedicated event in twurple — they ride on a chat
+  // message (msg.bits). A big cheer pops a communal drop (shared benefit, never a
+  // private advantage). This is a second onMessage listener alongside the main
+  // game handler, which twurple supports.
+  attach('onMessage', async (_ch, _user, _text, msg) => {
+    try {
+      const bits = msg?.bits || 0;
+      if (bits < 100) return;
+      const itemId = pickDrop(lootTable(), getItem, Math.random, config);
+      if (!itemId) return;
+      const drop = await setDrop(itemId);
+      chat.say(channel, `${bits} bits! A ${drop.rarity} ${drop.name} dropped for chat — !grab!`).catch(() => {});
+    } catch (err) {
+      logger.error('cheer handler failed', { err: String(err) });
+    }
+  });
 
   return () => {
     for (const l of listeners) l?.unbind?.();
