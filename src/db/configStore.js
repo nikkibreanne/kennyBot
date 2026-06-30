@@ -6,10 +6,14 @@
 import { database, PATHS, SERVER_TIMESTAMP } from './firebase.js';
 import { config as gameConfig } from '../config.js';
 
-/** @type {{ live: boolean, expMode: string, season: any, raid: any, dropScheduler: any }} */
+/** @type {{ live: boolean, expMode: string, chatMuted: boolean, season: any, raid: any, dropScheduler: any }} */
 const mirror = {
   live: false,
   expMode: gameConfig.liveGate.defaultExpMode,
+  // Mod kill-switch for OUTBOUND chat (`!mute`). When true the bot stays fully
+  // connected — listening, granting EXP, processing drops, holding the lease —
+  // but sends nothing to chat. Persisted so a restart keeps the mods' choice.
+  chatMuted: false,
   season: null,
   raid: null, // config/raid: { seasonId, weekId, phase, locksAt, startsAt }
   dropScheduler: { enabled: gameConfig.loot.scheduler.enabled, intervalSec: gameConfig.loot.scheduler.intervalSec },
@@ -29,9 +33,11 @@ export async function startConfigMirror(logger = console) {
   // Seed defaults transactionally if absent (never clobber existing values).
   await db.ref(PATHS.configExpMode()).transaction((v) => (v == null ? gameConfig.liveGate.defaultExpMode : v));
   await db.ref(PATHS.configLive()).transaction((v) => (v == null ? false : v));
+  await db.ref(PATHS.configChatMuted()).transaction((v) => (v == null ? false : v));
 
   const liveRef = db.ref(PATHS.configLive());
   const expRef = db.ref(PATHS.configExpMode());
+  const mutedRef = db.ref(PATHS.configChatMuted());
   const seasonRef = db.ref(PATHS.seasonCurrent());
   const raidRef = db.ref(PATHS.configRaid());
   const dropRef = db.ref(PATHS.configDropScheduler());
@@ -41,25 +47,32 @@ export async function startConfigMirror(logger = console) {
 
   liveRef.on('value', (s) => { mirror.live = Boolean(s.val()); });
   expRef.on('value', (s) => { mirror.expMode = s.val() || gameConfig.liveGate.defaultExpMode; });
+  mutedRef.on('value', (s) => { mirror.chatMuted = Boolean(s.val()); });
   seasonRef.on('value', (s) => { mirror.season = s.val(); });
   raidRef.on('value', (s) => { mirror.raid = s.val(); });
   dropRef.on('value', (s) => { if (s.val()) mirror.dropScheduler = s.val(); });
 
   // Wait for the initial reads so the mirror is warm before chat starts.
-  const [liveSnap, expSnap, seasonSnap, raidSnap, dropSnap] = await Promise.all([
-    liveRef.get(), expRef.get(), seasonRef.get(), raidRef.get(), dropRef.get(),
+  const [liveSnap, expSnap, mutedSnap, seasonSnap, raidSnap, dropSnap] = await Promise.all([
+    liveRef.get(), expRef.get(), mutedRef.get(), seasonRef.get(), raidRef.get(), dropRef.get(),
   ]);
   mirror.live = Boolean(liveSnap.val());
   mirror.expMode = expSnap.val() || gameConfig.liveGate.defaultExpMode;
+  mirror.chatMuted = Boolean(mutedSnap.val());
   mirror.season = seasonSnap.val();
   mirror.raid = raidSnap.val();
   if (dropSnap.val()) mirror.dropScheduler = dropSnap.val();
-  logger.info?.('config mirror warm', { live: mirror.live, expMode: mirror.expMode });
+  logger.info?.('config mirror warm', { live: mirror.live, expMode: mirror.expMode, chatMuted: mirror.chatMuted });
 }
 
 /** Current in-memory config view (hot path). */
 export function getConfig() {
-  return { live: mirror.live, expMode: mirror.expMode, season: mirror.season };
+  return { live: mirror.live, expMode: mirror.expMode, chatMuted: mirror.chatMuted, season: mirror.season };
+}
+
+/** True when a mod has muted the bot's outbound chat (`!mute`). Hot-path read. */
+export function isChatMuted() {
+  return mirror.chatMuted;
 }
 
 /** Active season pointer { id, name, weekId, ... } or null. */
@@ -110,6 +123,18 @@ export async function setExpMode(mode) {
   if (!['on', 'off', 'auto'].includes(mode)) throw new Error(`invalid expMode: ${mode}`);
   await database().ref(PATHS.configExpMode()).set(mode);
   return mode;
+}
+
+/**
+ * Mute / unmute the bot's outbound chat (`!mute`). Updates the mirror
+ * synchronously so the very next send respects it without waiting for the RTDB
+ * round-trip, then persists so the choice survives a restart.
+ */
+export async function setChatMuted(value) {
+  const next = Boolean(value);
+  mirror.chatMuted = next;
+  await database().ref(PATHS.configChatMuted()).set(next);
+  return next;
 }
 
 /**

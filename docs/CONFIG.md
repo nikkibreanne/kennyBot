@@ -37,6 +37,7 @@ so a mod can change them **while the bot is running**. These are the
 | What | How (chat command) | Where it's stored (RTDB) |
 |---|---|---|
 | **EXP gate** — on / off / auto | `!exp on` · `!exp off` · `!exp auto` · `!exp status` | `config/expMode` |
+| **Chat output mute** — silence sends, keep listening | `!mute on` · `!mute off` · `!mute status` (bare `!mute` toggles) | `config/chatMuted` |
 | **Auto drop scheduler** — on/off + interval | `!drops on` · `!drops off` · `!drops every <min>` · `!drops status` | `config/dropScheduler` |
 | **Live status** (set automatically by Twitch) | _(no command — EventSub / Helix poll set it)_ | `config/live` |
 | **Active season** | `!season start <id>` · `!season rollover <id>` | `config/season/current` |

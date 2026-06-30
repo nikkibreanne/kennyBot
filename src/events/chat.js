@@ -11,7 +11,7 @@
 // A lapsed sub keeps earning EXP on an existing character; only !create and loot
 // claims require an active sub (handled by the per-command `subOnly` gate).
 import { getCommand } from '../commands/registry.js';
-import { getConfig } from '../db/configStore.js';
+import { getConfig, isChatMuted } from '../db/configStore.js';
 import { config, shouldGrantExp } from '../config.js';
 import { applyChatTick } from '../db/players.js';
 
@@ -29,19 +29,35 @@ export function createMessageHandler({ chat, channel, botUserId, logger, onActiv
   const expCooldown = new Map(); // userId -> last grant ms
   const cmdCooldown = new Map(); // `${userId}:${cmd}` -> last run ms
 
-  async function dispatchCommand(ctx, name) {
+  const rawSay = (t) => chat.say(channel, t).catch((e) => logger.warn('say failed', { err: String(e) }));
+  const rawAction = (t) => chat.action(channel, t).catch(() => {});
+
+  async function dispatchCommand(user, args, name) {
     const def = getCommand(name);
     if (!def) return;
-    if (def.mod && !ctx.user.isMod && !ctx.user.isBroadcaster) return; // silently ignore non-mods
+    if (def.mod && !user.isMod && !user.isBroadcaster) return; // silently ignore non-mods
 
-    const key = `${ctx.user.id}:${name}`;
+    const key = `${user.id}:${name}`;
     const now = Date.now();
     if (def.cooldownMs && now - (cmdCooldown.get(key) || 0) < def.cooldownMs) return;
     cmdCooldown.set(key, now);
 
+    // Outbound mute (`!mute`): swallow every reply while muted EXCEPT for
+    // commands flagged `bypassMute` — that's the !mute control itself, so mods
+    // still get confirmation even while the bot is otherwise silent.
+    const silent = isChatMuted() && !def.bypassMute;
+    const ctx = {
+      user,
+      args,
+      channel,
+      reply: (t) => (silent ? undefined : rawSay(t)),
+      action: (t) => (silent ? undefined : rawAction(t)),
+      logger,
+    };
+
     // Sub-only participation (broadcaster can't sub to herself → always allowed).
-    if (def.subOnly && !ctx.user.isSubscriber && !ctx.user.isBroadcaster) {
-      ctx.reply(`@${ctx.user.displayName} the raid game is subscriber-only — sub to ${channel} to play! 🌱`);
+    if (def.subOnly && !user.isSubscriber && !user.isBroadcaster) {
+      ctx.reply(`@${user.displayName} the raid game is subscriber-only — sub to ${channel} to play! 🌱`);
       return;
     }
 
@@ -70,7 +86,7 @@ export function createMessageHandler({ chat, channel, botUserId, logger, onActiv
       return;
     }
     if (!tick) return; // not a player → nothing accrues (non-subs never created one)
-    if (tick.leveledUp) {
+    if (tick.leveledUp && !isChatMuted()) {
       chat.say(channel, `@${user.displayName} reached level ${tick.toLevel}! ⚔️`).catch(() => {});
     }
   }
@@ -95,15 +111,7 @@ export function createMessageHandler({ chat, channel, botUserId, logger, onActiv
       if (trimmed.startsWith('!')) {
         const parts = trimmed.slice(1).split(/\s+/);
         const name = parts[0].toLowerCase();
-        const ctx = {
-          user,
-          args: parts.slice(1),
-          channel,
-          reply: (t) => chat.say(channel, t).catch((e) => logger.warn('say failed', { err: String(e) })),
-          action: (t) => chat.action(channel, t).catch(() => {}),
-          logger,
-        };
-        await dispatchCommand(ctx, name);
+        await dispatchCommand(user, parts.slice(1), name);
       }
 
       await passiveTick(user);

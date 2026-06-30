@@ -81,6 +81,7 @@ export async function closeFirebase() {
 export const PATHS = {
   configLive: () => 'config/live',
   configExpMode: () => 'config/expMode',
+  configChatMuted: () => 'config/chatMuted',
   seasonCurrent: () => 'config/season/current',
   configRaid: () => 'config/raid',
   configDropScheduler: () => 'config/dropScheduler',

@@ -51,7 +51,7 @@ runOrSkip('client WRITE to players is rejected and leaves no data', async () => 
 });
 
 runOrSkip('client WRITE to leaderboard/bosses/raids/config is rejected', async () => {
-  for (const path of ['leaderboard/t1/u1', 'bosses/t1/w1', 'raids/t1/w1/x', 'config/live', 'config/expMode']) {
+  for (const path of ['leaderboard/t1/u1', 'bosses/t1/w1', 'raids/t1/w1/x', 'config/live', 'config/expMode', 'config/chatMuted']) {
     const res = await fetch(restUrl(path), { method: 'PUT', body: JSON.stringify({ x: 1 }) });
     assert.equal(res.status, 401, `client write to ${path} must be denied`);
   }
