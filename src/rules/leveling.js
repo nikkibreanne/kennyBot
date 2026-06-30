@@ -25,9 +25,13 @@ export function xpForMessage(engagementMult, config) {
 }
 
 /**
- * The pity roll. Given the current progress state, decide whether this message
- * triggers a level-up. Climbing probability p = min(base + k*pressure, cap);
- * a hard pressureCap guarantees an eventual pop so a player is never stuck.
+ * The level-up commit. Given the current progress state, decide whether this
+ * message triggers a level-up. Below threshold: never (the EXP bar is still
+ * filling). At/over threshold: an ACCUMULATING chance p = min(base+k*pressure,
+ * cap) — with base 0 the threshold-crossing message can't pop (no lucky early
+ * level); the chance then climbs each message and a hard pressureCap guarantees
+ * an eventual pop, so a level lands a few predictable messages after the bar
+ * fills, never on a random fluke.
  *
  * Pure: returns a NEW state object, never mutates the input.
  *
@@ -47,7 +51,7 @@ export function rollLevelUp(state, { rng, config }) {
     return { level, exp, levelPressure: pressure, eligible: false, leveledUp: false };
   }
 
-  const { base, k, cap, pressureCap } = config.exp.pity;
+  const { base, k, cap, pressureCap } = config.exp.levelUp;
   const p = Math.min(base + k * pressure, cap);
   const forced = pressure + 1 >= pressureCap; // guarantee an eventual pop
   const popped = forced || rng() < p;

@@ -25,11 +25,19 @@ export const config = {
     // threshold(level) = round(base * growth^(level-1)). 1.30 keeps a full
     // season's finale level reachable in ~6 weeks of chatting.
     threshold: { base: 100, growth: 1.3 },
-    // Pity roll: once at/over threshold, each qualifying message rolls
-    // p = min(base + k * levelPressure, cap) to level up. levelPressure climbs
-    // by 1 per non-popping message and resets on level-up. pressureCap forces a
-    // pop so it ALWAYS eventually levels (the missing cap the spec left open).
-    pity: { base: 0.05, k: 0.02, cap: 0.95, pressureCap: 60 },
+    // Level-up commit. EXP first fills to threshold(level) with NO chance to
+    // level early; THEN a level-up chance ACCUMULATES per qualifying message
+    // until it pops. base 0 ⇒ the message that crosses the threshold can never
+    // pop (no lucky single-roll levels); the chance then climbs and is
+    // GUARANTEED within pressureCap messages. chance = min(base + k*pressure,
+    // cap), where pressure = messages spent eligible-but-not-yet-popped (resets
+    // on level-up):
+    //   pressure 0 (crossing) → 0%   1 → 34%   2 → 68%   3 → 100% (also forced)
+    // So a level lands ~1–3 messages after the bar fills: predictable and earned,
+    // never random luck. Tighten the tail by raising k or lowering pressureCap;
+    // for strictly deterministic "level the instant the bar fills", set k high
+    // and pressureCap 1.
+    levelUp: { base: 0, k: 0.34, cap: 1.0, pressureCap: 4 },
   },
 
   // ── Role rating (spec §4) ────────────────────────────────────────────────

@@ -23,6 +23,12 @@ import { startDropScheduler } from './src/events/dropScheduler.js';
 
 const HEARTBEAT_FILE = process.env.HEARTBEAT_FILE || '/tmp/kennybot.heartbeat';
 
+// Health snapshot written to HEARTBEAT_FILE for the container HEALTHCHECK. More
+// than a liveness ping: it records whether the Twitch chat socket is actually
+// connected, so a "process alive but chat wedged" zombie reads unhealthy and the
+// orchestrator restarts it, rather than the check passing on a dead connection.
+const health = { chatConnected: false, live: false };
+
 // Shutdown is wired up inside main(); module scope holds the reference so signal
 // handlers and the lease-lost callback can trigger it cleanly.
 let doShutdown = null;
@@ -45,7 +51,7 @@ function requireEnv() {
 
 async function touchHeartbeat() {
   try {
-    await writeFile(HEARTBEAT_FILE, String(Date.now()));
+    await writeFile(HEARTBEAT_FILE, JSON.stringify({ ts: Date.now(), ...health }));
   } catch {
     /* best effort */
   }
@@ -61,6 +67,14 @@ async function main() {
     if (shuttingDown) return;
     shuttingDown = true;
     logger.info('shutting down', { reason });
+    // A hung dependency (a wedged socket close, a stuck RTDB op) must not trap
+    // the process — force exit if graceful cleanup overruns. Also keeps us inside
+    // Docker's stop grace period (it SIGKILLs after ~10s).
+    const watchdog = setTimeout(() => {
+      logger.error('shutdown timed out — forcing exit');
+      process.exit(1);
+    }, 5000);
+    watchdog.unref?.();
     for (const hook of shutdownHooks.reverse()) {
       try {
         await hook();
@@ -69,6 +83,7 @@ async function main() {
       }
     }
     await closeFirebase().catch(() => {});
+    clearTimeout(watchdog);
     process.exit(0);
   };
 
@@ -142,10 +157,16 @@ async function main() {
   // ── Chat ──
   const chat = new ChatClient({ authProvider, channels: [channel] });
   chat.onMessage(createMessageHandler({ chat, channel, botUserId, logger, onActivity: touchHeartbeat }));
-  chat.onConnect(() => logger.info('chat connected', { channel }));
-  chat.onDisconnect((manual, reason) =>
-    logger.warn('chat disconnected', { manual, reason: String(reason || '') }),
-  );
+  chat.onConnect(() => {
+    health.chatConnected = true;
+    touchHeartbeat();
+    logger.info('chat connected', { channel });
+  });
+  chat.onDisconnect((manual, reason) => {
+    health.chatConnected = false;
+    touchHeartbeat();
+    logger.warn('chat disconnected', { manual, reason: String(reason || '') });
+  });
   shutdownHooks.push(attachTwitchEvents({ chat, channel, logger }));
   await chat.connect();
   shutdownHooks.push(() => chat.quit());
@@ -154,7 +175,10 @@ async function main() {
   shutdownHooks.push(startDropScheduler({ chat, channel, logger }));
 
   // ── Live gate: Helix poll (always) + EventSub (when broadcaster auth fits) ──
-  const setLiveBound = (live, source) => setLive(live, source, logger);
+  const setLiveBound = (live, source) => {
+    health.live = live;
+    return setLive(live, source, logger);
+  };
   shutdownHooks.push(
     startLivePoll({
       apiClient,
@@ -198,8 +222,20 @@ async function main() {
   logger.info('kennyBot ready', { channel, botUserId, channelUserId, eventsub: eventSubActive });
 }
 
-process.on('SIGINT', () => (doShutdown ? doShutdown('signal') : process.exit(0)));
-process.on('SIGTERM', () => (doShutdown ? doShutdown('signal') : process.exit(0)));
+// First signal → graceful shutdown (itself watchdog-bounded above). A second
+// signal (impatient Ctrl-C, or Docker escalating) → hard exit immediately.
+let signalCount = 0;
+function onSignal() {
+  signalCount += 1;
+  if (signalCount >= 2) {
+    process.stderr.write('forced exit\n');
+    process.exit(1);
+  }
+  if (doShutdown) doShutdown('signal');
+  else process.exit(0);
+}
+process.on('SIGINT', onSignal);
+process.on('SIGTERM', onSignal);
 process.on('unhandledRejection', (err) => logger.error('unhandledRejection', { err: String(err?.stack || err) }));
 process.on('uncaughtException', (err) => {
   logger.error('uncaughtException', { err: String(err?.stack || err) });

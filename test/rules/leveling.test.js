@@ -8,7 +8,7 @@ import {
 } from '../../src/rules/leveling.js';
 import { config } from '../../src/config.js';
 
-// A seeded, deterministic RNG (mulberry32) so pity rolls are reproducible.
+// A seeded, deterministic RNG (mulberry32) so level-up rolls are reproducible.
 function seeded(seed) {
   let a = seed >>> 0;
   return function rng() {
@@ -40,24 +40,32 @@ test('rollLevelUp is not eligible below threshold', () => {
   assert.deepEqual({ level: out.level, exp: out.exp }, { level: 1, exp: 50 });
 });
 
-test('rollLevelUp pops when rng is below probability and carries remainder', () => {
-  const state = { level: 1, exp: 130, levelPressure: 0 }; // threshold 100
-  const out = rollLevelUp(state, { rng: () => 0, config }); // rng 0 < base prob
+test('the threshold-crossing message never pops (no lucky early level)', () => {
+  const state = { level: 1, exp: 130, levelPressure: 0 }; // over threshold 100, fresh
+  const out = rollLevelUp(state, { rng: () => 0, config }); // even rng 0 cannot pop at pressure 0
+  assert.equal(out.eligible, true);
+  assert.equal(out.leveledUp, false);
+  assert.equal(out.levelPressure, 1); // chance accumulates instead of popping
+});
+
+test('rollLevelUp pops once the accumulated chance clears, carrying remainder', () => {
+  const state = { level: 1, exp: 130, levelPressure: 1 }; // p = k*1 = 0.34
+  const out = rollLevelUp(state, { rng: () => 0, config }); // 0 < 0.34 → pops
   assert.equal(out.leveledUp, true);
   assert.equal(out.level, 2);
   assert.equal(out.exp, 30); // 130 - 100 carried
   assert.equal(out.levelPressure, 0);
 });
 
-test('rollLevelUp accrues pressure when it does not pop', () => {
-  const state = { level: 1, exp: 130, levelPressure: 3 };
-  const out = rollLevelUp(state, { rng: () => 0.999, config }); // never pops at this p
+test('rollLevelUp accrues pressure when the chance does not clear', () => {
+  const state = { level: 1, exp: 130, levelPressure: 1 }; // p = 0.34
+  const out = rollLevelUp(state, { rng: () => 0.999, config }); // 0.999 > 0.34 → no pop
   assert.equal(out.leveledUp, false);
-  assert.equal(out.levelPressure, 4);
+  assert.equal(out.levelPressure, 2);
 });
 
 test('pressureCap guarantees an eventual pop regardless of rng', () => {
-  const atCap = config.exp.pity.pressureCap - 1;
+  const atCap = config.exp.levelUp.pressureCap - 1;
   const state = { level: 5, exp: levelThreshold(5, config) + 1, levelPressure: atCap };
   const out = rollLevelUp(state, { rng: () => 1, config }); // rng=1 would never pop on probability
   assert.equal(out.leveledUp, true, 'forced pop at pressureCap');
@@ -69,7 +77,7 @@ test('a chatter who keeps chatting always levels within pressureCap messages', (
   const rng = () => 1; // worst case: probability never pops; only the cap saves them
   let state = { level: 1, exp: 0, levelPressure: 0 };
   let leveled = false;
-  for (let i = 0; i < config.exp.pity.pressureCap + 200; i++) {
+  for (let i = 0; i < config.exp.levelUp.pressureCap + 200; i++) {
     const out = applyChatExp(state, { engagementMult: 1, rng, config });
     state = { level: out.level, exp: out.exp, levelPressure: out.levelPressure };
     if (out.leveledUp) {
@@ -81,7 +89,8 @@ test('a chatter who keeps chatting always levels within pressureCap messages', (
 });
 
 test('applyChatExp reports gainedExp and from/to levels', () => {
-  const out = applyChatExp({ level: 1, exp: 95, levelPressure: 0 }, {
+  // Already eligible with accumulated pressure, so this message can pop.
+  const out = applyChatExp({ level: 1, exp: 130, levelPressure: 1 }, {
     engagementMult: 1,
     rng: () => 0,
     config,

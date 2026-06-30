@@ -21,13 +21,24 @@ ENV HEARTBEAT_FILE=/tmp/kennybot.heartbeat
 WORKDIR /app
 COPY --from=build /app/node_modules ./node_modules
 COPY --from=build /app .
+
+# Persisted refresh-token store (§F) lives on a writable volume owned by the
+# non-root runtime user. /app is root-owned, so create + chown a dedicated /data
+# BEFORE dropping privileges, and default the store there. Mount it at runtime
+# (-v kennybot-tokens:/data) so refreshed tokens survive restarts.
+ENV TOKEN_STORE_DIR=/data
+RUN mkdir -p /data && chown node:node /data
+VOLUME /data
+
 USER node                                  # never run as root
 
 # File-based healthcheck (§E): no HTTP listener exists, so a port probe is
-# meaningless. The bot touches HEARTBEAT_FILE on each Twitch keepalive; if it
-# goes stale the process is a "connected but socket dead" zombie a restart fixes.
-HEALTHCHECK --interval=30s --timeout=5s --start-period=30s --retries=3 \
-  CMD node -e "const fs=require('fs');const f=process.env.HEARTBEAT_FILE;const age=Date.now()-Number(fs.readFileSync(f,'utf8'));process.exit(age<120000?0:1)"
+# meaningless. The bot writes a JSON snapshot {ts, chatConnected, live} to
+# HEARTBEAT_FILE. Unhealthy = stale ts (process hung) OR chatConnected:false
+# (chat socket wedged/disconnected and not recovered) — so the orchestrator
+# restarts a "process alive but chat dead" zombie instead of trusting it.
+HEALTHCHECK --interval=30s --timeout=5s --start-period=45s --retries=3 \
+  CMD node -e "const fs=require('fs');const h=JSON.parse(fs.readFileSync(process.env.HEARTBEAT_FILE,'utf8'));process.exit(Date.now()-h.ts<120000&&h.chatConnected?0:1)"
 
 # no EXPOSE — the bot listens on nothing
 CMD ["node", "index.js"]
