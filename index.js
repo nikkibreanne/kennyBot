@@ -4,6 +4,7 @@
 // Outbound-only: listens on nothing (IMPLEMENTATION §B).
 import 'dotenv/config';
 import { writeFile } from 'node:fs/promises';
+import { readFileSync } from 'node:fs';
 import { ApiClient } from '@twurple/api';
 import { ChatClient } from '@twurple/chat';
 
@@ -22,13 +23,24 @@ import { attachTwitchEvents } from './src/events/twitchEvents.js';
 import { startDropScheduler } from './src/events/dropScheduler.js';
 import { processDrops } from './src/db/drops.js';
 
+// Running version, read from the bundled package.json (in the image at /app).
+// Surfaced in the startup log + heartbeat so "which release is this box on?"
+// is answerable from `docker logs` / the health snapshot — no label inspection.
+const APP_VERSION = (() => {
+  try {
+    return JSON.parse(readFileSync(new URL('./package.json', import.meta.url), 'utf8')).version;
+  } catch {
+    return 'unknown';
+  }
+})();
+
 const HEARTBEAT_FILE = process.env.HEARTBEAT_FILE || '/tmp/kennybot.heartbeat';
 
 // Health snapshot written to HEARTBEAT_FILE for the container HEALTHCHECK. More
 // than a liveness ping: it records whether the Twitch chat socket is actually
 // connected, so a "process alive but chat wedged" zombie reads unhealthy and the
 // orchestrator restarts it, rather than the check passing on a dead connection.
-const health = { chatConnected: false, live: false };
+const health = { version: APP_VERSION, chatConnected: false, live: false };
 
 // Shutdown is wired up inside main(); module scope holds the reference so signal
 // handlers and the lease-lost callback can trigger it cleanly.
@@ -89,6 +101,7 @@ async function main() {
   };
 
   logger.info('kennyBot starting', {
+    version: APP_VERSION,
     channel,
     instanceId,
     emulator: Boolean(process.env.FIREBASE_DATABASE_EMULATOR_HOST),
@@ -272,7 +285,7 @@ async function main() {
   hbTimer.unref?.();
   shutdownHooks.push(() => clearInterval(hbTimer));
 
-  logger.info('kennyBot ready', { channel, botUserId, channelUserId, eventsub: eventSubActive });
+  logger.info('kennyBot ready', { version: APP_VERSION, channel, botUserId, channelUserId, eventsub: eventSubActive });
 }
 
 // First signal → graceful shutdown (itself watchdog-bounded above). A second

@@ -35,8 +35,8 @@ VOLUME /data
 USER node
 
 # File-based healthcheck (§E): no HTTP listener exists, so a port probe is
-# meaningless. The bot writes a JSON snapshot {ts, chatConnected, live} to
-# HEARTBEAT_FILE. Unhealthy = stale ts (process hung) OR chatConnected:false
+# meaningless. The bot writes a JSON snapshot {ts, version, chatConnected, live}
+# to HEARTBEAT_FILE. Unhealthy = stale ts (process hung) OR chatConnected:false
 # (chat socket wedged/disconnected and not recovered) — so the orchestrator
 # restarts a "process alive but chat dead" zombie instead of trusting it.
 HEALTHCHECK --interval=30s --timeout=5s --start-period=45s --retries=3 \
