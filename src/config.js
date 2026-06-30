@@ -149,8 +149,8 @@ export const config = {
     staleMs: 60_000,
   },
 
-  // ── Site link surfaced by !raid / !char ──────────────────────────────────
-  siteUrl: 'https://nikkibreanne.github.io',
+  // ── Site link surfaced by !muster / !char ──────────────────────────────────
+  siteUrl: 'https://okrafans.com',
 };
 
 /**

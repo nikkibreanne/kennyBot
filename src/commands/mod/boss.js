@@ -21,7 +21,7 @@ async function schedule(seasonId, weekId, boss, reply, lead) {
   await setupRaidWeek({ seasonId, weekId, boss, locksAt: startsAt - config.raid.lockLeadMs, startsAt });
   const when = new Date(startsAt).toLocaleString();
   const rec = boss.recommended ? ` · recommended ~${boss.recommended} heroes` : '';
-  reply(`📣 ${lead}: ${boss.name}${rec}. Raid night: ${when}. Players: !raid to join.`);
+  reply(`📣 ${lead}: ${boss.name}${rec}. Raid night: ${when}. Players: !muster to join.`);
 }
 
 export default {
