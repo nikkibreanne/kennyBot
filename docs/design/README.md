@@ -23,8 +23,9 @@ The **implemented** content lives in `src/content/` (`items.js`, `abilities.js`,
   boss-signature drops + bad-luck pity.
 - [abilities.md](abilities.md) — advanced combat mechanics needing new engine
   `kind`s + replay-event shapes: **DoT, shields/absorb, taunt, cleanse, interrupt**.
-- [bosses.md](bosses.md) — **12 affixes** (weekly modifiers; need engine support),
-  **multi-phase finales** (HP-threshold phase transitions for the season capstone).
+- [bosses.md](bosses.md) — **multi-phase finales** (HP-threshold phase transitions
+  for the season capstone). *(Affixes, formerly listed here as needing engine
+  support, have since shipped — see Open decisions.)*
 - [balance.md](balance.md) — economy/EXP pacing, loot rates, prestige, and the
   **combat-log compaction** plan for dozens of participants (deferred per owner:
   keep full log lines for now; revisit if turnouts hit the dozens).

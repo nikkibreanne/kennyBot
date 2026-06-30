@@ -18,7 +18,7 @@ function whenHtmlSafe(ts) {
 }
 
 export default {
-  names: ['muster', 'raid'],
+  names: ['muster'],
   mod: false,
   cooldownMs: 3_000,
   help: '!muster — sign up for this week’s raid / see status',
