@@ -1,15 +1,16 @@
-// !grab / !loot — claim the active drop (rolls within the window) (spec §5.2).
-// Inclusive window with independent rolls, not first-to-type. A player's first
-// ever claim is guaranteed (good first impression, spec §5.5).
+// !grab / !loot — enter the active drop's LOTTERY (spec §5.2). Every grab within
+// the window enters you exactly once; when the window closes a single winner is
+// drawn and gets the single item, so a drop never mints duplicates. You need a
+// character to enter (loot has to land somewhere).
 import { getPlayer } from '../db/players.js';
-import { claimDrop } from '../db/drops.js';
+import { enterDrop } from '../db/drops.js';
 
 export default {
   names: ['grab', 'loot'],
   mod: false,
   subOnly: true, // subscriber-only loot claims (owner decision)
   cooldownMs: 2_000,
-  help: '!grab — roll for the active loot drop',
+  help: '!grab — enter the drawing for the active loot drop',
   async run({ user, reply }) {
     const player = await getPlayer(user.id);
     if (!player) {
@@ -17,25 +18,23 @@ export default {
       return;
     }
 
-    const guaranteed = (player.stats?.lootClaimed || 0) === 0; // first-claim guarantee
-    const res = await claimDrop({ userId: user.id, guaranteed });
+    const res = await enterDrop({ userId: user.id, displayName: user.displayName });
 
     switch (res.status) {
       case 'none':
         reply(`@${user.displayName} there's nothing to grab right now.`);
         break;
       case 'expired':
-        reply(`@${user.displayName} too late — that drop expired.`);
+        reply(`@${user.displayName} too late — that drop's window has closed.`);
         break;
       case 'already':
-        reply(`@${user.displayName} you already rolled on this drop.`);
+        reply(`@${user.displayName} you're already in the running for ${res.item?.name ?? 'this drop'}. 🎲`);
         break;
-      case 'claimed':
-        if (res.won) reply(`@${user.displayName} you grabbed ${res.item.name} (${res.item.rarity})! It's in your !bag.`);
-        else reply(`@${user.displayName} you rolled… and missed this one. Better luck next drop!`);
+      case 'entered':
+        reply(`@${user.displayName} 🎲 you're entered for ${res.item.name} (${res.item.rarity})! ${res.count} in the running — one winner is drawn when the window closes.`);
         break;
       default:
-        reply(`@${user.displayName} something went wrong grabbing the drop.`);
+        reply(`@${user.displayName} something went wrong entering the drop.`);
     }
   },
 };

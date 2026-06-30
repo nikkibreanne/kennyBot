@@ -62,10 +62,13 @@ export function attachTwitchEvents({ chat, channel, logger }) {
       const itemId = pickDrop(lootTable(), getItem, Math.random, config);
       if (!itemId) return;
       const drop = await setDrop(itemId);
-      chat.say(
-        channel,
-        `Raid incoming (${raidInfo?.viewerCount ?? '?'})! A ${drop.rarity} ${drop.name} dropped for everyone — !grab!`,
-      ).catch(() => {});
+      if (drop.status === 'full') return;
+      const lead = `Raid incoming (${raidInfo?.viewerCount ?? '?'})!`;
+      const line =
+        drop.status === 'open'
+          ? `${lead} A ${drop.rarity} ${drop.name} dropped — !grab to enter the draw!`
+          : `${lead} A ${drop.rarity} ${drop.name} is queued up — !grab when it opens!`;
+      chat.say(channel, line).catch(() => {});
     } catch (err) {
       logger.error('raid handler failed', { err: String(err) });
     }
@@ -82,7 +85,12 @@ export function attachTwitchEvents({ chat, channel, logger }) {
       const itemId = pickDrop(lootTable(), getItem, Math.random, config);
       if (!itemId) return;
       const drop = await setDrop(itemId);
-      chat.say(channel, `${bits} bits! A ${drop.rarity} ${drop.name} dropped for chat — !grab!`).catch(() => {});
+      if (drop.status === 'full') return;
+      const line =
+        drop.status === 'open'
+          ? `${bits} bits! A ${drop.rarity} ${drop.name} dropped — !grab to enter the draw!`
+          : `${bits} bits! A ${drop.rarity} ${drop.name} is queued — !grab when it opens!`;
+      chat.say(channel, line).catch(() => {});
     } catch (err) {
       logger.error('cheer handler failed', { err: String(err) });
     }

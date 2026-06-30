@@ -20,6 +20,7 @@ import { advanceRaidPhases } from './src/db/raid.js';
 import { createMessageHandler } from './src/events/chat.js';
 import { attachTwitchEvents } from './src/events/twitchEvents.js';
 import { startDropScheduler } from './src/events/dropScheduler.js';
+import { processDrops } from './src/db/drops.js';
 
 const HEARTBEAT_FILE = process.env.HEARTBEAT_FILE || '/tmp/kennybot.heartbeat';
 
@@ -212,6 +213,36 @@ async function main() {
   }, 30_000);
   phaseTimer.unref?.();
   shutdownHooks.push(() => clearInterval(phaseTimer));
+
+  // ── Loot lottery: close expired drops and draw a single winner (spec §5.2) ──
+  const drawTimer = setInterval(async () => {
+    try {
+      const { drawResult, activated } = await processDrops();
+      if (drawResult) {
+        if (drawResult.winner) {
+          chat
+            .say(
+              channel,
+              `🎉 @${drawResult.winner.name || 'a lucky grabber'} won the ${drawResult.item?.rarity ?? ''} ${drawResult.item?.name ?? 'drop'}! (${drawResult.count} entered) — it's in their !bag.`,
+            )
+            .catch(() => {});
+          logger.info('drop drawn', { item: drawResult.itemId, winner: drawResult.winner.userId, entrants: drawResult.count });
+        } else {
+          logger.info('drop expired with no entrants', { item: drawResult.itemId });
+        }
+      }
+      if (activated) {
+        const secs = Math.round(config.loot.windowMs / 1000);
+        chat
+          .say(channel, `⏭️ Next up — a ${activated.rarity} ${activated.name} is open! !grab within ${secs}s to enter the draw.`)
+          .catch(() => {});
+      }
+    } catch (err) {
+      logger.error('drop draw tick failed', { err: String(err) });
+    }
+  }, 10_000);
+  drawTimer.unref?.();
+  shutdownHooks.push(() => clearInterval(drawTimer));
 
   // ── Healthcheck heartbeat (file-based; no listener, §E) ──
   await touchHeartbeat();

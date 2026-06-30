@@ -57,7 +57,7 @@ export const config = {
   // Levers grant speed/communal benefit, never a guaranteed win.
   // Applies to BOTH EXP gain and raid COMBAT power (owner decision: sub tier
   // boosts power). Higher tiers = faster growth + a stronger hero. Chat loot
-  // grabs are deliberately NOT affected (kept tier-fair, see loot.claimChance).
+  // grabs are deliberately NOT affected (the loot draw is tier-fair — see loot).
   engagement: {
     base: 1.0,
     subTier: { 0: 1.0, 1: 1.3, 2: 1.55, 3: 1.8 }, // Twitch sub tiers 1000/2000/3000 → 1/2/3 (Prime = 1)
@@ -72,11 +72,15 @@ export const config = {
     // BOSS-battle rewards roll on a HIGHER-rarity table (clearing a raid should
     // feel better than a chat drop — owner request).
     bossRarityWeights: { common: 18, uncommon: 34, rare: 28, epic: 14, legendary: 6 },
-    // Claim is a WINDOW with independent rolls (inclusive), not first-to-type
-    // (spec §5.2): each claimer rolls claimChance. TIER-FAIR — every sub tier has
-    // equal weight to grab chat loot (owner decision). First claim guaranteed.
-    claimChance: 0.6,
-    windowMs: 60_000, // how long an active drop stays claimable
+    // Claim is a LOTTERY over a window (spec §5.2): every !grab in the window
+    // ENTERS the viewer; at window close ONE winner is drawn for the ONE item, so
+    // a drop never mints duplicates. TIER-FAIR — every entrant has equal odds in
+    // the draw (sub tier gives no loot edge; owner decision).
+    windowMs: 60_000, // how long a drop stays open for entries before the draw
+    // Overlapping drops QUEUE up (FIFO) instead of clobbering each other; each
+    // resolves in turn, one windowMs apart. At most maxQueue drops can be lined
+    // up at once (the open one + those waiting); drops past that are ignored.
+    maxQueue: 10, // ~10 min of back-to-back drops at a 60s window
     // Auto chat-drop scheduler while live; mod-tunable at runtime via the
     // config/drops/scheduler RTDB path (see !drops command).
     scheduler: { enabled: false, intervalSec: 15 * 60, jitter: 0.3 }, // ~15 min ±30%
