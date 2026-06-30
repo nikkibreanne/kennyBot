@@ -75,8 +75,8 @@ export async function closeFirebase() {
 
 /**
  * Centralized path builder for the §9 data model — the shared contract with the
- * website. Changing a shape here means telling the UI track (HANDOFF "interface
- * contract").
+ * website. Changing a shape here means coordinating with the UI track (the
+ * shared interface contract).
  */
 export const PATHS = {
   configLive: () => 'config/live',
