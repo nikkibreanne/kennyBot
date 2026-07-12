@@ -9,6 +9,12 @@ import unequip from './unequip.js';
 import grab from './grab.js';
 import raid from './raid.js';
 import top from './top.js';
+import fact from './fact.js';
+import kennycommands from './kennycommands.js';
+import points from './points.js';
+import daily from './daily.js';
+import bet from './bet.js';
+import market from './mod/market.js';
 import exp from './mod/exp.js';
 import mute from './mod/mute.js';
 import drop from './mod/drop.js';
@@ -17,7 +23,7 @@ import boss from './mod/boss.js';
 import raidnight from './mod/raidnight.js';
 import season from './mod/season.js';
 
-const defs = [create, char, bag, equip, unequip, grab, raid, top, exp, mute, drop, drops, boss, raidnight, season];
+const defs = [create, char, bag, equip, unequip, grab, raid, top, fact, kennycommands, points, daily, bet, exp, mute, drop, drops, boss, raidnight, season, market];
 
 /** @type {Map<string, typeof defs[number]>} */
 const byName = new Map();

@@ -158,6 +158,17 @@ export const config = {
     staleMs: 60_000,
   },
 
+  // ── OKRAMARKET points economy (viewer wagering, spec §5.2 extension) ────────
+  // credits are the wagering currency (bot-owned ledger; NOT the RPG EXP/loot
+  // economy). Balances start with a grubstake; a daily allowance keeps everyone in
+  // the game. Markets pay out parimutuel (winners split the pool, no rake).
+  economy: {
+    grubstake: 500, // starting balance the first time a viewer touches their wallet
+    minBet: 1, // smallest wager
+    daily: { amount: 200, cooldownMs: 20 * 60 * 60 * 1000 }, // ~once/day claim
+    maxOpenMarkets: 8, // how many OKRAMARKET predictions can run concurrently
+  },
+
   // ── Site link surfaced by !muster / !char ──────────────────────────────────
   siteUrl: 'https://okrafans.com',
 };
