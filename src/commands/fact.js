@@ -1,4 +1,4 @@
-// !fact — NIKKI FACTS. Public: `!fact` shows a random approved fact;
+// !fact — NIKKI FUN FACTS. Public: `!fact` shows a random approved fact;
 // `!fact suggest <text>` queues one for mod approval. Mod-only:
 // `!fact pending`, `!fact approve <#>`, `!fact reject <#>`. Mixed public/mod, so
 // it stays `mod:false` and gates the moderation subcommands on isMod inline.
@@ -13,7 +13,7 @@ export default {
   names: ['fact', 'facts'],
   mod: false,
   cooldownMs: 3_000,
-  help: '!fact — a random Nikki fact · !fact suggest <text> — suggest one for approval',
+  help: '!fact — a random Nikki fun fact · !fact suggest <text> — suggest one for approval',
   async run({ user, args, reply }) {
     const sub = (args[0] || '').toLowerCase();
     const isMod = user.isMod || user.isBroadcaster;
@@ -61,11 +61,11 @@ export default {
       return;
     }
 
-    // ── public: a random Nikki fact ──
+    // ── public: a random Nikki fun fact ──
     const fact = await randomApprovedFact();
     reply(
       fact
-        ? `NIKKI FACT: ${fact.text}${fact.by ? ` (— ${fact.by})` : ''}  ·  suggest yours: !fact suggest <text>`
+        ? `NIKKI FUN FACT: ${fact.text}${fact.by ? ` (— ${fact.by})` : ''}  ·  suggest yours: !fact suggest <text>`
         : `No facts yet — be the first! !fact suggest <your fact>  (${config.siteUrl}/info/)`,
     );
   },

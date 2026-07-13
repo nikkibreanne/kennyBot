@@ -87,7 +87,7 @@ export default {
           reply(`Can't approve #${id}: ${why}`);
           return;
         }
-        reply(`✅ Suggestion #${id} is live → 📈 OKRAMARKET #${res.market.id} "${res.market.question}"  ${optionLine(res.market)}  ·  bet: !bet ${res.market.id} <yes|no> <amount> · board: ${config.siteUrl}/#okramarket`);
+        reply(`✅ Suggestion #${id} is live → 📈 OKRAMARKET #${res.market.id} "${res.market.question}"  ${optionLine(res.market)}  ·  bet: !bet ${res.market.id} <yes|no> <amount> · board: ${config.siteUrl}/okramarket/`);
       } else {
         const res = await rejectMarketSuggestion(id);
         reply(res.ok ? `🗑️ Suggestion #${id} rejected.` : `Couldn't reject #${id} (${res.reason}).`);
@@ -108,7 +108,7 @@ export default {
         reply(`Can't open: ${why}`);
         return;
       }
-      reply(`📈 OKRAMARKET #${res.market.id} OPEN — "${res.market.question}"  ${optionLine(res.market)}  ·  bet: !bet ${res.market.id} <yes|no> <amount> · board: ${config.siteUrl}/#okramarket`);
+      reply(`📈 OKRAMARKET #${res.market.id} OPEN — "${res.market.question}"  ${optionLine(res.market)}  ·  bet: !bet ${res.market.id} <yes|no> <amount> · board: ${config.siteUrl}/okramarket/`);
       return;
     }
 
@@ -162,6 +162,6 @@ export default {
     const shown = open.slice(0, 5);
     const lines = shown.map((m) => `#${m.id} "${clip(m.question, 40)}" [${m.status}] Y:${(m.pools?.yes || 0).toLocaleString('en-US')}/N:${(m.pools?.no || 0).toLocaleString('en-US')}`).join('  ·  ');
     const more = open.length > shown.length ? ` · +${open.length - shown.length} more` : '';
-    reply(`📈 OKRAMARKETs (${open.length}) — ${lines}${more} · bet: !bet <#> <yes|no> <amount> · board: ${config.siteUrl}/#okramarket`);
+    reply(`📈 OKRAMARKETs (${open.length}) — ${lines}${more} · bet: !bet <#> <yes|no> <amount> · board: ${config.siteUrl}/okramarket/`);
   },
 };

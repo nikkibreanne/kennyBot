@@ -12,7 +12,7 @@ export default {
     const w = await ensureWallet({ userId: user.id, login: user.login, displayName: user.displayName });
     reply(
       `@${user.displayName} 💰 you have ${(w.balance || 0).toLocaleString('en-US')} credits. ` +
-        `Wager at the OKRAMARKET (!bet <option> <amount>) · claim your free !daily · board: ${config.siteUrl}/#okramarket`,
+        `Wager at the OKRAMARKET (!bet <#> <yes|no> <amount>) · claim your free !daily · board: ${config.siteUrl}/okramarket/`,
     );
   },
 };
