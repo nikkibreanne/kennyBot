@@ -1,16 +1,20 @@
-// !grab / !loot — enter the active drop's LOTTERY (spec §5.2). Every grab within
+// !loot / !claim — enter the active drop's LOTTERY (spec §5.2). Every claim within
 // the window enters you exactly once; when the window closes a single winner is
 // drawn and gets the single item, so a drop never mints duplicates. You need a
 // character to enter (loot has to land somewhere).
+//
+// NOTE: this used to be `!grab`, but that trigger collides with the quote/points
+// bots common in Twitch chat (they answer !grab too), so the primary is now !loot
+// (alias !claim) — kennyBot no longer listens on !grab.
 import { getPlayer } from '../db/players.js';
 import { enterDrop } from '../db/drops.js';
 
 export default {
-  names: ['grab', 'loot'],
+  names: ['loot', 'claim'],
   mod: false,
   subOnly: true, // subscriber-only loot claims (owner decision)
   cooldownMs: 2_000,
-  help: '!grab — enter the drawing for the active loot drop',
+  help: '!loot — enter the drawing for the active loot drop (alias: !claim)',
   async run({ user, reply }) {
     const player = await getPlayer(user.id);
     if (!player) {

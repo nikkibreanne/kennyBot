@@ -269,7 +269,7 @@ async function main() {
       if (activated) {
         const secs = Math.round(config.loot.windowMs / 1000);
         out
-          .say(channel, `⏭️ Next up — a ${activated.rarity} ${activated.name} is open! !grab within ${secs}s to enter the draw.`)
+          .say(channel, `⏭️ Next up — a ${activated.rarity} ${activated.name} is open! !loot within ${secs}s to enter the draw.`)
           .catch(() => {});
       }
     } catch (err) {

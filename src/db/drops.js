@@ -1,5 +1,5 @@
 // Active loot-drop persistence (spec §5.2). A drop is a LOTTERY over a claim
-// WINDOW: every !grab within the window ENTERS the viewer; when the window closes
+// WINDOW: every !loot within the window ENTERS the viewer; when the window closes
 // a single winner is drawn and gets the single item — so a drop never mints
 // duplicates no matter how many people grab.
 //

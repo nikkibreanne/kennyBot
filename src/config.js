@@ -72,7 +72,7 @@ export const config = {
     // BOSS-battle rewards roll on a HIGHER-rarity table (clearing a raid should
     // feel better than a chat drop — owner request).
     bossRarityWeights: { common: 18, uncommon: 34, rare: 28, epic: 14, legendary: 6 },
-    // Claim is a LOTTERY over a window (spec §5.2): every !grab in the window
+    // Claim is a LOTTERY over a window (spec §5.2): every !loot in the window
     // ENTERS the viewer; at window close ONE winner is drawn for the ONE item, so
     // a drop never mints duplicates. TIER-FAIR — every entrant has equal odds in
     // the draw (sub tier gives no loot edge; owner decision).

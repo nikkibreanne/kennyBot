@@ -60,7 +60,7 @@ export function pickDrop(lootTable, getItem, rng, config, weights) {
 
 /**
  * Draw exactly ONE winner uniformly from a drop's entrants (spec §5.2). The claim
- * window is a LOTTERY, not per-user rolls: everyone who !grabs in the window is
+ * window is a LOTTERY, not per-user rolls: everyone who !loots in the window is
  * entered, then a single winner takes the single item — so a drop never mints
  * duplicates no matter how many people grab. Pure + RNG-injected for testing.
  * @param {Record<string, unknown>} entries  map of entrant userId → entry

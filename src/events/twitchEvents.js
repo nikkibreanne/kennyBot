@@ -34,7 +34,7 @@ function lootTable() {
 export function attachTwitchEvents({ chat, channel, logger }) {
   const listeners = [];
   // Outbound mute (`!mute`): these communal-drop announcements are suppressed
-  // while muted, but the drop itself is still created so !grab keeps working.
+  // while muted, but the drop itself is still created so !loot keeps working.
   const say = (text) => { if (!isChatMuted()) chat.say(channel, text).catch(() => {}); };
 
   const onSubLike = (label) => async (_ch, _user, info, msg) => {
@@ -69,8 +69,8 @@ export function attachTwitchEvents({ chat, channel, logger }) {
       const lead = `Raid incoming (${raidInfo?.viewerCount ?? '?'})!`;
       const line =
         drop.status === 'open'
-          ? `${lead} A ${drop.rarity} ${drop.name} dropped — !grab to enter the draw!`
-          : `${lead} A ${drop.rarity} ${drop.name} is queued up — !grab when it opens!`;
+          ? `${lead} A ${drop.rarity} ${drop.name} dropped — !loot to enter the draw!`
+          : `${lead} A ${drop.rarity} ${drop.name} is queued up — !loot when it opens!`;
       say(line);
     } catch (err) {
       logger.error('raid handler failed', { err: String(err) });
@@ -91,8 +91,8 @@ export function attachTwitchEvents({ chat, channel, logger }) {
       if (drop.status === 'full') return;
       const line =
         drop.status === 'open'
-          ? `${bits} bits! A ${drop.rarity} ${drop.name} dropped — !grab to enter the draw!`
-          : `${bits} bits! A ${drop.rarity} ${drop.name} is queued — !grab when it opens!`;
+          ? `${bits} bits! A ${drop.rarity} ${drop.name} dropped — !loot to enter the draw!`
+          : `${bits} bits! A ${drop.rarity} ${drop.name} is queued — !loot when it opens!`;
       say(line);
     } catch (err) {
       logger.error('cheer handler failed', { err: String(err) });

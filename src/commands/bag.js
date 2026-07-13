@@ -15,7 +15,7 @@ export default {
     }
     const inventory = Array.isArray(player.inventory) ? player.inventory : [];
     if (inventory.length === 0) {
-      reply(`@${user.displayName} your bag is empty. !grab drops while live to fill it.`);
+      reply(`@${user.displayName} your bag is empty. !loot drops while live to fill it.`);
       return;
     }
     const names = inventory
