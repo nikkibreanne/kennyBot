@@ -92,6 +92,12 @@ export const PATHS = {
   factSubmissions: () => 'factSubmissions',
   factSubmission: (id) => `factSubmissions/${id}`,
   factCounter: () => 'counters/factSub',
+  // TODO BOARD (/todo/): Nikki's public, date-organized to-do list. Items are
+  // client-READ-ONLY; mods add/remove them from chat (`!todo`). Keyed by a short
+  // atomic counter so a mod can target one to remove (`!todo remove 3`).
+  todos: () => 'todos',
+  todo: (id) => `todos/${id}`,
+  todoCounter: () => 'counters/todo',
   // OKRAMARKET economy: wallets (points ledger) + the active/archived markets.
   wallet: (userId) => `wallets/${userId}`,
   wallets: () => 'wallets',
