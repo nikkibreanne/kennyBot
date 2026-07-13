@@ -18,6 +18,7 @@ import { buildAuth } from './src/twitch/auth.js';
 import { startLivePoll } from './src/twitch/liveGate.js';
 import { startEventSub } from './src/twitch/eventsub.js';
 import { advanceRaidPhases, refreshMusteredRoster } from './src/db/raid.js';
+import { seedCuratedFacts } from './src/db/facts.js';
 import { createMessageHandler } from './src/events/chat.js';
 import { attachTwitchEvents } from './src/events/twitchEvents.js';
 import { startDropScheduler } from './src/events/dropScheduler.js';
@@ -128,6 +129,16 @@ async function main() {
     }),
   );
   shutdownHooks.push(() => releaseLock({ instanceId }));
+
+  // ── Seed the curated fun facts (idempotent upsert) so `!fact` and the /info/
+  //    page read ONE source. Lease-gated (only the active instance seeds) and
+  //    non-fatal — a seed hiccup must never block the bot from coming up. ──
+  try {
+    const seeded = await seedCuratedFacts();
+    logger.info('curated facts seeded', seeded);
+  } catch (err) {
+    logger.warn('curated fact seed failed (non-fatal)', { err: String(err) });
+  }
 
   // ── Twitch auth (persisted refresh token) ──
   const tokenStore = new TokenStore(process.env.TOKEN_STORE_DIR || './.tokens');

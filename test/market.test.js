@@ -7,7 +7,8 @@ import { test, before, after, beforeEach } from 'node:test';
 import assert from 'node:assert/strict';
 import { initFirebase, database, closeFirebase } from '../src/db/firebase.js';
 import { ensureWallet, claimDaily, getBalance, credit } from '../src/db/wallet.js';
-import { suggestFact, listPendingFacts, approveFact, rejectFact, randomApprovedFact } from '../src/db/facts.js';
+import { suggestFact, listPendingFacts, approveFact, rejectFact, randomApprovedFact, seedCuratedFacts } from '../src/db/facts.js';
+import { CURATED_FACTS } from '../src/content/facts.js';
 import { openMarket, placeBet, closeMarket, resolveMarket, cancelMarket, getMarket, listOpenMarkets } from '../src/db/market.js';
 import { suggestMarket, listPendingMarketSuggestions, approveMarketSuggestion, rejectMarketSuggestion } from '../src/db/market.js';
 import { config } from '../src/config.js';
@@ -40,6 +41,26 @@ runOrSkip('facts: suggest → moderate → publish', async () => {
   await rejectFact(2);
   assert.equal((await listPendingFacts()).length, 0, 'queue clears');
   assert.equal((await randomApprovedFact()).text, 'nikki is okra');
+});
+
+runOrSkip('facts: curated seed is idempotent and !fact pulls it (shared source)', async () => {
+  const r = await seedCuratedFacts();
+  assert.equal(r.count, CURATED_FACTS.length, 'seeds the whole curated list');
+
+  await seedCuratedFacts(); // re-run must not duplicate (fixed keys)
+  const all = (await database().ref('facts').get()).val() || {};
+  assert.equal(Object.keys(all).length, CURATED_FACTS.length, 'no duplication on re-seed');
+  assert.ok(Object.values(all).every((f) => f.source === 'curated' && f.text), 'all curated, all have text');
+
+  // !fact returns a curated fact even with ZERO viewer submissions — the split is gone.
+  const f = await randomApprovedFact();
+  assert.ok(f && f.text, 'a random fact is available from the seed alone');
+
+  // Curated + a later approved submission coexist under facts/.
+  await suggestFact({ userId: 'z', displayName: 'Zed', text: 'a brand new submitted fact' });
+  await approveFact(1);
+  const merged = (await database().ref('facts').get()).val() || {};
+  assert.equal(Object.keys(merged).length, CURATED_FACTS.length + 1, 'submission adds alongside curated');
 });
 
 runOrSkip('wallet: grubstake, daily, cooldown', async () => {
