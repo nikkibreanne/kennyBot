@@ -32,6 +32,20 @@
 
     "items": { ".read": true, ".write": false },
     "drops": { ".read": true, ".write": false },
+
+    // OKRA FACTS: approved facts are public-readable, Admin-write only (kennyBot
+    // publishes them on `!fact approve`). The submission queue (factSubmissions)
+    // and its counter stay unreadable/unwritable to clients (default deny) — the
+    // website never touches them; suggestions arrive via chat (`!fact suggest`).
+    "facts": { ".read": true, ".write": false },
+
+    // OKRAMARKET: okra-buck balances and market state are public-READABLE (the
+    // site renders the board + odds) but Admin-write only — points can never be
+    // minted client-side; bets/opens/resolves all go through kennyBot. The bet
+    // counter (counters/) stays fully locked (default deny).
+    "wallets": { ".read": true, ".write": false },
+    "markets": { ".read": true, ".write": false },
+
     "players": { ".read": true, ".write": false },
     "usernames": { ".read": true, ".write": false },
     "bosses": { ".read": true, ".write": false },

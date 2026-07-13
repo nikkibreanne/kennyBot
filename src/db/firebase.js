@@ -86,6 +86,27 @@ export const PATHS = {
   configRaid: () => 'config/raid',
   configDropScheduler: () => 'config/dropScheduler',
   configLock: () => 'config/lock',
+  // OKRA FACTS (/info/): approved facts are client-read-only; the submission
+  // queue + counter are admin-only.
+  facts: () => 'facts',
+  factSubmissions: () => 'factSubmissions',
+  factSubmission: (id) => `factSubmissions/${id}`,
+  factCounter: () => 'counters/factSub',
+  // OKRAMARKET economy: wallets (points ledger) + the active/archived markets.
+  wallet: (userId) => `wallets/${userId}`,
+  wallets: () => 'wallets',
+  // Concurrent binary YES/NO markets: each lives at markets/open/<id> while
+  // running (bets nested under it); resolved/cancelled ones move to history.
+  marketsOpen: () => 'markets/open',
+  marketOpen: (id) => `markets/open/${id}`,
+  marketBet: (id, userId) => `markets/open/${id}/bets/${userId}`,
+  marketHistory: (id) => `markets/history/${id}`,
+  marketCounter: () => 'counters/market',
+  // Viewer-proposed markets: an admin-only moderation queue (default-deny, like
+  // factSubmissions) — a mod promotes one to the live market via `!market approve`.
+  marketSuggestions: () => 'marketSuggestions',
+  marketSuggestion: (id) => `marketSuggestions/${id}`,
+  marketSuggestionCounter: () => 'counters/marketSug',
   botToken: () => 'config/secrets/botToken',
   items: () => 'items',
   dropActive: () => 'drops/active',
