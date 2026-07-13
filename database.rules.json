@@ -39,6 +39,11 @@
     // website never touches them; suggestions arrive via chat (`!fact suggest`).
     "facts": { ".read": true, ".write": false },
 
+    // TODO BOARD (/todo/): Nikki's to-do list is public-READABLE (the page renders
+    // it) but Admin-write only — mods add/remove items from chat (`!todo`), never
+    // the client. Its counter (counters/) stays fully locked (default deny).
+    "todos": { ".read": true, ".write": false },
+
     // OKRAMARKET: okra-buck balances and market state are public-READABLE (the
     // site renders the board + odds) but Admin-write only — points can never be
     // minted client-side; bets/opens/resolves all go through kennyBot. The bet
