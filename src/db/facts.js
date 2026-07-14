@@ -5,9 +5,37 @@
 // — client-READ-ONLY — which the website renders. All writes are Admin-SDK only.
 
 import { database, PATHS, SERVER_TIMESTAMP } from './firebase.js';
+import { CURATED_FACTS } from '../content/facts.js';
 
 const MIN_LEN = 3;
 const MAX_LEN = 200;
+
+// Stable key for a curated fact by its 1-based position (curated-01, curated-02…).
+// Fixed keys make the seed an idempotent UPSERT — re-running never duplicates.
+const curatedKey = (i) => `curated-${String(i + 1).padStart(2, '0')}`;
+
+/**
+ * Upsert the curated fun facts (../content/facts.js) into `facts/` so `!fact` and
+ * the /info/ page share ONE source. Idempotent: fixed keys overwrite in place, and
+ * curated-* keys beyond the current list are pruned (so the list can shrink). Runs
+ * on every boot. Curated facts carry `source:'curated'` + an `order` (stable
+ * display) and have no `by` attribution.
+ * @returns {Promise<{count:number}>}
+ */
+export async function seedCuratedFacts() {
+  const ref = database().ref(PATHS.facts());
+  const existing = (await ref.get()).val() || {};
+  const updates = {};
+  CURATED_FACTS.forEach((text, i) => {
+    updates[curatedKey(i)] = { text, source: 'curated', order: i + 1 };
+  });
+  // Prune orphaned curated-* entries if the canonical list got shorter.
+  for (const key of Object.keys(existing)) {
+    if (key.startsWith('curated-') && !(key in updates)) updates[key] = null;
+  }
+  await ref.update(updates);
+  return { count: CURATED_FACTS.length };
+}
 
 /** Normalize submitted text: collapse whitespace, trim. */
 export function cleanFactText(raw) {
