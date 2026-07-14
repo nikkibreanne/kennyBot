@@ -113,6 +113,12 @@ export const PATHS = {
   marketSuggestions: () => 'marketSuggestions',
   marketSuggestion: (id) => `marketSuggestions/${id}`,
   marketSuggestionCounter: () => 'counters/marketSug',
+  // DUELS: transient PvP credit wagers. A pending challenge is keyed by the
+  // TARGET's login (so the target accepts/denies with just `!duel accept`), and
+  // is Admin-only (default-deny — the site never reads it). Cleared on
+  // resolve/deny/expiry; no history kept.
+  duelsPending: () => 'duels/pending',
+  duelPending: (toLogin) => `duels/pending/${toLogin}`,
   botToken: () => 'config/secrets/botToken',
   items: () => 'items',
   dropActive: () => 'drops/active',
