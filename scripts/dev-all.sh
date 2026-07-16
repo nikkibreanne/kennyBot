@@ -13,6 +13,10 @@
 #   npm run dev:all           # or:  bash scripts/dev-all.sh
 #   SITE_DIR=/path/to/site npm run dev:all      # if the website isn't at ~/git/nikkibreanne.github.io
 #
+# Or run the automated end-to-end command suite against a fresh emulator DB (no
+# website, no console) — a thorough regression check that every command still works:
+#   npm run dev:all -- test    # (or: bash scripts/dev-all.sh test)  ==  npm run test:e2e
+#
 set -uo pipefail
 
 BOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
@@ -24,6 +28,14 @@ PATH="$BOT_DIR/node_modules/.bin:$PATH"
 # Ensure bundler is reachable (user gem bin isn't always on PATH).
 if ! command -v bundle >/dev/null 2>&1; then
   for d in "$HOME/.local/share/gem/ruby/"*/bin; do [ -d "$d" ] && PATH="$d:$PATH"; done
+fi
+
+# ── E2E mode (`dev:all test`): run the automated command suite against a fresh
+#    emulator DB and exit — no website, no interactive console. ────────────────
+if [ "${1:-}" = "test" ] || [ "${1:-}" = "--e2e" ]; then
+  echo "▶ E2E: driving every command through the dispatcher against a fresh emulator DB…"
+  cd "$BOT_DIR"
+  exec firebase emulators:exec --only database --project okrafans "node --test test/e2e/commands.e2e.test.js"
 fi
 
 SITE_PID=""
