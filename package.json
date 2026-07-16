@@ -11,7 +11,7 @@
     "start": "node index.js",
     "dev": "node --watch index.js",
     "test": "node --test \"test/rules/**/*.test.js\"",
-    "test:emulator": "firebase emulators:exec --only database --project okrafans \"node --test --test-concurrency=1 test/firebase-rules.test.js test/mute.test.js test/roster-refresh.test.js test/market.test.js test/todo.test.js test/duel.test.js\"",
+    "test:emulator": "firebase emulators:exec --only database --project okrafans \"node --test --test-concurrency=1 test/firebase-rules.test.js test/mute.test.js test/roster-refresh.test.js test/market.test.js test/todo.test.js test/duel.test.js test/catalog.test.js\"",
     "synthetic": "firebase emulators:exec --only database --project okrafans \"node scripts/synthetic-chat.js\"",
     "dev:console": "firebase emulators:exec --only database --project okrafans \"node scripts/dev-console.js\"",
     "dev:all": "bash scripts/dev-all.sh"
