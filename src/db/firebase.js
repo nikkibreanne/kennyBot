@@ -119,6 +119,13 @@ export const PATHS = {
   // resolve/deny/expiry; no history kept.
   duelsPending: () => 'duels/pending',
   duelPending: (toLogin) => `duels/pending/${toLogin}`,
+  // TRADES — item/credit swaps negotiated between two players. Transient +
+  // Admin-only (default-deny; the site never reads them). A trade lives at
+  // trades/active/<id>; trades/index/<login> maps each participant → that id so
+  // accept/counter/decline need no target argument. Cleared on settle/decline/expiry.
+  tradesActive: () => 'trades/active',
+  trade: (id) => `trades/active/${id}`,
+  tradeIndex: (login) => `trades/index/${login}`,
   botToken: () => 'config/secrets/botToken',
   items: () => 'items',
   dropActive: () => 'drops/active',
