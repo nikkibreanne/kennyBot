@@ -215,6 +215,32 @@ export function getItem(itemId) {
 }
 
 /**
+ * Resolve untrusted chat input to an item id the player OWNS (present in
+ * `inventory`). Accepts, in order: a 1-based bag index (as shown by !bag), an
+ * exact item id, or a CASE-INSENSITIVE item name. Returns the item id, or null
+ * if it isn't owned — callers must reject (never trust chat text; §G input
+ * handling). Shared by !equip and !trade so item lookup behaves identically.
+ * @param {string[]} inventory
+ * @param {string} input
+ * @returns {string|null}
+ */
+export function resolveOwnedItem(inventory, input) {
+  const list = Array.isArray(inventory) ? inventory : [];
+  const raw = String(input || '').trim();
+  if (!raw) return null;
+  // 1-based bag index (e.g. "!equip 3")
+  if (/^\d+$/.test(raw)) {
+    const idx = Number(raw) - 1;
+    return idx >= 0 && idx < list.length ? list[idx] : null;
+  }
+  // exact item id
+  if (list.includes(raw)) return raw;
+  // case-insensitive item name
+  const needle = raw.toLowerCase();
+  return list.find((id) => (ITEMS[id]?.name || '').toLowerCase() === needle) ?? null;
+}
+
+/**
  * Denormalized item object stored in player.equipped[slot] and signups.equipped.
  * Carries display fields ({name, rarity}) AND the bonuses the engine reads.
  * @param {string} itemId

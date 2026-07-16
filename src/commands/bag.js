@@ -19,10 +19,10 @@ export default {
       return;
     }
     const names = inventory
-      .map((id) => getItem(id)?.name || id)
       .slice(0, 12)
-      .join(', ');
+      .map((id, i) => `${i + 1}. ${getItem(id)?.name || id}`)
+      .join('  ');
     const more = inventory.length > 12 ? ` (+${inventory.length - 12} more)` : '';
-    reply(`@${user.displayName} bag: ${names}${more}. !equip <item> to wear one.`);
+    reply(`@${user.displayName} bag: ${names}${more}. !equip <#> to wear one · !trade @user <#> to trade.`);
   },
 };
