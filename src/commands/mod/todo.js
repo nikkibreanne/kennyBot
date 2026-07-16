@@ -37,7 +37,7 @@ export default {
         reply(`@${user.displayName} couldn't add that (${res.reason === 'too-long' ? '200 char max' : res.reason}).`);
         return;
       }
-      reply(`📝 To-do #${res.id} added for ${dayLabel(res.todo.date)}: “${res.todo.text}” → ${PAGE()}`);
+      reply(`📝 To-do #${res.id} added for ${dayLabel(res.todo.date)}: “${res.todo.text}”`);
       return;
     }
 

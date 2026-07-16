@@ -19,6 +19,7 @@ import { startLivePoll } from './src/twitch/liveGate.js';
 import { startEventSub } from './src/twitch/eventsub.js';
 import { advanceRaidPhases, refreshMusteredRoster } from './src/db/raid.js';
 import { seedCuratedFacts } from './src/db/facts.js';
+import { seedCatalog } from './src/db/catalog.js';
 import { createMessageHandler } from './src/events/chat.js';
 import { attachTwitchEvents } from './src/events/twitchEvents.js';
 import { startDropScheduler } from './src/events/dropScheduler.js';
@@ -138,6 +139,16 @@ async function main() {
     logger.info('curated facts seeded', seeded);
   } catch (err) {
     logger.warn('curated fact seed failed (non-fatal)', { err: String(err) });
+  }
+
+  // ── Seed the item catalog (idempotent upsert of src/content/items.js into
+  //    items/) so the /items/ Compendium renders the same gear the raid engine
+  //    uses — ONE source, no drift. Lease-gated + non-fatal, like the fact seed. ──
+  try {
+    const cat = await seedCatalog();
+    logger.info('item catalog seeded', cat);
+  } catch (err) {
+    logger.warn('item catalog seed failed (non-fatal)', { err: String(err) });
   }
 
   // ── Twitch auth (persisted refresh token) ──
