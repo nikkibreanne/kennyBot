@@ -3,19 +3,19 @@
 #
 # PRODUCTION: pin the base by digest so a rebuild is reproducible and a poisoned
 # upstream tag can't silently change your base, e.g.
-#   FROM node:20-bookworm-slim@sha256:<digest> AS build
+#   FROM node:22-bookworm-slim@sha256:<digest> AS build
 # Bump it deliberately. slim (glibc), NOT alpine — firebase-admin's gRPC native
 # bits make glibc the path of least resistance.
 
 # ---- build ----
-FROM node:20-bookworm-slim AS build
+FROM node:22-bookworm-slim AS build
 WORKDIR /app
 COPY package*.json ./
 RUN npm ci --omit=dev
 COPY . .
 
 # ---- runtime ----
-FROM node:20-bookworm-slim
+FROM node:22-bookworm-slim
 ENV NODE_ENV=production
 ENV HEARTBEAT_FILE=/tmp/kennybot.heartbeat
 WORKDIR /app
