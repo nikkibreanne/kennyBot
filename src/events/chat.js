@@ -17,7 +17,7 @@ import { applyChatTick } from '../db/players.js';
 
 /**
  * @param {{
- *   chat: { say: Function, action: Function },
+ *   sender: { say: (t: string) => Promise<void>, action: (t: string) => Promise<void> },
  *   channel: string,
  *   botUserId: string,
  *   logger: any,
@@ -25,12 +25,13 @@ import { applyChatTick } from '../db/players.js';
  * }} deps
  * @returns {(channel: string, user: string, text: string, msg: any) => Promise<void>}
  */
-export function createMessageHandler({ chat, channel, botUserId, logger, onActivity }) {
+export function createMessageHandler({ sender, channel, botUserId, logger, onActivity }) {
   const expCooldown = new Map(); // userId -> last grant ms
   const cmdCooldown = new Map(); // `${userId}:${cmd}` -> last run ms
 
-  const rawSay = (t) => chat.say(channel, t).catch((e) => logger.warn('say failed', { err: String(e) }));
-  const rawAction = (t) => chat.action(channel, t).catch(() => {});
+  // Transport-only sender (src/twitch/sender.js); it catches its own send errors.
+  const rawSay = (t) => sender.say(t);
+  const rawAction = (t) => sender.action(t);
 
   async function dispatchCommand(user, args, name) {
     const def = getCommand(name);
@@ -87,7 +88,7 @@ export function createMessageHandler({ chat, channel, botUserId, logger, onActiv
     }
     if (!tick) return; // not a player → nothing accrues (non-subs never created one)
     if (tick.leveledUp && !isChatMuted()) {
-      chat.say(channel, `@${user.displayName} reached level ${tick.toLevel}! ⚔️`).catch(() => {});
+      sender.say(`@${user.displayName} reached level ${tick.toLevel}! ⚔️`);
     }
   }
 

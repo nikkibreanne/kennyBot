@@ -44,6 +44,12 @@
     // the client. Its counter (counters/) stays fully locked (default deny).
     "todos": { ".read": true, ".write": false },
 
+    // CLIP SYNC (clapperboard): per-stream sync anchors written by kennyBot on
+    // `!start`, read by the separate okra-clip-archiver tool to align Twitch
+    // clips to the local 4K recording. Public-READABLE (anchors aren't
+    // sensitive) so the archiver needs no admin key; Admin-write only.
+    "clipSync": { ".read": true, ".write": false },
+
     // OKRAMARKET: okra-buck balances and market state are public-READABLE (the
     // site renders the board + odds) but Admin-write only — points can never be
     // minted client-side; bets/opens/resolves all go through kennyBot. The bet

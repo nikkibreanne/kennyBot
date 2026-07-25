@@ -19,9 +19,9 @@ const noopLogger = { info() {}, warn() {}, error() {}, debug() {} };
 
 // Records outbound chat so we can assert on what the bot said (or didn't).
 const sent = [];
-const fakeChat = {
-  say: (_ch, text) => { sent.push(text); return Promise.resolve(); },
-  action: (_ch, text) => { sent.push(text); return Promise.resolve(); },
+const fakeSender = {
+  say: (text) => { sent.push(text); return Promise.resolve(); },
+  action: (text) => { sent.push(text); return Promise.resolve(); },
 };
 
 let handler;
@@ -48,7 +48,7 @@ before(async () => {
   if (!host) return;
   initFirebase();
   await startConfigMirror(noopLogger);
-  handler = createMessageHandler({ chat: fakeChat, channel: '#test', botUserId: 'bot', logger: noopLogger, onActivity() {} });
+  handler = createMessageHandler({ sender: fakeSender, channel: '#test', botUserId: 'bot', logger: noopLogger, onActivity() {} });
 });
 
 after(async () => {

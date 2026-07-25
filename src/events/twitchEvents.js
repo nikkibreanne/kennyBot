@@ -28,14 +28,15 @@ function lootTable() {
 
 /**
  * Attach native chat-event listeners. Returns a cleanup function that removes
- * them (twurple listeners expose .unbind()).
- * @param {{ chat: import('@twurple/chat').ChatClient, channel: string, logger: any }} deps
+ * them (twurple listeners expose .unbind()). `chat` is still the read side (the
+ * sub/raid/cheer listeners); `sender` is the transport for anything we say back.
+ * @param {{ chat: import('@twurple/chat').ChatClient, sender: { say: (t: string) => Promise<void> }, logger: any }} deps
  */
-export function attachTwitchEvents({ chat, channel, logger }) {
+export function attachTwitchEvents({ chat, sender, logger }) {
   const listeners = [];
   // Outbound mute (`!mute`): these communal-drop announcements are suppressed
   // while muted, but the drop itself is still created so !grab keeps working.
-  const say = (text) => { if (!isChatMuted()) chat.say(channel, text).catch(() => {}); };
+  const say = (text) => { if (!isChatMuted()) sender.say(text); };
 
   const onSubLike = (label) => async (_ch, _user, info, msg) => {
     const userId = msg?.userInfo?.userId;
