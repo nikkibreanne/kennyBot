@@ -10,10 +10,12 @@ import { getItem, DEFAULT_LOOT_TABLE } from '../content/items.js';
 import { config, shouldGrantExp } from '../config.js';
 
 /**
- * @param {{ chat: { say: Function }, channel: string, logger: any }} deps
+ * @param {{ send: { say: (t: string) => Promise<void> }, logger: any }} deps
+ *   `send` is the mute-aware sender wrapper (announcements are suppressed while
+ *   the bot is muted, but the drop itself is still created so !grab keeps working).
  * @returns {() => void} stop function
  */
-export function startDropScheduler({ chat, channel, logger }) {
+export function startDropScheduler({ send, logger }) {
   let timer = null;
   let stopped = false;
 
@@ -37,9 +39,9 @@ export function startDropScheduler({ chat, channel, logger }) {
           const drop = await setDrop(itemId);
           const secs = Math.round(config.loot.windowMs / 1000);
           if (drop.status === 'open') {
-            chat.say(channel, `🎁 A ${drop.rarity} ${drop.name} dropped! Type !grab within ${secs}s to enter the draw — one winner!`).catch(() => {});
+            send.say(`🎁 A ${drop.rarity} ${drop.name} dropped! Type !grab within ${secs}s to enter the draw — one winner!`);
           } else if (drop.status === 'queued') {
-            chat.say(channel, `🎁 A ${drop.rarity} ${drop.name} is queued (#${drop.position}) — opens when the current drop closes.`).catch(() => {});
+            send.say(`🎁 A ${drop.rarity} ${drop.name} is queued (#${drop.position}) — opens when the current drop closes.`);
           }
           logger.info?.('auto drop', { item: itemId, rarity: drop.rarity, status: drop.status });
         }

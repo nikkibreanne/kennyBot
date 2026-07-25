@@ -13,7 +13,8 @@ import { openMarket } from '../../src/db/market.js';
 import { setDrop } from '../../src/db/drops.js';
 import { setupRaidWeek, enlist } from '../../src/db/raid.js';
 import { seedCuratedFacts } from '../../src/db/facts.js';
-import { getRaidPointer } from '../../src/db/configStore.js';
+import { getRaidPointer, getConfig, setLive } from '../../src/db/configStore.js';
+import { initClipsWith } from '../../src/twitch/clips.js';
 import { defaultBoss } from '../../src/content/bosses.js';
 import { until } from './harness.js';
 
@@ -60,6 +61,28 @@ export const fixtures = { player, loot, wallet, market, drop, facts, leaderboard
 
 // ── scenarios (one per command primary name) ─────────────────────────────────
 export const SCENARIOS = [
+  {
+    command: 'clip', title: 'clips the live stream and posts a link',
+    run: async ({ bot, u }) => {
+      const alice = u('e2e_clip', { login: 'alice', name: 'Alice' });
+      initClipsWith(async () => 'TestClipId123'); // fake Helix Create Clip
+      await setLive(true, 'test');
+      await until(() => getConfig().live === true); // mirror is async
+      const reply = await bot.send(alice, '!clip');
+      assert.match(reply, /clips\.twitch\.tv\/TestClipId123/);
+      await setLive(false, 'test'); // reset shared live state for later scenarios
+    },
+  },
+  {
+    command: 'start', title: 'a mod drops a clip-sync anchor',
+    run: async ({ bot, u }) => {
+      const mod = u('e2e_start', { login: 'nikki', name: 'Nikki', mod: true });
+      const reply = await bot.send(mod, '!start'); // not live → anchor only, no marker
+      assert.match(reply, /sync point set/i);
+      const snap = await database().ref('clipSync').get();
+      assert.ok(snap.exists(), 'a clipSync anchor was written');
+    },
+  },
   {
     command: 'create', title: 'a subscriber makes a hero',
     run: async ({ bot, u }) => {

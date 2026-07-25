@@ -141,4 +141,7 @@ export const PATHS = {
   team: (seasonId, weekId) => `raids/${seasonId}/${weekId}/team`,
   combat: (seasonId, weekId) => `raids/${seasonId}/${weekId}/combat`,
   leaderboardEntry: (seasonId, userId) => `leaderboard/${seasonId}/${userId}`,
+  // CLIP SYNC (clapperboard): per-stream anchors for the okra-clip-archiver tool.
+  clipSync: () => 'clipSync',
+  clipSession: (id) => `clipSync/${id}`,
 };

@@ -15,6 +15,8 @@ import { startConfigMirror, setLive, isChatMuted } from './src/db/configStore.js
 import { acquireLock, startHeartbeat, releaseLock, defaultInstanceId } from './src/db/lock.js';
 import { TokenStore } from './src/db/tokenStore.js';
 import { buildAuth } from './src/twitch/auth.js';
+import { createSender } from './src/twitch/sender.js';
+import { initClips } from './src/twitch/clips.js';
 import { startLivePoll } from './src/twitch/liveGate.js';
 import { startEventSub } from './src/twitch/eventsub.js';
 import { advanceRaidPhases, refreshMusteredRoster } from './src/db/raid.js';
@@ -181,6 +183,11 @@ async function main() {
   }
   const channelUserId = channelUser.id;
 
+  // Clip service (Helix Create Clip). Clips in the BOT's user context, so the bot
+  // token needs clips:edit and the channel must be live; wired here so the !clip
+  // command reaches it without threading the ApiClient through the chat handler.
+  initClips({ apiClient, broadcasterId: channelUserId, botUserId });
+
   // ── Resolve-on-boot: advance raid phases by stored timestamps, never a timer
   //    a restart could lose (§H.5 / §L.1). Loop to catch up after downtime
   //    (e.g. signup→locked→live→done all overdue).
@@ -192,16 +199,37 @@ async function main() {
 
   // ── Chat ──
   const chat = new ChatClient({ authProvider, channels: [channel] });
-  // Mute-aware sender for spontaneous (non-command) announcements. When a mod
-  // mutes the bot (`!mute`) every outbound send is suppressed while the bot
-  // keeps listening, granting EXP, processing drops, and holding the lease.
-  // Command replies are gated inside the message handler (which also lets the
-  // !mute control itself bypass, so mods still get confirmation).
-  const out = {
-    say: (ch, text) => (isChatMuted() ? Promise.resolve() : chat.say(ch, text)),
-    action: (ch, text) => (isChatMuted() ? Promise.resolve() : chat.action(ch, text)),
+
+  // Outbound sender (src/twitch/sender.js). 'irc' sends via the ChatClient;
+  // 'helix' sends via the Send Chat Message API on an app token to earn the Chat
+  // Bot badge. Default stays 'irc' so behaviour is byte-for-byte unchanged until
+  // the bot token carries the extra scopes (user:bot, user:write:chat) and the
+  // flag is flipped — reading always stays on the ChatClient either way.
+  const sendMode = (process.env.TWITCH_SEND_MODE || 'irc').toLowerCase() === 'helix' ? 'helix' : 'irc';
+  if ((process.env.TWITCH_SEND_MODE || 'irc').toLowerCase() !== sendMode) {
+    logger.warn('unknown TWITCH_SEND_MODE — using irc', { value: process.env.TWITCH_SEND_MODE });
+  }
+  const sender = createSender({
+    mode: sendMode,
+    chat,
+    apiClient,
+    channel,
+    broadcasterId: channelUserId,
+    botUserId,
+    logger,
+  });
+  logger.info('chat sender ready', { mode: sender.mode });
+
+  // Mute-aware wrapper for spontaneous (non-command) announcements — loot draws +
+  // the auto-drop scheduler. When a mod mutes the bot (`!mute`) these are
+  // suppressed while the bot keeps listening, granting EXP, processing drops, and
+  // holding the lease. Command replies + level-ups do their own mute gating inside
+  // the handler (which also lets the !mute control itself bypass for confirmation).
+  const send = {
+    say: (text) => (isChatMuted() ? Promise.resolve() : sender.say(text)),
+    action: (text) => (isChatMuted() ? Promise.resolve() : sender.action(text)),
   };
-  chat.onMessage(createMessageHandler({ chat, channel, botUserId, logger, onActivity: touchHeartbeat }));
+  chat.onMessage(createMessageHandler({ sender, channel, botUserId, logger, onActivity: touchHeartbeat }));
   chat.onConnect(() => {
     health.chatConnected = true;
     touchHeartbeat();
@@ -212,12 +240,12 @@ async function main() {
     touchHeartbeat();
     logger.warn('chat disconnected', { manual, reason: String(reason || '') });
   });
-  shutdownHooks.push(attachTwitchEvents({ chat, channel, logger }));
+  shutdownHooks.push(attachTwitchEvents({ chat, sender, logger }));
   await chat.connect();
   shutdownHooks.push(() => chat.quit());
 
   // Auto chat-drop scheduler (mod-toggled via !drops; fires only while live).
-  shutdownHooks.push(startDropScheduler({ chat: out, channel, logger }));
+  shutdownHooks.push(startDropScheduler({ send, logger }));
 
   // ── Live gate: Helix poll (always) + EventSub (when broadcaster auth fits) ──
   const setLiveBound = (live, source) => {
@@ -277,12 +305,9 @@ async function main() {
       const { drawResult, activated } = await processDrops();
       if (drawResult) {
         if (drawResult.winner) {
-          out
-            .say(
-              channel,
-              `🎉 @${drawResult.winner.name || 'a lucky grabber'} won the ${drawResult.item?.rarity ?? ''} ${drawResult.item?.name ?? 'drop'}! (${drawResult.count} entered) — it's in their !bag.`,
-            )
-            .catch(() => {});
+          send.say(
+            `🎉 @${drawResult.winner.name || 'a lucky grabber'} won the ${drawResult.item?.rarity ?? ''} ${drawResult.item?.name ?? 'drop'}! (${drawResult.count} entered) — it's in their !bag.`,
+          );
           logger.info('drop drawn', { item: drawResult.itemId, winner: drawResult.winner.userId, entrants: drawResult.count });
         } else {
           logger.info('drop expired with no entrants', { item: drawResult.itemId });
@@ -290,9 +315,7 @@ async function main() {
       }
       if (activated) {
         const secs = Math.round(config.loot.windowMs / 1000);
-        out
-          .say(channel, `⏭️ Next up — a ${activated.rarity} ${activated.name} is open! !grab within ${secs}s to enter the draw.`)
-          .catch(() => {});
+        send.say(`⏭️ Next up — a ${activated.rarity} ${activated.name} is open! !grab within ${secs}s to enter the draw.`);
       }
     } catch (err) {
       logger.error('drop draw tick failed', { err: String(err) });

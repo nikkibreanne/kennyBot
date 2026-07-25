@@ -30,7 +30,7 @@ const runOrSkip = host ? test : test.skip;
 const GAME_PATHS = [
   'players', 'usernames', 'wallets', 'markets', 'marketSuggestions', 'drops',
   'raids', 'bosses', 'facts', 'factSubmissions', 'todos', 'duels', 'trades',
-  'leaderboard', 'items', 'counters',
+  'leaderboard', 'items', 'counters', 'clipSync',
 ];
 async function wipeGame() {
   await Promise.all(GAME_PATHS.map((p) => database().ref(p).remove().catch(() => {})));

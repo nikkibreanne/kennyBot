@@ -46,14 +46,14 @@ export function user(id, opts = {}) {
  */
 export function makeBot({ channel = CHANNEL, botUserId = BOT_USER_ID } = {}) {
   const replies = [];
-  const chat = {
-    say: async (_ch, text) => { replies.push({ kind: 'say', text }); },
-    action: async (_ch, text) => { replies.push({ kind: 'action', text }); },
+  const sender = {
+    say: async (text) => { replies.push({ kind: 'say', text }); },
+    action: async (text) => { replies.push({ kind: 'action', text }); },
   };
 
   async function send(u, text) {
     replies.length = 0;
-    const handler = createMessageHandler({ chat, channel, botUserId, logger: silentLogger, onActivity() {} });
+    const handler = createMessageHandler({ sender, channel, botUserId, logger: silentLogger, onActivity() {} });
     const msg = {
       userInfo: {
         userId: u.id,
@@ -68,5 +68,5 @@ export function makeBot({ channel = CHANNEL, botUserId = BOT_USER_ID } = {}) {
     return replies.map((r) => r.text).join(' ⏎ ');
   }
 
-  return { send, replies, chat };
+  return { send, replies, sender };
 }
