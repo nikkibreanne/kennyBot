@@ -25,8 +25,11 @@ const api = new ApiClient({ authProvider: new AppTokenAuthProvider(clientId, cli
 const user = await api.users.getUserByName(channel);
 if (!user) { console.error(`channel not found: ${channel}`); process.exit(1); }
 
-const startDate = new Date(Date.now() - days * 86_400_000).toISOString();
-const { data: clips } = await api.clips.getClipsForBroadcaster(user.id, { startDate, limit: 100 });
+// Bound the window with endDate — Twitch defaults ended_at to one WEEK after
+// started_at, so a large --days window silently drops anything more recent.
+const now = new Date();
+const startDate = new Date(now.getTime() - days * 86_400_000).toISOString();
+const { data: clips } = await api.clips.getClipsForBroadcaster(user.id, { startDate, endDate: now.toISOString(), limit: 100 });
 
 const short = clips.filter((c) => c.duration <= 60);
 console.log(`\n${channel}: ${clips.length} clips in the last ${days}d — ${short.length} are ≤60s (Shorts-eligible)\n`);
