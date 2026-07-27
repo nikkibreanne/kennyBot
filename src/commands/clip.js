@@ -28,7 +28,14 @@ export default {
     try {
       const { url } = await createChannelClip();
       const local = await capture;
-      reply(`@${user.displayName} 🎬 clipped it! ${url}${local?.ok ? ' (+ full-quality local capture saved)' : ''}`);
+      // `started` means the replay buffer wasn't running and we just turned it on
+      // — nothing was captured this time, but the next !clip will have content.
+      const note = local?.ok
+        ? local.started
+          ? ' (local recording buffer just started — the next !clip will capture it too)'
+          : ' (+ full-quality local capture saved)'
+        : '';
+      reply(`@${user.displayName} 🎬 clipped it! ${url}${note}`);
     } catch (err) {
       logger?.warn?.('clip failed', { userId: user.id, err: String(err) });
       await capture; // let the local save settle so its result is still logged

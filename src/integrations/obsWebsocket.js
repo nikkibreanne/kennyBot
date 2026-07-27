@@ -124,30 +124,64 @@ export async function withObs({ url, password = '', timeoutMs = 8000 }, fn) {
 }
 
 /**
- * Save the last N seconds from OBS's replay buffer. Starts the buffer first if
- * it isn't running, so a streamer who forgot to enable it still gets the clip
- * (that save will be short — the buffer only just began filling).
+ * Save the last N seconds from OBS's replay buffer.
+ *
+ * If the buffer isn't running we START it — a streamer who forgot to enable it
+ * shouldn't silently get nothing from every future `!clip`. But we do NOT then
+ * pretend to save: OBS brings outputs up ASYNCHRONOUSLY, so an immediate save
+ * fails with 501 OutputNotRunning (found the hard way against a real OBS), and
+ * even once it is up the buffer holds ~nothing. So we wait for it to actually go
+ * active, report `started: true, path: null`, and let the NEXT clip have content.
  *
  * @returns {Promise<{ path: string|null, started: boolean }>}
  */
 export async function saveReplayBuffer({ url, password, timeoutMs }) {
-  return withObs({ url, password, timeoutMs }, async (request) => {
-    let started = false;
+  return withObs({ url, password, timeoutMs }, (request) => replayBufferSequence(request));
+}
+
+/**
+ * The request sequence itself, split out from the socket so it can be unit-tested
+ * with a fake `request`. Both bugs found against a real OBS lived here: saving
+ * before the output was actually up, and reporting the PREVIOUS file's path.
+ *
+ * @param {(type: string, data?: object) => Promise<any>} request
+ * @param {(ms: number) => Promise<void>} [sleep] injectable for tests
+ */
+export async function replayBufferSequence(request, sleep = (ms) => new Promise((r) => setTimeout(r, ms))) {
+  {
     const status = await request('GetReplayBufferStatus');
     if (!status.outputActive) {
       await request('StartReplayBuffer');
-      started = true;
+      // Poll until the output is genuinely up, so the buffer is filling from now on.
+      for (const wait of [150, 250, 500, 1000]) {
+        await sleep(wait);
+        const s = await request('GetReplayBufferStatus');
+        if (s.outputActive) break;
+      }
+      return { path: null, started: true };
     }
+    // Remember which file was last written BEFORE saving. OBS finalizes the new
+    // one asynchronously, so GetLastReplayBufferReplay keeps returning the
+    // PREVIOUS path for a moment — reporting that would name the wrong file
+    // (observed against a real OBS). Poll until it actually changes.
+    const previous = await request('GetLastReplayBufferReplay')
+      .then((r) => r?.savedReplayPath ?? null)
+      .catch(() => null);
+
     await request('SaveReplayBuffer');
-    // OBS writes the file asynchronously; the path may lag a beat, so a miss
-    // here is not an error — the save still happened.
+
     let path = null;
-    try {
-      const last = await request('GetLastReplayBufferReplay');
-      path = last?.savedReplayPath ?? null;
-    } catch {
-      /* path unavailable — the save itself already succeeded */
+    for (const wait of [200, 300, 500, 1000]) {
+      await sleep(wait);
+      const current = await request('GetLastReplayBufferReplay')
+        .then((r) => r?.savedReplayPath ?? null)
+        .catch(() => null);
+      if (current && current !== previous) {
+        path = current;
+        break;
+      }
     }
-    return { path, started };
-  });
+    // A null path just means the write hadn't landed yet — the save still happened.
+    return { path, started: false };
+  }
 }
