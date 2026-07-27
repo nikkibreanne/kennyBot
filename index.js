@@ -44,7 +44,7 @@ const HEARTBEAT_FILE = process.env.HEARTBEAT_FILE || '/tmp/kennybot.heartbeat';
 // than a liveness ping: it records whether the Twitch chat socket is actually
 // connected, so a "process alive but chat wedged" zombie reads unhealthy and the
 // orchestrator restarts it, rather than the check passing on a dead connection.
-const health = { version: APP_VERSION, chatConnected: false, live: false };
+const health = { version: APP_VERSION, chatConnected: false, live: false, sendMode: null };
 
 // Shutdown is wired up inside main(); module scope holds the reference so signal
 // handlers and the lease-lost callback can trigger it cleanly.
@@ -200,14 +200,15 @@ async function main() {
   // ── Chat ──
   const chat = new ChatClient({ authProvider, channels: [channel] });
 
-  // Outbound sender (src/twitch/sender.js). 'irc' sends via the ChatClient;
-  // 'helix' sends via the Send Chat Message API on an app token to earn the Chat
-  // Bot badge. Default stays 'irc' so behaviour is byte-for-byte unchanged until
-  // the bot token carries the extra scopes (user:bot, user:write:chat) and the
-  // flag is flipped — reading always stays on the ChatClient either way.
-  const sendMode = (process.env.TWITCH_SEND_MODE || 'irc').toLowerCase() === 'helix' ? 'helix' : 'irc';
-  if ((process.env.TWITCH_SEND_MODE || 'irc').toLowerCase() !== sendMode) {
-    logger.warn('unknown TWITCH_SEND_MODE — using irc', { value: process.env.TWITCH_SEND_MODE });
+  // Outbound sender (src/twitch/sender.js). Default 'auto': prefer the Helix
+  // Send Chat Message API (the only path that earns the Chat Bot badge) and fall
+  // back to IRC if Twitch refuses the grant, so the bot can never go silent
+  // because a token or mod status is missing. Reading always stays on the
+  // ChatClient. 'helix' forces it (failures surface); 'irc' pins the old path.
+  const rawSendMode = (process.env.TWITCH_SEND_MODE || 'auto').toLowerCase();
+  const sendMode = ['auto', 'helix', 'irc'].includes(rawSendMode) ? rawSendMode : 'auto';
+  if (rawSendMode !== sendMode) {
+    logger.warn('unknown TWITCH_SEND_MODE — using auto', { value: process.env.TWITCH_SEND_MODE });
   }
   const sender = createSender({
     mode: sendMode,
@@ -218,7 +219,7 @@ async function main() {
     botUserId,
     logger,
   });
-  logger.info('chat sender ready', { mode: sender.mode });
+  logger.info('chat sender ready', { mode: sender.mode, sending: sender.effectiveMode() });
 
   // Mute-aware wrapper for spontaneous (non-command) announcements — loot draws +
   // the auto-drop scheduler. When a mod mutes the bot (`!mute`) these are
@@ -229,6 +230,7 @@ async function main() {
     say: (text) => (isChatMuted() ? Promise.resolve() : sender.say(text)),
     action: (text) => (isChatMuted() ? Promise.resolve() : sender.action(text)),
   };
+  health.sendMode = sender.effectiveMode();
   chat.onMessage(createMessageHandler({ sender, channel, botUserId, logger, onActivity: touchHeartbeat }));
   chat.onConnect(() => {
     health.chatConnected = true;
