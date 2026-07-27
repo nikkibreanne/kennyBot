@@ -17,6 +17,7 @@ import { TokenStore } from './src/db/tokenStore.js';
 import { buildAuth } from './src/twitch/auth.js';
 import { createSender } from './src/twitch/sender.js';
 import { initClips } from './src/twitch/clips.js';
+import { initCapture } from './src/integrations/capture.js';
 import { startLivePoll } from './src/twitch/liveGate.js';
 import { startEventSub } from './src/twitch/eventsub.js';
 import { advanceRaidPhases, refreshMusteredRoster } from './src/db/raid.js';
@@ -187,6 +188,10 @@ async function main() {
   // token needs clips:edit and the channel must be live; wired here so the !clip
   // command reaches it without threading the ApiClient through the chat handler.
   initClips({ apiClient, broadcasterId: channelUserId, botUserId });
+
+  // Local full-quality capture on the streamer's PC (obs-websocket over the
+  // tailnet). Optional: with no OBS_WEBSOCKET_URL, !clip just makes Twitch clips.
+  initCapture({}, logger);
 
   // ── Resolve-on-boot: advance raid phases by stored timestamps, never a timer
   //    a restart could lose (§H.5 / §L.1). Loop to catch up after downtime

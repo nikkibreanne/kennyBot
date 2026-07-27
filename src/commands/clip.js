@@ -4,6 +4,7 @@
 // separate capture (obs-websocket replay buffer / post-hoc archive).
 import { getConfig } from '../db/configStore.js';
 import { createChannelClip, clipsReady } from '../twitch/clips.js';
+import { triggerCapture, captureReady } from '../integrations/capture.js';
 
 export default {
   names: ['clip'],
@@ -19,11 +20,18 @@ export default {
       reply(`@${user.displayName} I can only clip while the stream is live!`);
       return;
     }
+    // Fire the local high-quality capture FIRST and in parallel: the replay
+    // buffer holds the last N seconds, so the sooner it's told to save, the less
+    // the moment has aged out of the buffer. Its failure never affects the clip.
+    const capture = captureReady() ? triggerCapture(logger) : null;
+
     try {
       const { url } = await createChannelClip();
-      reply(`@${user.displayName} 🎬 clipped it! ${url}`);
+      const local = await capture;
+      reply(`@${user.displayName} 🎬 clipped it! ${url}${local?.ok ? ' (+ full-quality local capture saved)' : ''}`);
     } catch (err) {
       logger?.warn?.('clip failed', { userId: user.id, err: String(err) });
+      await capture; // let the local save settle so its result is still logged
       reply(`@${user.displayName} couldn't make a clip just now — try again in a moment.`);
     }
   },
