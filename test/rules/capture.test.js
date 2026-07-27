@@ -51,6 +51,43 @@ test('triggerCapture is a no-op when unconfigured', async () => {
   assert.deepEqual(res, { ok: false, reason: 'not configured' });
 });
 
+test('a global rate limit stops a burst of !clips writing many huge files', async () => {
+  let fired = 0;
+  initCaptureWith(async () => { fired += 1; return { path: `f${fired}.mkv` }; }, { minIntervalMs: 60_000 });
+  const t0 = 1_000_000;
+  assert.equal((await triggerCapture(noopLogger, t0)).ok, true, 'first fires');
+  const second = await triggerCapture(noopLogger, t0 + 5_000);
+  assert.equal(second.ok, false);
+  assert.equal(second.reason, 'rate-limited');
+  assert.equal(second.retryInMs, 55_000, 'reports when it will be allowed again');
+  assert.equal(fired, 1, 'the expensive save ran once for the burst');
+  // …and it opens back up once the window passes.
+  assert.equal((await triggerCapture(noopLogger, t0 + 60_000)).ok, true);
+  assert.equal(fired, 2);
+});
+
+test('the rate limit is per-channel, not per-user (that is !clip\'s job)', async () => {
+  let fired = 0;
+  initCaptureWith(async () => { fired += 1; return { path: 'x.mkv' }; }, { minIntervalMs: 60_000 });
+  // Different viewers, same window — capture.js has no notion of who asked.
+  await triggerCapture(noopLogger, 1000);
+  await triggerCapture(noopLogger, 2000);
+  await triggerCapture(noopLogger, 3000);
+  assert.equal(fired, 1);
+});
+
+test('a failed capture does not burn the rate-limit window', async () => {
+  let calls = 0;
+  initCaptureWith(async () => {
+    calls += 1;
+    if (calls === 1) throw new Error('could not reach OBS');
+    return { path: 'ok.mkv' };
+  }, { minIntervalMs: 60_000 });
+  assert.equal((await triggerCapture(noopLogger, 1000)).ok, false, 'PC was off');
+  const retry = await triggerCapture(noopLogger, 2000); // immediately after
+  assert.equal(retry.ok, true, 'next !clip may retry straight away');
+});
+
 test('obs-websocket auth is the documented two-round derivation', () => {
   // secret = base64(sha256(password + salt)); auth = base64(sha256(secret + challenge))
   const auth = deriveAuth('pw', 'salt', 'chal');
