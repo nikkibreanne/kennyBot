@@ -17,7 +17,10 @@ import { TokenStore } from './src/db/tokenStore.js';
 import { buildAuth } from './src/twitch/auth.js';
 import { createSender } from './src/twitch/sender.js';
 import { initClips } from './src/twitch/clips.js';
-import { initCapture } from './src/integrations/capture.js';
+import { initCapture, captureReady } from './src/integrations/capture.js';
+// The !clip command owns CLIP_MODE; index.js only resolves it once at boot so a
+// typo is caught in the startup log rather than on the first viewer's !clip.
+import { resolveClipMode } from './src/commands/clip.js';
 import { startLivePoll } from './src/twitch/liveGate.js';
 import { startEventSub } from './src/twitch/eventsub.js';
 import { advanceRaidPhases, refreshMusteredRoster } from './src/db/raid.js';
@@ -45,7 +48,7 @@ const HEARTBEAT_FILE = process.env.HEARTBEAT_FILE || '/tmp/kennybot.heartbeat';
 // than a liveness ping: it records whether the Twitch chat socket is actually
 // connected, so a "process alive but chat wedged" zombie reads unhealthy and the
 // orchestrator restarts it, rather than the check passing on a dead connection.
-const health = { version: APP_VERSION, chatConnected: false, live: false, sendMode: null };
+const health = { version: APP_VERSION, chatConnected: false, live: false, sendMode: null, clipMode: null };
 
 // Shutdown is wired up inside main(); module scope holds the reference so signal
 // handlers and the lease-lost callback can trigger it cleanly.
@@ -190,8 +193,25 @@ async function main() {
   initClips({ apiClient, broadcasterId: channelUserId, botUserId });
 
   // Local full-quality capture on the streamer's PC (obs-websocket over the
-  // tailnet). Optional: with no OBS_WEBSOCKET_URL, !clip just makes Twitch clips.
+  // tailnet), reached whenever !clip's mode includes the local half.
   initCapture({}, logger);
+
+  // What !clip actually does. Default 'local': trigger the streamer's OBS/Aitum
+  // capture and post NO Twitch clip — a Twitch clip is capped at the stream
+  // resolution, so the local recording is the copy worth keeping. 'twitch'
+  // restores the Helix-clip-only behaviour; 'both' does each.
+  const rawClipMode = (process.env.CLIP_MODE || '').toLowerCase();
+  const clipMode = resolveClipMode(rawClipMode);
+  if (rawClipMode && rawClipMode !== clipMode) {
+    logger.warn('unknown CLIP_MODE — using local', { value: process.env.CLIP_MODE });
+  }
+  health.clipMode = clipMode;
+  logger.info('clip mode', { mode: clipMode, localCapture: captureReady() });
+  if (clipMode === 'local' && !captureReady()) {
+    logger.warn(
+      '!clip has nothing to do: CLIP_MODE=local but no capture backend is configured — set OBS_WEBSOCKET_URL, or CLIP_MODE=twitch/both',
+    );
+  }
 
   // ── Resolve-on-boot: advance raid phases by stored timestamps, never a timer
   //    a restart could lose (§H.5 / §L.1). Loop to catch up after downtime

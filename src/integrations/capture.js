@@ -1,24 +1,24 @@
 // Local high-quality capture trigger — the "grab the last N seconds on the
 // streamer's PC" half of a clip.
 //
-// A Twitch clip is capped at the STREAM resolution, so `!clip` alone can never
-// give you a 4K keepsake. This fires a second, local capture at full recording
-// quality on the streamer's machine (reached over the tailnet), which the
-// okra-clip-archiver then picks up.
+// A Twitch clip is capped at the STREAM resolution, so it can never be a 4K
+// keepsake. This fires a capture at full recording quality on the streamer's
+// machine (reached over the tailnet) — the default half of `!clip` (CLIP_MODE),
+// and what the okra-clip-archiver later picks up.
 //
 // Backend-agnostic on purpose: obs-websocket today (free, password-authed, built
 // into OBS 28+), Aitum's :7777 rule API later. Commands call `triggerCapture()`
 // and never learn which one is configured.
 //
-// EVERY failure here is non-fatal. The streamer's PC may be off, OBS may be
-// closed, the tailnet may be down — none of that may break `!clip`, which still
-// produces a perfectly good Twitch clip on its own.
+// EVERY failure here is non-fatal and RESOLVES rather than throwing. The
+// streamer's PC may be off, OBS may be closed, the tailnet may be down — the
+// caller gets `{ ok: false, reason }` and decides what to tell chat.
 //
 // RATE LIMITING is global, and deliberately separate from !clip's cooldown. That
-// cooldown is per-user, so N viewers can each clip within the same minute — fine
-// for Twitch clips (free, server-side) but not for local saves, where every
-// trigger writes hundreds of MB and then has to be shipped over the streamer's
-// upload. This gate is channel-wide: a burst of !clips yields one local capture.
+// cooldown is per-user, so N viewers can each clip within the same minute — free
+// for Twitch clips (server-side) but not for local saves, where every trigger
+// writes hundreds of MB and then has to be shipped over the streamer's upload.
+// This gate is channel-wide: a burst of !clips yields one local capture.
 
 import { saveReplayBuffer, websocketAvailable } from './obsWebsocket.js';
 
@@ -37,7 +37,7 @@ export function initCapture(opts = {}, logger = console) {
 
   if (backend === 'none' || !url) {
     cfg = null;
-    logger.info?.('local capture disabled (no OBS_WEBSOCKET_URL) — !clip will make Twitch clips only');
+    logger.info?.('local capture disabled (no OBS_WEBSOCKET_URL)');
     return;
   }
   if (backend !== 'obs-websocket') {
@@ -98,7 +98,7 @@ export async function triggerCapture(logger = console, now = Date.now()) {
     // retry immediately (the PC may have just come back).
     lastAt = 0;
     // Expected whenever the streamer's PC is off or OBS is closed — log, move on.
-    logger.warn?.('local capture failed (Twitch clip is unaffected)', { err: String(err?.message || err) });
+    logger.warn?.('local capture failed', { err: String(err?.message || err) });
     return { ok: false, reason: String(err?.message || err) };
   }
 }

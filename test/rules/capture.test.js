@@ -1,6 +1,6 @@
 // Local-capture tests. The load-bearing guarantee: triggering the streamer's OBS
 // is BEST EFFORT — a PC that's off, an OBS that's closed, or a dead tailnet must
-// never break `!clip`, which still produces a perfectly good Twitch clip.
+// resolve as a reported failure, never throw out of `!clip`.
 import { test, afterEach } from 'node:test';
 import assert from 'node:assert/strict';
 import { initCapture, initCaptureWith, captureReady, triggerCapture } from '../../src/integrations/capture.js';
