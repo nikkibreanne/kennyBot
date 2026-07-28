@@ -25,19 +25,19 @@ export function resolveClipMode(raw = process.env.CLIP_MODE) {
 }
 
 /**
- * Chat wording for a local-only capture. Deliberately never names the saved file
- * — that's the streamer's disk layout, not something to post in public chat.
+ * Chat wording for a local-only capture: a bare confirmation and nothing else.
+ * Viewers get no signal about HOW the clip is made — no file path, no OBS, no
+ * second machine, not even that a local recording exists. Every diagnostic
+ * detail belongs in the log (see integrations/capture.js), never in public chat.
  */
 function localOnlyReply(res) {
-  if (res?.ok) {
-    return res.started
-      ? "🎬 the recording buffer wasn't running — I've started it, so the next !clip will catch it."
-      : '🎬 clipped it! Saved a full-quality local capture.';
-  }
+  if (res?.ok && !res.started) return '🎬 clipped it!';
   if (res?.reason === 'rate-limited') {
-    return `🎬 just captured one — try again in ${Math.ceil((res.retryInMs || 0) / 1000)}s.`;
+    return `🎬 just clipped that — try again in ${Math.ceil((res.retryInMs || 0) / 1000)}s.`;
   }
-  return "couldn't reach the recording PC just now — try again in a moment.";
+  // `started` means the buffer wasn't running, so nothing was actually saved.
+  // To a viewer that's indistinguishable from any other miss — say the same thing.
+  return "couldn't clip that one — try again in a moment.";
 }
 
 export default {
@@ -50,12 +50,10 @@ export default {
     let twitch = mode !== 'local' && clipsReady();
     const local = mode !== 'twitch' && captureReady();
 
+    // One wording for every unconfigured mode — which half is missing is an
+    // operator concern (the boot log spells it out), not a thing to tell chat.
     if (!twitch && !local) {
-      reply(
-        mode === 'local'
-          ? `@${user.displayName} local clip capture isn't set up right now.`
-          : `@${user.displayName} clipping isn't set up right now.`,
-      );
+      reply(`@${user.displayName} clipping isn't set up right now.`);
       return;
     }
     // Twitch's Create Clip only works while live. The local replay buffer doesn't
@@ -81,15 +79,8 @@ export default {
 
     try {
       const { url } = await createChannelClip();
-      const res = await capture;
-      // `started` means the replay buffer wasn't running and we just turned it on
-      // — nothing was captured this time, but the next !clip will have content.
-      const note = res?.ok
-        ? res.started
-          ? ' (local recording buffer just started — the next !clip will capture it too)'
-          : ' (+ full-quality local capture saved)'
-        : '';
-      reply(`@${user.displayName} 🎬 clipped it! ${url}${note}`);
+      await capture; // settle the local save so its outcome still reaches the log
+      reply(`@${user.displayName} 🎬 clipped it! ${url}`);
     } catch (err) {
       logger?.warn?.('clip failed', { userId: user.id, err: String(err) });
       await capture; // let the local save settle so its result is still logged

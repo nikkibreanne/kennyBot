@@ -44,8 +44,27 @@ test('by default !clip captures locally and makes NO Twitch clip', async () => {
   const reply = await runClip();
   assert.equal(captures, 1);
   assert.equal(clips, 0, 'the Twitch half must not fire in the default mode');
-  assert.match(reply, /local capture/i);
-  assert.doesNotMatch(reply, /clips\.twitch\.tv/);
+  assert.equal(reply, '@Alice 🎬 clipped it!');
+});
+
+// Viewers must not be able to infer HOW a clip is made: no file path, no OBS, no
+// second machine, not even that a local recording exists. Every branch of the
+// local-only reply gets checked, so a future "helpful" message can't reopen this.
+test('no local-only reply leaks anything about the capture setup', async () => {
+  const outcomes = [
+    async () => ({ path: 'D:/streams/rec/Replay 2026-07-27.mkv' }), // saved
+    async () => ({ path: null, started: true }), // buffer was cold
+    async () => { throw new Error('could not reach OBS at ws://100.82.136.16:4455'); },
+  ];
+  const leaks = /obs|websocket|replay|buffer|recording|\bPC\b|4k|quality|\.mkv|\.mp4|[A-Z]:[/\\]|ws:\/\/|\d+\.\d+\.\d+\.\d+/i;
+  for (const outcome of outcomes) {
+    initCaptureWith(outcome);
+    assert.doesNotMatch(await runClip(), leaks);
+  }
+  // …and the rate-limited branch, which needs a second call inside the window.
+  initCaptureWith(async () => ({ path: 'a.mkv' }), { minIntervalMs: 60_000 });
+  await runClip();
+  assert.doesNotMatch(await runClip(), leaks);
 });
 
 test('local mode ignores the live gate — OBS records whether or not you are streaming', async () => {
@@ -63,7 +82,7 @@ test('local mode never falls back to Twitch when no capture backend is configure
 
   const reply = await runClip();
   assert.equal(clips, 0, 'silently posting a Twitch clip would defeat the mode');
-  assert.match(reply, /local clip capture isn't set up/i);
+  assert.match(reply, /clipping isn't set up/i);
 });
 
 test("CLIP_MODE=twitch restores the old behaviour and doesn't touch OBS", async () => {
@@ -85,12 +104,12 @@ test('CLIP_MODE=both while offline still saves locally instead of failing', asyn
 
   const reply = await runClip(); // not live → Twitch half is impossible
   assert.equal(clips, 0, 'Create Clip would be rejected offline — do not call it');
-  assert.match(reply, /local capture/i);
+  assert.match(reply, /clipped it/i);
 });
 
-test('a cold replay buffer tells the viewer the next !clip will work', async () => {
-  initCaptureWith(async () => ({ path: null, started: true }));
-  assert.match(await runClip(), /next !clip/i);
+test('a cold replay buffer reads as an ordinary miss, not a status report', async () => {
+  initCaptureWith(async () => ({ path: null, started: true })); // nothing saved
+  assert.match(await runClip(), /couldn't clip that one/i);
 });
 
 test('a rate-limited capture tells the viewer when to retry', async () => {
@@ -102,7 +121,5 @@ test('a rate-limited capture tells the viewer when to retry', async () => {
 
 test('an unreachable OBS gets a plain-English reply, never a stack trace', async () => {
   initCaptureWith(async () => { throw new Error('could not reach OBS at ws://x:4455'); });
-  const reply = await runClip();
-  assert.match(reply, /couldn't reach the recording PC/i);
-  assert.doesNotMatch(reply, /ws:\/\//, 'no internals in chat');
+  assert.match(await runClip(), /couldn't clip that one/i);
 });

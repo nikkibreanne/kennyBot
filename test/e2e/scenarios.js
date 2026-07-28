@@ -72,8 +72,9 @@ export const SCENARIOS = [
       try {
         // Default CLIP_MODE=local: the streamer's OBS saves the moment at full
         // recording quality and nothing is posted to Twitch.
+        // The reply is a bare confirmation — chat learns nothing about the rig.
         const local = await bot.send(alice, '!clip');
-        assert.match(local, /local capture/i);
+        assert.match(local, /clipped it/i);
         assert.doesNotMatch(local, /clips\.twitch\.tv/, 'the default must not make a Twitch clip');
 
         // CLIP_MODE=both puts the Twitch clip back alongside it (needs live).
