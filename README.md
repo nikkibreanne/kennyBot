@@ -158,6 +158,10 @@ gitignored). Secrets arrive at runtime, never baked into the image.
 | `FIREBASE_DATABASE_URL` / `FIREBASE_PROJECT_ID` | RTDB URL + project (`okrafans`) |
 | `FIREBASE_DATABASE_EMULATOR_HOST` | *local only* — targets the emulator; leave empty in prod |
 | `TOKEN_STORE_DIR` | dir for the persisted refresh-token store (the `/data` volume) |
+| `TWITCH_SEND_MODE` | chat transport — `auto` (default, Helix + IRC fallback) · `helix` (Chat Bot badge) · `irc` |
+| `CLIP_MODE` | what `!clip` does — `local` (**default**: OBS/Aitum capture only, nothing posted to Twitch) · `twitch` · `both` |
+| `OBS_WEBSOCKET_URL` / `OBS_WEBSOCKET_PASSWORD` | the streamer's OBS (obs-websocket, over the tailnet) — required for the local capture |
+| `OBS_TIMEOUT_MS` / `CAPTURE_MIN_INTERVAL_MS` / `CAPTURE_BACKEND` | *optional* capture knobs — request deadline, channel-wide gap between local saves, backend |
 | `INSTANCE_ID` / `LOG_LEVEL` / `HEARTBEAT_FILE` | optional runtime knobs |
 
 ## Production (containerized, outbound-only)

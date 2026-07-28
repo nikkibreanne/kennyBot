@@ -15,6 +15,7 @@ import { setupRaidWeek, enlist } from '../../src/db/raid.js';
 import { seedCuratedFacts } from '../../src/db/facts.js';
 import { getRaidPointer, getConfig, setLive } from '../../src/db/configStore.js';
 import { initClipsWith } from '../../src/twitch/clips.js';
+import { initCaptureWith } from '../../src/integrations/capture.js';
 import { defaultBoss } from '../../src/content/bosses.js';
 import { until } from './harness.js';
 
@@ -62,15 +63,30 @@ export const fixtures = { player, loot, wallet, market, drop, facts, leaderboard
 // ── scenarios (one per command primary name) ─────────────────────────────────
 export const SCENARIOS = [
   {
-    command: 'clip', title: 'clips the live stream and posts a link',
+    command: 'clip', title: 'saves a full-quality local capture (and a Twitch clip in "both" mode)',
     run: async ({ bot, u }) => {
       const alice = u('e2e_clip', { login: 'alice', name: 'Alice' });
+      const bob = u('e2e_clip2', { login: 'bob', name: 'Bob' }); // !clip is per-user cooldowned
       initClipsWith(async () => 'TestClipId123'); // fake Helix Create Clip
-      await setLive(true, 'test');
-      await until(() => getConfig().live === true); // mirror is async
-      const reply = await bot.send(alice, '!clip');
-      assert.match(reply, /clips\.twitch\.tv\/TestClipId123/);
-      await setLive(false, 'test'); // reset shared live state for later scenarios
+      initCaptureWith(async () => ({ path: 'D:/rec/Replay.mkv' })); // fake OBS
+      try {
+        // Default CLIP_MODE=local: the streamer's OBS saves the moment at full
+        // recording quality and nothing is posted to Twitch.
+        // The reply is a bare confirmation — chat learns nothing about the rig.
+        const local = await bot.send(alice, '!clip');
+        assert.match(local, /clipped it/i);
+        assert.doesNotMatch(local, /clips\.twitch\.tv/, 'the default must not make a Twitch clip');
+
+        // CLIP_MODE=both puts the Twitch clip back alongside it (needs live).
+        process.env.CLIP_MODE = 'both';
+        await setLive(true, 'test');
+        await until(() => getConfig().live === true); // mirror is async
+        assert.match(await bot.send(bob, '!clip'), /clips\.twitch\.tv\/TestClipId123/);
+      } finally {
+        delete process.env.CLIP_MODE;
+        initCaptureWith(null);
+        await setLive(false, 'test'); // reset shared live state for later scenarios
+      }
     },
   },
   {
