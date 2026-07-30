@@ -144,6 +144,28 @@ node index.js                                                     # terminal 2
 Test offline with `!exp on` (bypasses the live gate) and the mod commands
 (`!boss set …`, `!drop`, `!boss endnow`) — you never need to go live to test.
 
+## Two clip workflows (separate, by design)
+
+There are two ways a high-quality copy of a moment gets made. They solve
+**different problems, are not a pipeline, and neither depends on the other.**
+Nothing kennyBot captures is consumed by the archiver, and the archiver does not
+need kennyBot to have been running.
+
+| | **Local capture** (this repo) | **okra-clip-archiver** (separate tool) |
+|---|---|---|
+| Trigger | `!clip` in chat, live | after the stream, on demand |
+| Source | OBS replay buffer, in the moment | the full VOD, after the fact |
+| Captures | only what someone `!clip`ped | any clip, including ones viewers made |
+| Needs | OBS reachable while live | nothing running during the stream |
+| Good for | full flexibility on the spot, at recording quality | recovering moments nobody clipped live |
+
+Local capture is **self-contained**: the file OBS writes is the finished artefact.
+
+The single point of contact is `!start` (`src/db/clipSync.js`), which writes a
+per-stream sync anchor to RTDB so the archiver can align Twitch clip timestamps to
+the local recording. That anchor is *data the archiver reads* — not a handoff of
+captured files, and it works whether or not local capture is configured.
+
 ## Environment contract
 
 Names only — **never commit values** (`.env*` and `serviceAccount*.json` are

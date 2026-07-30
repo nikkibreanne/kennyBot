@@ -54,7 +54,7 @@ test('no local-only reply leaks anything about the capture setup', async () => {
   const outcomes = [
     async () => ({ path: 'D:/streams/rec/Replay 2026-07-27.mkv' }), // saved
     async () => ({ path: null, started: true }), // buffer was cold
-    async () => { throw new Error('could not reach OBS at ws://100.82.136.16:4455'); },
+    async () => { throw new Error('could not reach OBS at ws://obs.invalid:4455'); },
   ];
   const leaks = /obs|websocket|replay|buffer|recording|\bPC\b|4k|quality|\.mkv|\.mp4|[A-Z]:[/\\]|ws:\/\/|\d+\.\d+\.\d+\.\d+/i;
   for (const outcome of outcomes) {

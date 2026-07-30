@@ -9,9 +9,9 @@
 // be a normal user with clips:edit, no broadcaster involvement. The clip needs a
 // few seconds to finish processing, but the returned URL is valid immediately.
 //
-// NOTE: a Twitch clip is capped at the STREAM resolution (≤1080p here) — a local
-// 4K copy is a separate capture (obs-websocket replay buffer / post-hoc archive),
-// tracked in the aitum-badge-initiative notes.
+// NOTE: a Twitch clip is capped at the STREAM resolution (≤1080p here). A full
+// -quality local copy comes from a different mechanism entirely — see the README's
+// "Two clip workflows" section; they are separate and neither feeds the other.
 
 let createFn = null;
 
