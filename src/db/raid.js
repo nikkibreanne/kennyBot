@@ -84,11 +84,30 @@ export function computeTeam(signups) {
 
 /**
  * Stand up a raid week: write the boss, the config/raid pointer (signup phase +
- * schedule), and reset the raid node. The website's muster page lights up off
- * config/raid.
+ * schedule), and seed the raid node. Within a season, participation is
+ * season-long: a newly scheduled boss inherits the previous active roster.
+ * Starting/rolling over a season opens week 1 without carry-over.
  * @param {{ seasonId: string, weekId: string, boss: object, locksAt: number, startsAt: number }} args
  */
 export async function setupRaidWeek({ seasonId, weekId, boss, locksAt, startsAt }) {
+  const db = database();
+  const previous = getRaidPointer();
+  let signups = {};
+  if (previous?.seasonId === seasonId && previous?.weekId && previous.weekId !== weekId && weekId !== 'w1') {
+    const prevSnap = await db.ref(PATHS.signups(previous.seasonId, previous.weekId)).get();
+    signups = prevSnap.val() || {};
+
+    const refreshed = {};
+    await Promise.all(
+      Object.keys(signups).map(async (uid) => {
+        const playerSnap = await db.ref(PATHS.player(uid)).get();
+        const player = playerSnap.val();
+        refreshed[uid] = player ? buildSnapshot(player) : signups[uid];
+      }),
+    );
+    signups = refreshed;
+  }
+
   const baseHp = boss.baseHp ?? boss.hp ?? config.raid.defaultBossHp;
   const bossRecord = {
     name: boss.name,
@@ -102,12 +121,12 @@ export async function setupRaidWeek({ seasonId, weekId, boss, locksAt, startsAt 
     recommended: boss.recommended ?? null,
     status: 'signup',
   };
-  await database().ref().update({
+  await db.ref().update({
     [PATHS.boss(seasonId, weekId)]: bossRecord,
-    // Reset the raid node for muster. Do NOT seed a zeros `team` — the website
-    // computes team stats from `signups` until lock writes the real aggregate;
-    // a zeros object is truthy and would shadow that fallback (showing 0s).
-    [PATHS.raid(seasonId, weekId)]: { signups: {} },
+    // Do NOT seed a zeros `team` — the website computes team stats from
+    // `signups` until lock writes the real aggregate; a zeros object is truthy
+    // and would shadow that fallback (showing 0s).
+    [PATHS.raid(seasonId, weekId)]: { signups },
     [PATHS.configRaid()]: { seasonId, weekId, phase: 'signup', locksAt, startsAt, doneAt: null },
   });
   return { seasonId, weekId, boss: bossRecord };

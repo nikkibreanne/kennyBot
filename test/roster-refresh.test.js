@@ -15,7 +15,9 @@ const runOrSkip = host ? test : test.skip;
 const noopLogger = { info() {}, warn() {}, error() {}, debug() {} };
 
 const SEASON = 's_rtest';
+const NEXT_SEASON = 's_rtest_next';
 const WEEK = 'w1';
+const NEXT_WEEK = 'w2';
 const UID = 'u_rtest';
 
 const makePlayer = (level) => ({
@@ -41,7 +43,10 @@ before(async () => {
 after(async () => {
   if (!host) return;
   await database().ref(PATHS.raid(SEASON, WEEK)).remove().catch(() => {});
+  await database().ref(PATHS.raid(SEASON, NEXT_WEEK)).remove().catch(() => {});
+  await database().ref(PATHS.raid(NEXT_SEASON, WEEK)).remove().catch(() => {});
   await database().ref(PATHS.bossesForSeason(SEASON)).remove().catch(() => {});
+  await database().ref(PATHS.bossesForSeason(NEXT_SEASON)).remove().catch(() => {});
   await database().ref(PATHS.player(UID)).remove().catch(() => {});
   await database().ref(PATHS.configRaid()).remove().catch(() => {});
   await closeFirebase();
@@ -77,4 +82,36 @@ runOrSkip('locked phase: the roster is frozen — no refresh', async () => {
   await db.ref(PATHS.player(UID)).update({ level: 9 });
   assert.equal(await refreshMusteredRoster(), 0, 'a locked roster must not be rewritten');
   assert.equal((await getSignup(SEASON, WEEK, UID)).level, 5, 'snapshot stays frozen at lock-time level');
+});
+
+runOrSkip('new boss in the same season inherits the mustered roster', async () => {
+  const db = database();
+  await db.ref(PATHS.player(UID)).set(makePlayer(7));
+  await setupRaidWeek({
+    seasonId: SEASON, weekId: WEEK,
+    boss: { name: 'First Boss', thresholds: { tank: 0, healer: 0, dps: 0 } },
+    locksAt: Date.now() + 3_600_000, startsAt: Date.now() + 7_200_000,
+  });
+  await waitForPointer((p) => p?.seasonId === SEASON && p?.weekId === WEEK && p?.phase === 'signup');
+  await enlist({ seasonId: SEASON, weekId: WEEK, userId: UID, player: makePlayer(7) });
+
+  await db.ref(PATHS.player(UID)).update({ level: 8 });
+  await setupRaidWeek({
+    seasonId: SEASON, weekId: NEXT_WEEK,
+    boss: { name: 'Next Boss', thresholds: { tank: 0, healer: 0, dps: 0 } },
+    locksAt: Date.now() + 10_800_000, startsAt: Date.now() + 14_400_000,
+  });
+
+  const carried = await getSignup(SEASON, NEXT_WEEK, UID);
+  assert.equal(carried.level, 8, 'carry-over uses a fresh player snapshot');
+});
+
+runOrSkip('new season week 1 starts with an empty muster roster', async () => {
+  await setupRaidWeek({
+    seasonId: NEXT_SEASON, weekId: WEEK,
+    boss: { name: 'Fresh Season Boss', thresholds: { tank: 0, healer: 0, dps: 0 } },
+    locksAt: Date.now() + 3_600_000, startsAt: Date.now() + 7_200_000,
+  });
+
+  assert.equal(await getSignup(NEXT_SEASON, WEEK, UID), null, 'season boundary clears participation');
 });
