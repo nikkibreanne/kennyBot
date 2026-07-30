@@ -66,7 +66,7 @@ scripts/synthetic-chat.js no-stream harness that drives the whole loop
 | `!bag` / `!inventory` | everyone | view unequipped loot |
 | `!equip <item>` | everyone | equip an owned item into its slot |
 | `!grab` / `!loot` | **subs** | roll for the active drop (independent rolls within the window) |
-| `!muster` | everyone* | sign up for this week's raid (during muster) / see status |
+| `!muster` | everyone* | sign up for this season's raid roster (during muster) / see status |
 | `!exp on\|off\|auto\|status` | mod | control the EXP gate (`on` bypasses live for testing) |
 | `!mute on\|off\|status` | mod | silence the bot's chat output when it gets noisy; it keeps listening, tracking EXP, and holding the lease — bare `!mute` toggles |
 | `!drop [item]` | mod | force a single loot drop |
@@ -79,8 +79,10 @@ scripts/synthetic-chat.js no-stream harness that drives the whole loop
 `!muster`) needs an active sub — same as `!create` and `!grab`. A lapsed sub keeps
 the hero they built and keeps earning EXP, but must re-sub to muster.
 
-Mustering writes a snapshot of your hero onto the roster. While the muster window
-is open, the bot re-snapshots signees from their live record on a timer
+Mustering writes a snapshot of your hero onto the season roster. When a new boss
+is scheduled in the same season, participating adventurers roll forward into that
+boss's muster roster; starting or rolling over a season clears the roster. While
+the muster window is open, the bot re-snapshots signees from their live record on a timer
 (`raid.rosterRefreshMs`), so leveling or gearing up after you muster keeps showing
 on the site without a re-`!muster`. At **roster lock** (15 min before raid night)
 every card is frozen from the live record — that's the loadout that fights.
