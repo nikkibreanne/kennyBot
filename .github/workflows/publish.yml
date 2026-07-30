@@ -1,48 +1,36 @@
-# Build the runtime image in CI and publish to GHCR (private) — IMPLEMENTATION §D.
-# CI pushes with the built-in GITHUB_TOKEN (no stored credential). Keep the GHCR
-# package PRIVATE; the runtime pulls with a fine-scoped read:packages token.
+# Publish on a HAND-PUSHED version tag — the hotfix / escape hatch path.
+#
+# The normal route is release.yml (release-please), which publishes inside its own
+# run. This workflow covers the case where a human pushes `vX.Y.Z` directly: those
+# events DO trigger workflows, unlike tags created by GITHUB_TOKEN.
+#
+# Both paths call the same reusable docker-publish.yml, so the image is built
+# identically however the release was cut.
 name: publish
 
 on:
   push:
     tags: ['v*'] # publish only on version tags — not every push to main
 
-permissions:
-  contents: read
-  packages: write # lets GITHUB_TOKEN push to GHCR — no PAT in CI
+permissions: {}
 
 jobs:
-  # Reuse the same suite that gates PRs into main (.github/workflows/ci.yml) so a
-  # release tag can't ship an image that skipped the tests — one source of truth.
-  test:
-    uses: ./.github/workflows/ci.yml
-
-  docker:
-    needs: test
+  # docker-publish takes the version WITHOUT the leading v (it's the image tag);
+  # GitHub expressions have no string-replace, so strip it in a shell step.
+  meta:
     runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.strip.outputs.version }}
     steps:
-      - uses: actions/checkout@v5
-      # docker-container driver — required to attach the SBOM/provenance attestations below.
-      - uses: docker/setup-buildx-action@v3
-      - uses: docker/login-action@v3
-        with:
-          registry: ghcr.io
-          username: ${{ github.actor }}
-          password: ${{ secrets.GITHUB_TOKEN }}
-      - uses: docker/metadata-action@v5
-        id: meta
-        with:
-          images: ghcr.io/nikkibreanne/kennybot
-          tags: |
-            type=raw,value=latest,enable={{is_default_branch}}
-            type=sha
-            type=semver,pattern={{version}}
-      - uses: docker/build-push-action@v6
-        with:
-          context: .
-          push: true
-          tags: ${{ steps.meta.outputs.tags }}
-          labels: ${{ steps.meta.outputs.labels }}
-          # Supply-chain auditability (IMPLEMENTATION §D / §K.1).
-          sbom: true
-          provenance: true
+      - id: strip
+        run: echo "version=${GITHUB_REF_NAME#v}" >> "$GITHUB_OUTPUT"
+
+  release:
+    needs: meta
+    uses: ./.github/workflows/docker-publish.yml
+    with:
+      ref: ${{ github.ref_name }}
+      version: ${{ needs.meta.outputs.version }}
+    permissions:
+      contents: read
+      packages: write

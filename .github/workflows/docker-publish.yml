@@ -1,0 +1,68 @@
+# Build the runtime image and publish to GHCR (private) — IMPLEMENTATION §D.
+#
+# Reusable (workflow_call) so the two ways a release can happen share ONE
+# definition and cannot drift apart:
+#   • release.yml  — the automated path (release-please merged a release PR)
+#   • publish.yml  — a hand-pushed v* tag (hotfix / escape hatch)
+#
+# Pushes with the built-in GITHUB_TOKEN, so there is no stored registry
+# credential. Keep the GHCR package PRIVATE; the runtime pulls with a
+# fine-scoped read:packages token.
+name: docker-publish
+
+on:
+  workflow_call:
+    inputs:
+      ref:
+        description: Git ref to build (the release tag).
+        required: true
+        type: string
+      version:
+        description: Semver WITHOUT the leading v — becomes the image tag.
+        required: true
+        type: string
+
+jobs:
+  # The same suite that gates PRs into main (.github/workflows/ci.yml), so a
+  # release can't ship an image that skipped the tests — one source of truth.
+  test:
+    uses: ./.github/workflows/ci.yml
+
+  docker:
+    needs: test
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write # lets GITHUB_TOKEN push to GHCR — no PAT in CI
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          ref: ${{ inputs.ref }}
+      # docker-container driver — required to attach the SBOM/provenance attestations below.
+      - uses: docker/setup-buildx-action@v3
+      - uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - uses: docker/metadata-action@v5
+        id: meta
+        with:
+          images: ghcr.io/nikkibreanne/kennybot
+          # type=raw, NOT type=semver: metadata-action derives semver from
+          # github.ref, which on the release.yml path is refs/heads/main (the
+          # push that merged the release PR) — it would emit no version tag at
+          # all. The version is passed in explicitly instead.
+          tags: |
+            type=raw,value=${{ inputs.version }}
+            type=raw,value=latest
+            type=sha
+      - uses: docker/build-push-action@v6
+        with:
+          context: .
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          # Supply-chain auditability (IMPLEMENTATION §D / §K.1).
+          sbom: true
+          provenance: true

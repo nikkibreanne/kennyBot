@@ -1,0 +1,59 @@
+# Enforce Conventional Commits on the PR TITLE.
+#
+# Squash is the only merge strategy on this repo, so the PR title becomes the
+# commit subject on main verbatim — which is exactly the string release-please
+# parses to decide the next version. A PR titled "updates" lands a feature that
+# never gets released. This check is what makes the automation trustworthy.
+#
+#   feat: …            → minor (0.8.0 → 0.9.0)
+#   fix: / perf: …     → patch (0.8.0 → 0.8.1)
+#   feat!: / BREAKING  → minor while pre-1.0 (bump-minor-pre-major)
+#   docs:/test:/ci:/chore:/build:/refactor:/revert: → no release
+#
+# Implemented inline rather than with a third-party action, matching how this repo
+# keeps its dependency surface small (see src/integrations/obsWebsocket.js, which
+# speaks the protocol by hand for the same reason).
+name: pr-title
+
+on:
+  pull_request:
+    types: [opened, edited, reopened, synchronize]
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  pr-title:
+    runs-on: ubuntu-latest
+    steps:
+      - name: PR title must be a conventional commit
+        env:
+          # Via env, never inlined into the script — a title is attacker-controlled
+          # text and ${{ }} interpolation into a shell body is a script-injection hole.
+          TITLE: ${{ github.event.pull_request.title }}
+        run: |
+          set -euo pipefail
+          # type(optional scope)optional !: subject
+          # Also matches release-please's own "chore(main): release 1.2.3".
+          PATTERN='^(feat|fix|perf|refactor|docs|test|build|ci|chore|revert)(\([a-z0-9 ._/-]+\))?!?: .+'
+          if [[ "$TITLE" =~ $PATTERN ]]; then
+            echo "✓ $TITLE"
+            exit 0
+          fi
+          cat >&2 <<EOF
+          ✗ PR title is not a conventional commit:
+
+              $TITLE
+
+          It becomes the commit subject on main (squash merge) and decides the next
+          version. Use one of:
+
+              feat: <what changed>      → minor bump
+              fix: <what changed>       → patch bump
+              feat!: <what changed>     → breaking (minor while pre-1.0)
+              docs|test|ci|build|chore|refactor|revert: <what>   → no release
+
+          A scope is optional: feat(clip): add CLIP_MODE
+          EOF
+          exit 1
