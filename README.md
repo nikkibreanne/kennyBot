@@ -172,7 +172,7 @@ gitignored). Secrets arrive at runtime, never baked into the image.
 docker build -t kennybot .       # multi-stage, non-root, no exposed ports
 ```
 
-CI builds and publishes to **GHCR (private)** on push (`.github/workflows/publish.yml`).
+CI builds and publishes to **GHCR (private)** on release (see below).
 Run per `IMPLEMENTATION.md §E` — `--read-only --tmpfs /tmp`, `--cap-drop ALL`,
 `--security-opt no-new-privileges`, memory/cpu caps, `--env-file`, the
 service-account JSON mounted read-only, and one writable `/data` volume for the
@@ -184,6 +184,44 @@ Deploy the RTDB rules from `database.rules.json` before going live:
 ```bash
 npx firebase deploy --only database --project okrafans
 ```
+
+## Releasing
+
+Versions are derived from **Conventional Commits** by
+[release-please](https://github.com/googleapis/release-please) — nobody edits
+`package.json` or pushes a tag by hand.
+
+`main` is protected for **everyone, including admins** (`enforce_admins`), so a
+direct push is rejected. All changes land through a PR that passed `ci / test`.
+
+**Merges are squash-only**, which makes the PR title the commit subject on `main`
+— and that title is what decides the next version. The `pr-title` check enforces it:
+
+| PR title | Result |
+|---|---|
+| `fix: …` · `perf: …` | patch — `0.8.0` → `0.8.1` |
+| `feat: …` | minor — `0.8.0` → `0.9.0` |
+| `feat!: …` / `BREAKING CHANGE:` | minor while pre-1.0, major after |
+| `docs:` `test:` `ci:` `build:` `chore:` `refactor:` `revert:` | no release |
+
+A scope is optional: `feat(clip): add CLIP_MODE`.
+
+**The loop.** Merge PRs as normal → release-please opens a single
+`chore(main): release X.Y.Z` PR with the version bump and `CHANGELOG.md`, updating
+it as more land → merge that PR when you want to ship. The tag, the GitHub release,
+and `ghcr.io/nikkibreanne/kennybot:X.Y.Z` + `:latest` all follow automatically.
+
+> **One manual step per release.** The release PR is opened by `GITHUB_TOKEN`, and
+> GitHub won't auto-run workflows for its own token's events — so its CI sits in an
+> approval-required state until you click **"Approve and run"**. That's deliberate:
+> the alternative is storing a PAT, which this repo avoids. For the same reason the
+> image is published *inside* `release.yml`'s run rather than by reacting to the tag
+> (a `GITHUB_TOKEN`-created tag would trigger nothing, and the release would ship
+> with no image and no error).
+
+`publish.yml` still builds on a **hand-pushed** `vX.Y.Z` tag — human-pushed tags do
+trigger workflows — as a hotfix escape hatch. Both paths share
+`.github/workflows/docker-publish.yml`, so the image is built identically either way.
 
 ## Interface contract with the website
 

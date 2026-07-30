@@ -1,0 +1,57 @@
+# Automated releases — version resolved from conventional commits.
+#
+# The loop:
+#   1. A PR merges into main with a conventional title (feat:/fix:/…). Squash is
+#      the only merge strategy, so that title IS the commit release-please parses.
+#   2. release-please opens/updates a single "chore(main): release X.Y.Z" PR that
+#      bumps package.json and writes CHANGELOG.md. It accumulates as more PRs land.
+#   3. Merging that PR creates the tag + GitHub release — and the publish job
+#      below builds the image in THIS SAME RUN.
+#
+# Why publish here instead of reacting to the tag: GitHub does not run workflows
+# for events created by GITHUB_TOKEN, so the tag release-please pushes will NOT
+# trigger publish.yml's `on: push: tags`. Wiring it that way produces releases
+# with no image and no error — the failure is silent. publish.yml still exists for
+# HAND-pushed tags, which do trigger.
+#
+# Same restriction means the release PR's CI starts in an approval-required state:
+# click "Approve and run" once per release. That's the deliberate cost of not
+# storing a PAT (see publish.yml — "no PAT in CI").
+name: release
+
+on:
+  push:
+    branches: [main]
+
+permissions: {} # nothing by default; each job asks for exactly what it needs
+
+jobs:
+  release-please:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write # create tags + GitHub releases, push the release branch
+      pull-requests: write # open/update the release PR
+      issues: write # release-please labels its PR
+    outputs:
+      released: ${{ steps.release.outputs.release_created }}
+      tag: ${{ steps.release.outputs.tag_name }}
+      version: ${{ steps.release.outputs.version }}
+    steps:
+      - uses: googleapis/release-please-action@v4
+        id: release
+        with:
+          config-file: release-please-config.json
+          manifest-file: .release-please-manifest.json
+
+  # Only when a release was actually cut (i.e. the release PR just merged) —
+  # every other push to main stops at the job above.
+  publish:
+    needs: release-please
+    if: needs.release-please.outputs.released == 'true'
+    uses: ./.github/workflows/docker-publish.yml
+    with:
+      ref: ${{ needs.release-please.outputs.tag }}
+      version: ${{ needs.release-please.outputs.version }}
+    permissions:
+      contents: read
+      packages: write
