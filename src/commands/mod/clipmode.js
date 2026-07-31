@@ -6,8 +6,8 @@
 // the container is not a recovery path anyone will take at 2am, so this is
 // reachable from chat like the EXP gate and the chat mute.
 //
-// RTDB is authoritative once set, so this is NOT undone by the container's
-// CLIP_MODE on the next restart.
+// RTDB is the only source (seeded once from config.clip.defaultMode), so there is
+// no environment variable that could disagree or revert this on the next restart.
 import { setClipMode, getConfig, CLIP_MODES } from '../../db/configStore.js';
 import { captureReady } from '../../integrations/capture.js';
 import { clipsReady } from '../../twitch/clips.js';

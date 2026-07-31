@@ -4,7 +4,7 @@
 // A Twitch clip is capped at the STREAM resolution, so it can never be a 4K
 // keepsake. This fires a capture at full recording quality on the streamer's
 // machine (reached over their private network) — the default half of `!clip`
-// (CLIP_MODE).
+// (see the live clip mode / `!clipmode`).
 //
 // This is a SELF-CONTAINED workflow: the file it saves is the finished artefact.
 // It is NOT an input to okra-clip-archiver, which is an unrelated tool that

@@ -1,6 +1,6 @@
 // !clip — grab the last ~30–60s of the stream.
 //
-// TWO independent halves, selected by CLIP_MODE:
+// TWO independent halves, selected by the live clip mode (`!clipmode`):
 //   local  (default) — tell the streamer's OBS/Aitum to save its replay buffer at
 //                      full recording quality. Nothing is posted to Twitch.
 //   twitch           — Helix Create Clip only (the original behaviour).
@@ -10,28 +10,22 @@
 // (≤1080p here) while the local recording is whatever the camera actually shot —
 // the high-quality copy is the point of the command.
 import { getConfig, parseClipMode, CLIP_MODES } from '../db/configStore.js';
+import { config as gameConfig } from '../config.js';
 import { createChannelClip, clipsReady } from '../twitch/clips.js';
 import { triggerCapture, captureReady } from '../integrations/capture.js';
 
 export { CLIP_MODES };
 
 /**
- * Resolve the mode from the ENV var, defaulting to 'local'. This is only the
- * first-boot seed and the fallback before the config mirror is warm — the live
- * value comes from RTDB (see activeClipMode).
- */
-export function resolveClipMode(raw = process.env.CLIP_MODE) {
-  return parseClipMode(raw);
-}
-
-/**
- * The mode in force right now. RTDB (`config/clipMode`, set by `!clipmode`) wins
- * over the environment, so a mod can switch to Twitch clips the moment the
- * streamer's OBS dies — without an SSH session, a file edit and a redeploy.
- * Falls back to env only while the mirror is cold (boot, or unit tests).
+ * The mode in force right now — RTDB `config/clipMode`, changed live by mods with
+ * `!clipmode`. There is no environment variable: one source of truth, seeded once
+ * from `config.clip.defaultMode`, exactly like the EXP gate.
+ *
+ * The fallback only covers the window before the config mirror is warm (early
+ * boot, and unit tests that run without a database).
  */
 export function activeClipMode() {
-  return getConfig().clipMode ?? resolveClipMode();
+  return getConfig().clipMode ?? parseClipMode(gameConfig.clip.defaultMode);
 }
 
 /**

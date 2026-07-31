@@ -150,6 +150,18 @@ export const config = {
     defaultExpMode: 'auto', // on | off | auto  (auto = follow live status)
   },
 
+  // ── !clip ────────────────────────────────────────────────────────────────
+  clip: {
+    // What !clip does on a BRAND-NEW database: local | twitch | both.
+    // 'local' = trigger the streamer's OBS/Aitum capture, post nothing to Twitch
+    // (a Twitch clip is capped at stream resolution, so it can't be the keepsake).
+    //
+    // This seeds config/clipMode once. After that RTDB is the ONLY source and
+    // mods change it live with `!clipmode` — same as defaultExpMode above.
+    // Editing this value does not move an existing deployment.
+    defaultMode: 'local',
+  },
+
   // ── Single-instance lease (IMPLEMENTATION §E/§J) ─────────────────────────
   lock: {
     heartbeatMs: 15_000,

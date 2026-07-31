@@ -26,8 +26,8 @@ about the capture rig · the capture rate limit is channel-wide, not per-user ·
 vertical (Aitum Backtrack) capture reports `requested`, **never** `saved` — the
 plugin answers `success` on acceptance and gives no way to confirm the write.
 
-`CLIP_MODE` seeds the first boot only; `config/clipMode` in RTDB then wins, changed
-live by mods via `!clipmode`. Editing the env var will not move a running deployment.
+The clip mode has **no env var**: it lives in RTDB (`config/clipMode`), seeded once
+from `clip.defaultMode` in `src/config.js`, and mods change it live via `!clipmode`.
 
 When verifying a capture, **read OBS's own log** (`Wrote replay buffer to '…'`) —
 not the vendor API's return value, and not a filesystem listing (WSL serves stale

@@ -70,16 +70,15 @@ export const SCENARIOS = [
       initClipsWith(async () => 'TestClipId123'); // fake Helix Create Clip
       initCaptureWith(async () => ({ path: 'D:/rec/Replay.mkv' })); // fake OBS
       try {
-        // Default CLIP_MODE=local: the streamer's OBS saves the moment at full
+        // Default mode is local: the streamer's OBS saves the moment at full
         // recording quality and nothing is posted to Twitch.
         // The reply is a bare confirmation — chat learns nothing about the rig.
         const local = await bot.send(alice, '!clip');
         assert.match(local, /clipped it/i);
         assert.doesNotMatch(local, /clips\.twitch\.tv/, 'the default must not make a Twitch clip');
 
-        // 'both' puts the Twitch clip back alongside it (needs live). Set the LIVE
-        // value rather than the env var — RTDB deliberately overrides the
-        // environment, so setting CLIP_MODE here would (correctly) be ignored.
+        // 'both' puts the Twitch clip back alongside it (needs live). The mode is
+        // RTDB-only — there is no env var — so switch it the way a mod does.
         await setClipMode('both');
         await setLive(true, 'test');
         await until(() => getConfig().live === true); // mirror is async

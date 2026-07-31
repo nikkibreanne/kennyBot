@@ -18,9 +18,8 @@ import { buildAuth } from './src/twitch/auth.js';
 import { createSender } from './src/twitch/sender.js';
 import { initClips } from './src/twitch/clips.js';
 import { initCapture, captureReady } from './src/integrations/capture.js';
-// The !clip command owns CLIP_MODE; index.js only resolves it once at boot so a
-// typo is caught in the startup log rather than on the first viewer's !clip.
-import { resolveClipMode, activeClipMode } from './src/commands/clip.js';
+// Read once at boot purely to log what's in force; the live value is RTDB-backed.
+import { activeClipMode } from './src/commands/clip.js';
 import { startLivePoll } from './src/twitch/liveGate.js';
 import { startEventSub } from './src/twitch/eventsub.js';
 import { advanceRaidPhases, refreshMusteredRoster } from './src/db/raid.js';
@@ -200,21 +199,11 @@ async function main() {
   // capture and post NO Twitch clip — a Twitch clip is capped at the stream
   // resolution, so the local recording is the copy worth keeping. 'twitch'
   // restores the Helix-clip-only behaviour; 'both' does each.
-  const rawClipMode = (process.env.CLIP_MODE || '').toLowerCase();
-  const envClipMode = resolveClipMode(rawClipMode);
-  if (rawClipMode && rawClipMode !== envClipMode) {
-    logger.warn('unknown CLIP_MODE — using local', { value: process.env.CLIP_MODE });
-  }
-  // RTDB wins once seeded (a mod's `!clipmode` must outlive the container's env),
-  // so report what's ACTUALLY in force — otherwise the startup log contradicts the
-  // running behaviour and sends the next person to edit the wrong thing.
+  // Lives in RTDB (`config/clipMode`), seeded once from config.clip.defaultMode and
+  // changed live by mods with `!clipmode` — there is no env var to disagree with.
   const clipMode = activeClipMode();
   health.clipMode = clipMode;
-  logger.info('clip mode', {
-    mode: clipMode,
-    source: clipMode === envClipMode ? 'env/rtdb' : 'rtdb (overrides CLIP_MODE)',
-    localCapture: captureReady(),
-  });
+  logger.info('clip mode', { mode: clipMode, localCapture: captureReady() });
   if (clipMode === 'local' && !captureReady()) {
     logger.warn(
       '!clip has nothing to do: clip mode is local but no capture backend is configured — set OBS_WEBSOCKET_URL, or switch with `!clipmode twitch` in chat',

@@ -101,6 +101,26 @@ encoder** on that output in the Aitum settings; miss any and it silently writes
 nothing. **OBS's own log is the source of truth** (`Wrote replay buffer to '…'`) —
 check it before believing either the API or a filesystem listing.
 
+### Clip length — set in OBS, not in kennyBot
+
+**kennyBot has no length setting.** It says "save"; it gets whatever is buffered.
+Length is entirely OBS-side, in **three independent places that must be aligned**:
+
+| What | Where | Note |
+|---|---|---|
+| Horizontal | OBS → Settings → Output → **Replay Buffer → Maximum Replay Time** | `RecRBTime` in the profile |
+| Vertical | Aitum settings → Outputs → Backtrack → **Maximum Replay Time** | plus **Maximum Memory**, a second cap |
+| Twitch clip | — | **not controllable.** Twitch decides (~30s) |
+
+If the two buffers disagree, one `!clip` yields a pair of files covering *different
+spans of time*, which makes them painful to cut together. Aitum's own docs say to
+match them.
+
+Both are also capped by **memory**: a buffer holds `min(time, size)`, so a generous
+Maximum Replay Time with a small Maximum Memory silently yields short clips. A
+vertical clip coming out shorter than the horizontal is normal if the Backtrack
+output was started later — the buffer simply hasn't filled yet.
+
 ### Why Ingest A currently carries the load
 
 Ingest B was the original plan for the archiver — re-cut any moment from a
@@ -113,7 +133,7 @@ above-stream quality, which makes Ingest A the primary path, not a convenience.
 ## What kennyBot does and does not do
 
 **Does:**
-- `!clip` → triggers the local capture and/or a Twitch clip, per `CLIP_MODE`
+- `!clip` → triggers the local capture and/or a Twitch clip, per the live clip mode
   (`src/commands/clip.js`)
 - Talks obs-websocket to save the replay buffer (`src/integrations/obsWebsocket.js`)
 - Rate-limits local captures channel-wide (`src/integrations/capture.js`)
@@ -135,20 +155,22 @@ configured.
 
 | Concern | Where |
 |---|---|
-| `!clip` command, `CLIP_MODE` routing | `src/commands/clip.js` |
+| `!clip` command, clip-mode routing | `src/commands/clip.js` |
+| `!clipmode` (mod, live switch) | `src/commands/mod/clipmode.js` |
 | Capture facade (backend-agnostic, rate limit) | `src/integrations/capture.js` |
 | obs-websocket v5 client + replay-buffer sequence | `src/integrations/obsWebsocket.js` |
 | Aitum vertical Backtrack (vendor requests) | `src/integrations/obsWebsocket.js` (`verticalBacktrackSequence`) |
 | Twitch clip creation (Helix) | `src/twitch/clips.js` |
 | `!start` sync anchor | `src/commands/start.js`, `src/db/clipSync.js` |
-| Config contract | `.env.example` (`CLIP_MODE`, `OBS_*`, `CAPTURE_*`) |
+| Clip mode (runtime) | RTDB `config/clipMode` · default `clip.defaultMode` in `src/config.js` |
+| Config contract | `.env.example` (`OBS_*`, `CAPTURE_*`) |
 | Vertical re-cut, job queue, uploads | okra-clip-archiver (**separate repo**) |
 
 ---
 
 ## Invariants — breaking these is a regression
 
-1. **`CLIP_MODE` defaults to `local`.** `!clip` does not create a Twitch clip unless
+1. **The clip mode defaults to `local`.** `!clip` does not create a Twitch clip unless
    explicitly asked. It must never silently fall back to Twitch when capture is
    unconfigured — that defeats the mode. (`test/rules/clip-command.test.js`)
 2. **Capture failure never breaks chat.** A PC that's off, OBS closed, or a dead
@@ -177,17 +199,19 @@ configured.
 |---|---|
 | `!clip` local capture (horizontal) | built, deployed, verified against a real OBS |
 | `!clip` vertical capture (Aitum Backtrack) | built, **verified end to end** — one `!clip` wrote a 1920×1080 and a 1080×1920 file one second apart |
-| `CLIP_MODE` default `local` | live on faraday (v0.8.0) |
+| clip mode default `local` | live on faraday (v0.8.0) |
 | Local capture on prod | **inert** — no `OBS_WEBSOCKET_URL` set; boot log warns |
 | Chat Bot badge on the prod channel | **falling back to IRC** — bot is not yet a moderator there |
 | Full-session recording (Ingest B) | not established |
 | okra-clip-archiver | processing half built; ingest source unsettled |
 
-**`CLIP_MODE` is runtime config, not env-only.** `CLIP_MODE` seeds the *first boot*;
-after that `config/clipMode` in RTDB is authoritative and mods change it from chat
-with `!clipmode local|twitch|both`. This exists because the streamer's OBS can die
-mid-stream, and recovering by SSH + env edit + container restart is not a route
-anyone takes mid-show. **The env var does not win it back on the next restart.**
+**The clip mode is runtime config with NO environment variable.** It lives in RTDB
+at `config/clipMode`, seeded once from `clip.defaultMode` in `src/config.js`, and
+mods change it from chat with `!clipmode local|twitch|both`. This exists because the
+streamer's OBS can die mid-stream, and recovering by SSH + env edit + container
+restart is not a route anyone takes mid-show. Deliberately **one** source of truth —
+an env var and a DB value that can disagree is a trap, and the EXP gate
+(`liveGate.defaultExpMode`) already establishes this shape.
 
 `CAPTURE_*` and `OBS_*` remain env-only — they describe the deployment's topology
 (which machine, which credentials), not an operational choice a mod should make.

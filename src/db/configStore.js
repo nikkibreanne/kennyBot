@@ -14,11 +14,11 @@ const mirror = {
   // connected — listening, granting EXP, processing drops, holding the lease —
   // but sends nothing to chat. Persisted so a restart keeps the mods' choice.
   chatMuted: false,
-  // What !clip does: 'local' | 'twitch' | 'both'. Seeded from CLIP_MODE at first
-  // boot, then RTDB is authoritative so a mod can flip it from chat — the
-  // streamer's OBS can die mid-stream, and re-deploying the container to get
-  // Twitch clips back is not an acceptable recovery path.
-  clipMode: null, // null until the mirror is warm; readers fall back to env
+  // What !clip does: 'local' | 'twitch' | 'both'. Seeded once from
+  // config.clip.defaultMode; RTDB is then the only source, so a mod can flip it
+  // from chat — the streamer's OBS can die mid-stream, and re-deploying the
+  // container to get Twitch clips back is not an acceptable recovery path.
+  clipMode: null, // null until the mirror is warm; readers fall back to the config default
   season: null,
   raid: null, // config/raid: { seasonId, weekId, phase, locksAt, startsAt }
   dropScheduler: { enabled: gameConfig.loot.scheduler.enabled, intervalSec: gameConfig.loot.scheduler.intervalSec },
@@ -39,9 +39,10 @@ export async function startConfigMirror(logger = console) {
   await db.ref(PATHS.configExpMode()).transaction((v) => (v == null ? gameConfig.liveGate.defaultExpMode : v));
   await db.ref(PATHS.configLive()).transaction((v) => (v == null ? false : v));
   await db.ref(PATHS.configChatMuted()).transaction((v) => (v == null ? false : v));
-  // CLIP_MODE seeds the FIRST boot only; after that RTDB wins, so a mod's `!clipmode`
-  // is not silently undone by whatever the container's env still says.
-  await db.ref(PATHS.configClipMode()).transaction((v) => (v == null ? parseClipMode(process.env.CLIP_MODE) : v));
+  // Seeded once from config.js, exactly like expMode above — never clobbered, so a
+  // mod's `!clipmode` survives every restart. There is deliberately no env var:
+  // one source of truth beats two that can disagree.
+  await db.ref(PATHS.configClipMode()).transaction((v) => (v == null ? parseClipMode(gameConfig.clip.defaultMode) : v));
 
   const liveRef = db.ref(PATHS.configLive());
   const expRef = db.ref(PATHS.configExpMode());
@@ -137,7 +138,6 @@ export async function setLive(value, source = 'unknown', logger = console) {
   return true;
 }
 
-/** Set the EXP gate override mode (on|off|auto). */
 /**
  * Test seam: prime the in-memory mirror without RTDB. Unit tests run with no
  * database, so the mirror is otherwise stuck at its cold defaults and any
@@ -152,22 +152,22 @@ export function primeConfigForTest(patch) {
 export const CLIP_MODES = ['local', 'twitch', 'both'];
 
 /**
- * Parse a clip mode from any source (env, RTDB, chat). Anything unrecognised —
- * including null/undefined — becomes 'local', because the failure that matters is
- * a typo quietly turning Twitch clipping back on.
+ * Parse a clip mode from any source (RTDB, chat, config). Anything unrecognised —
+ * including null/undefined — falls back to the configured default, because the
+ * failure that matters is a typo quietly turning Twitch clipping back on.
  *
  * Lives here rather than in commands/clip.js so configStore can validate and seed
  * without importing the command that imports it.
  */
 export function parseClipMode(raw) {
   const v = String(raw ?? '').trim().toLowerCase();
-  return CLIP_MODES.includes(v) ? v : 'local';
+  return CLIP_MODES.includes(v) ? v : gameConfig.clip.defaultMode;
 }
 
 /**
  * Change what `!clip` does, live (`!clipmode`). Updates the mirror synchronously
  * so the very next `!clip` obeys it without waiting for the RTDB round-trip, then
- * persists so the choice survives a restart — and outlives the container's env.
+ * persists so the choice survives every restart.
  */
 export async function setClipMode(mode) {
   if (!CLIP_MODES.includes(mode)) throw new Error(`invalid clipMode: ${mode}`);
@@ -176,6 +176,7 @@ export async function setClipMode(mode) {
   return mode;
 }
 
+/** Set the EXP gate override mode (on|off|auto). */
 export async function setExpMode(mode) {
   if (!['on', 'off', 'auto'].includes(mode)) throw new Error(`invalid expMode: ${mode}`);
   await database().ref(PATHS.configExpMode()).set(mode);
