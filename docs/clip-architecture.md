@@ -72,6 +72,35 @@ one file per !clip                      every moment, retrievable after the fact
 alignment reference* (see `!start` below). Per constraint 2 it can never improve
 quality, so it is never the video source.
 
+### Ingest A saves TWO files: horizontal and vertical
+
+Aitum Stream Suite adds a second **1080×1920 canvas** with its own replay buffer,
+**Backtrack**. The streamer composes that canvas for portrait — so its capture is a
+**natively framed 9:16 clip**, not a crop of the landscape one. That is strictly
+better than any after-the-fact crop, which can only guess where the subject was.
+
+Enabled with `CAPTURE_VERTICAL_OUTPUT` (the Backtrack output's name, normally
+`Vertical Backtrack`); unset means horizontal only. Both saves ride **one**
+obs-websocket connection: Stream Suite exposes its API as obs-websocket *vendor
+requests* under the vendor name `aitum-stream-suite`, so this needs no new
+transport, no new dependency, and **not Aitum Nexus** (Nexus is a separate
+automation product and is not on this path).
+
+The vendor requests that matter:
+
+| Request | Params |
+|---|---|
+| `get_canvas` · `get_outputs` · `version` | — |
+| `get_scenes` | `{canvas: "Vertical"}` (case-sensitive) |
+| `start_output` / `stop_output` | `{output: "Vertical Backtrack"}` |
+| `save_backtrack` | `{output: "Vertical Backtrack"}` |
+
+⚠ **`save_backtrack` returning `{"success": true}` does not mean a file exists** —
+see invariant 5. Setting it up requires a **recording path, a length, and a video
+encoder** on that output in the Aitum settings; miss any and it silently writes
+nothing. **OBS's own log is the source of truth** (`Wrote replay buffer to '…'`) —
+check it before believing either the API or a filesystem listing.
+
 ### Why Ingest A currently carries the load
 
 Ingest B was the original plan for the archiver — re-cut any moment from a
@@ -109,6 +138,7 @@ configured.
 | `!clip` command, `CLIP_MODE` routing | `src/commands/clip.js` |
 | Capture facade (backend-agnostic, rate limit) | `src/integrations/capture.js` |
 | obs-websocket v5 client + replay-buffer sequence | `src/integrations/obsWebsocket.js` |
+| Aitum vertical Backtrack (vendor requests) | `src/integrations/obsWebsocket.js` (`verticalBacktrackSequence`) |
 | Twitch clip creation (Helix) | `src/twitch/clips.js` |
 | `!start` sync anchor | `src/commands/start.js`, `src/db/clipSync.js` |
 | Config contract | `.env.example` (`CLIP_MODE`, `OBS_*`, `CAPTURE_*`) |
@@ -129,9 +159,14 @@ configured.
 4. **The local-capture rate limit is channel-wide**, deliberately separate from
    `!clip`'s per-user cooldown — N viewers clipping in a minute must not write N
    large files.
-5. **Aitum is a future second backend**, behind the same facade. It does not change
-   any of the above.
-6. **No real addresses, hostnames or credentials in the repo** — this is public. Use
+5. **The vertical capture reports `requested`, never `saved`.** Aitum answers
+   `{"success": true}` on *acceptance*, and exposes no way to read back the written
+   path — so acceptance must never be promoted to "a file exists". Verified the hard
+   way: a misconfigured output returned success for 90 minutes while writing nothing.
+   (`test/rules/capture.test.js` asserts the result carries neither `path` nor `saved`)
+6. **A vertical failure never costs the horizontal capture.** It runs after the
+   horizontal save and is caught separately.
+7. **No real addresses, hostnames or credentials in the repo** — this is public. Use
    placeholders (`ws://<obs-host>:4455`).
 
 ---
@@ -140,12 +175,16 @@ configured.
 
 | Thing | State |
 |---|---|
-| `!clip` local capture | built, deployed, verified against a real OBS |
+| `!clip` local capture (horizontal) | built, deployed, verified against a real OBS |
+| `!clip` vertical capture (Aitum Backtrack) | built, **verified end to end** — one `!clip` wrote a 1920×1080 and a 1080×1920 file one second apart |
 | `CLIP_MODE` default `local` | live on faraday (v0.8.0) |
 | Local capture on prod | **inert** — no `OBS_WEBSOCKET_URL` set; boot log warns |
 | Chat Bot badge on the prod channel | **falling back to IRC** — bot is not yet a moderator there |
 | Full-session recording (Ingest B) | not established |
 | okra-clip-archiver | processing half built; ingest source unsettled |
+
+`CLIP_MODE` and `CAPTURE_*` are **environment variables read once at boot**, not RTDB
+config — changing them needs a container restart, unlike the EXP gate or chat mute.
 
 ---
 

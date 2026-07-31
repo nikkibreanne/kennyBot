@@ -63,9 +63,17 @@ export function initCapture(opts = {}, logger = console) {
     password: opts.password ?? process.env.OBS_WEBSOCKET_PASSWORD ?? '',
     timeoutMs: opts.timeoutMs ?? Number(process.env.OBS_TIMEOUT_MS || 8000),
     minIntervalMs: opts.minIntervalMs ?? Number(process.env.CAPTURE_MIN_INTERVAL_MS || 60_000),
+    // Aitum Stream Suite's vertical (9:16) Backtrack output, saved alongside the
+    // horizontal replay buffer on the same connection. Unset = horizontal only.
+    verticalOutput: opts.verticalOutput ?? process.env.CAPTURE_VERTICAL_OUTPUT ?? '',
   };
   lastAt = 0;
-  logger.info?.('local capture ready', { backend, url, minIntervalMs: cfg.minIntervalMs });
+  logger.info?.('local capture ready', {
+    backend,
+    url,
+    minIntervalMs: cfg.minIntervalMs,
+    vertical: cfg.verticalOutput || 'disabled',
+  });
 }
 
 /** Test seam: inject a fake trigger. Pass `null` to disable capture. */
@@ -97,8 +105,28 @@ export async function triggerCapture(logger = console, now = Date.now()) {
 
   try {
     const res = cfg.backend === 'test' ? await cfg.trigger() : await saveReplayBuffer(cfg);
-    logger.info?.('local capture saved', { path: res?.path ?? null, startedBuffer: Boolean(res?.started) });
-    return { ok: true, path: res?.path ?? null, started: Boolean(res?.started) };
+    // `vertical.requested` is NOT proof of a file — Aitum answers success on
+    // acceptance and writes nothing when its output has no recording path. Logged
+    // as what it is so a silent misconfiguration is visible in `docker logs`.
+    logger.info?.('local capture saved', {
+      path: res?.path ?? null,
+      startedBuffer: Boolean(res?.started),
+      ...(res?.vertical
+        ? {
+            verticalRequested: Boolean(res.vertical.requested),
+            verticalStartedBuffer: Boolean(res.vertical.started),
+            ...(res.vertical.ok ? {} : { verticalError: res.vertical.reason }),
+          }
+        : {}),
+    });
+    // `vertical` is present only when a vertical output is configured, so callers
+    // (and tests) that predate it see exactly the shape they always did.
+    return {
+      ok: true,
+      path: res?.path ?? null,
+      started: Boolean(res?.started),
+      ...(res?.vertical ? { vertical: res.vertical } : {}),
+    };
   } catch (err) {
     // A failed attempt shouldn't burn the rate-limit window — let the next !clip
     // retry immediately (the PC may have just come back).

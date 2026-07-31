@@ -22,7 +22,13 @@ The four that get forgotten most:
 
 Invariants (each has a test): `CLIP_MODE` defaults to `local` and never silently
 falls back to Twitch · capture failure never breaks chat · chat replies leak nothing
-about the capture rig · the capture rate limit is channel-wide, not per-user.
+about the capture rig · the capture rate limit is channel-wide, not per-user · the
+vertical (Aitum Backtrack) capture reports `requested`, **never** `saved` — the
+plugin answers `success` on acceptance and gives no way to confirm the write.
+
+When verifying a capture, **read OBS's own log** (`Wrote replay buffer to '…'`) —
+not the vendor API's return value, and not a filesystem listing (WSL serves stale
+metadata for `/mnt/c`, which has already caused one wrong diagnosis).
 
 ## Repo conventions
 

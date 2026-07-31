@@ -198,6 +198,7 @@ gitignored). Secrets arrive at runtime, never baked into the image.
 | `TWITCH_SEND_MODE` | chat transport — `auto` (default, Helix + IRC fallback) · `helix` (Chat Bot badge) · `irc` |
 | `CLIP_MODE` | what `!clip` does — `local` (**default**: OBS/Aitum capture only, nothing posted to Twitch) · `twitch` · `both` |
 | `OBS_WEBSOCKET_URL` / `OBS_WEBSOCKET_PASSWORD` | the streamer's OBS (obs-websocket, over the tailnet) — required for the local capture |
+| `CAPTURE_VERTICAL_OUTPUT` | *optional* — Aitum Stream Suite Backtrack output name (e.g. `Vertical Backtrack`); also saves a natively-framed 9:16 clip. Unset = horizontal only |
 | `OBS_TIMEOUT_MS` / `CAPTURE_MIN_INTERVAL_MS` / `CAPTURE_BACKEND` | *optional* capture knobs — request deadline, channel-wide gap between local saves, backend |
 | `INSTANCE_ID` / `LOG_LEVEL` / `HEARTBEAT_FILE` | optional runtime knobs |
 
