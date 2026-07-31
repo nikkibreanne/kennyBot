@@ -21,7 +21,7 @@ test('an unknown backend disables capture rather than guessing', () => {
 });
 
 test('a valid obs-websocket config enables capture', () => {
-  initCapture({ backend: 'obs-websocket', url: 'ws://100.82.136.16:4455' }, noopLogger);
+  initCapture({ backend: 'obs-websocket', url: 'ws://obs.invalid:4455' }, noopLogger);
   assert.equal(captureReady(), websocketAvailable(), 'enabled iff the runtime has WebSocket');
 });
 

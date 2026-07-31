@@ -144,6 +144,41 @@ node index.js                                                     # terminal 2
 Test offline with `!exp on` (bypasses the live gate) and the mod commands
 (`!boss set …`, `!drop`, `!boss endnow`) — you never need to go live to test.
 
+## Clip capture
+
+> **Full detail: [`docs/clip-architecture.md`](docs/clip-architecture.md).** Read it
+> before changing anything clip-related — it records the physical constraints that
+> every past design error came from contradicting.
+
+Two **separate ingest** paths feed one **shared processing** stage:
+
+| | **Ingest A — `!clip` capture** (this repo) | **Ingest B — full-session recording** |
+|---|---|---|
+| Trigger | `!clip` in chat, while live | OBS records the whole session |
+| Source | OBS replay buffer (last ~60s) | one long local recording |
+| Covers | only moments someone `!clip`ped | any moment, including viewer-clipped ones |
+| Needs | OBS reachable while live | disk + sustained encode for hours |
+
+Both feed **okra-clip-archiver** (separate repo), which is *source-agnostic* — it
+takes any local video plus timestamps and produces the two-box 9:16 re-cut. Ingest is
+separate; processing is shared. **kennyBot never hands files to the archiver.**
+
+Two things that are commonly assumed and are false:
+
+- **A Twitch VOD is not a high-quality source.** It's the broadcast, capped at the
+  stream resolution — it can never be "the 4K version". The archiver uses it only to
+  *align timestamps* against a local recording.
+- **There is no retroactive capture.** The replay buffer holds ~60s, and Twitch clips
+  appear minutes later, so reacting to viewer-created clips cannot work. Acting
+  *during* the moment is the only option.
+
+Both ingest paths are bounded by the same ceiling: **the OBS canvas resolution and
+Recording settings.** Neither exceeds stream quality until those are raised.
+
+The one point of contact is `!start` (`src/db/clipSync.js`), which writes a per-stream
+sync anchor to RTDB — *data the archiver reads*, not a file handoff, and it works
+whether or not local capture is configured.
+
 ## Environment contract
 
 Names only — **never commit values** (`.env*` and `serviceAccount*.json` are

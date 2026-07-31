@@ -3,8 +3,14 @@
 //
 // A Twitch clip is capped at the STREAM resolution, so it can never be a 4K
 // keepsake. This fires a capture at full recording quality on the streamer's
-// machine (reached over the tailnet) — the default half of `!clip` (CLIP_MODE),
-// and what the okra-clip-archiver later picks up.
+// machine (reached over their private network) — the default half of `!clip`
+// (CLIP_MODE).
+//
+// This is a SELF-CONTAINED workflow: the file it saves is the finished artefact.
+// It is NOT an input to okra-clip-archiver, which is an unrelated tool that
+// re-cuts viewer-made clips out of the full VOD after the fact. Same subject,
+// different jobs — see the README's "Two clip workflows" section. The only thing
+// kennyBot does for the archiver is the `!start` sync anchor (src/db/clipSync.js).
 //
 // Backend-agnostic on purpose: obs-websocket today (free, password-authed, built
 // into OBS 28+), Aitum's :7777 rule API later. Commands call `triggerCapture()`
