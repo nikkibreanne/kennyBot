@@ -10,14 +10,18 @@ turn-by-turn (spec §5.8). Authoritative game state lives in **Firebase Realtime
 Database**; the website reads it (read-only). The bot is **outbound-only** and
 ships as a container.
 
-> **Public docs** (`docs/`): [`raid-game-spec.md`](docs/raid-game-spec.md) — the game,
-> incl. §5.8 the automated-combat model · [`CONFIG.md`](docs/CONFIG.md) — every
-> tunable, for the channel owner · [`clip-architecture.md`](docs/clip-architecture.md)
-> — **read this before touching anything clip-related.**
+> **Docs** (all in `docs/`):
+> [`raid-game-spec.md`](docs/raid-game-spec.md) — the game, incl. §5.8 the
+> automated-combat model ·
+> [`IMPLEMENTATION.md`](docs/IMPLEMENTATION.md) — the build & deployment contract;
+> this is what the `§E` / `§G` / `§L` markers throughout the source refer to ·
+> [`CONFIG.md`](docs/CONFIG.md) — every tunable, for the channel owner ·
+> [`clip-architecture.md`](docs/clip-architecture.md) — **read before touching
+> anything clip-related.**
 >
-> `IMPLEMENTATION.md` — cited as `§E`, `§G`, `§L` … throughout the source — is a
-> **private** note in the gitignored `.workspace/`, not a public doc. Those section
-> markers are internal breadcrumbs; nothing here depends on resolving them.
+> Operational specifics — hostnames, addresses, credentials, network topology —
+> are deliberately **not** in this repo; they live in a private runbook. Local
+> scratch notes go in `.workspace/` (gitignored).
 
 ## Status
 
@@ -384,9 +388,10 @@ The site reads `config/raid` (`{seasonId, weekId, phase, locksAt, startsAt}`),
 (the muster roster, aggregates, and the append-only combat-event `log`),
 `players/<id>`, `usernames/<login>` (login→id index), and `leaderboard/<season>`.
 The combat-log + signup shapes are specified in
-[`docs/raid-game-spec.md`](docs/raid-game-spec.md) §5.8 (and, privately,
-`.workspace/IMPLEMENTATION.md` §L). The UI side lives in the **website repo**, not
-here. **Changing any path/shape means telling the UI track.**
+[`docs/raid-game-spec.md`](docs/raid-game-spec.md) §5.8 and
+[`docs/IMPLEMENTATION.md`](docs/IMPLEMENTATION.md) §L. The UI side (`raid-game-ui.md`)
+lives in the **website repo**, not here. **Changing any path/shape means telling the
+UI track.**
 
 ## Decisions (confirmed with the owner)
 
