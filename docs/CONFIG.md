@@ -207,6 +207,25 @@ unless you're also changing the website.
 
 ---
 
+## `clip` — what `!clip` does
+
+| Key | Default | What it controls | Effect of changing it |
+|---|---|---|---|
+| `defaultMode` | `'local'` | The **seed default** for `!clip`: `local` (trigger the streamer's OBS/Aitum capture, post nothing to Twitch), `twitch` (Twitch clip only), `both`. Stored in RTDB on first boot; thereafter controlled by `!clipmode`. | Leave `local`. A Twitch clip is capped at your *stream* resolution, so it can never be the high-quality keepsake — that's the whole point of the local capture. (Change it live with `!clipmode`, not by editing this after first boot — see the seeding caveat.) |
+
+Same seeding rule as `defaultExpMode`: **editing this does nothing to an existing
+deployment**, because `config/clipMode` is already populated. Use `!clipmode` in chat.
+
+`!clipmode status` also reports whether each half can actually run — useful when
+`!clip` is telling viewers clipping isn't set up and you want to know which piece is
+missing.
+
+> Clip **length** is not configured here, or anywhere in kennyBot — it comes from
+> OBS's Replay Buffer and Aitum's Backtrack settings on the streamer's PC. See
+> [`clip-architecture.md`](clip-architecture.md).
+
+---
+
 ## `lock` — single-instance lease
 
 kennyBot must run as exactly one instance (two = double EXP/loot). A lease in

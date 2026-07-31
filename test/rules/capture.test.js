@@ -23,7 +23,9 @@ test('capture is disabled when no OBS url is configured', () => {
 
 test('an unknown backend disables capture rather than guessing', () => {
   initCapture({ backend: 'aitum', url: 'ws://x:4455' }, noopLogger);
-  assert.equal(captureReady(), false, 'aitum is not implemented yet — must not silently use obs');
+  // Aitum IS supported — but via obs-websocket vendor requests on the obs-websocket
+  // backend, not as a backend name. An unknown name must disable capture, never guess.
+  assert.equal(captureReady(), false, 'an unrecognised backend must not silently use obs');
 });
 
 test('a valid obs-websocket config enables capture', () => {

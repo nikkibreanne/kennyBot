@@ -48,7 +48,7 @@ export default {
   names: ['clip'],
   mod: false,
   cooldownMs: 60_000, // per-user: a viewer can clip at most once a minute
-  help: '!clip — clip the last ~30s of the stream',
+  help: '!clip — capture the last ~60s of the stream',
   async run({ user, reply, logger }) {
     const mode = activeClipMode();
     let twitch = mode !== 'local' && clipsReady();

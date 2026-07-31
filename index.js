@@ -71,6 +71,11 @@ function requireEnv() {
 
 async function touchHeartbeat() {
   try {
+    // clipMode is RUNTIME config — a mod can change it with `!clipmode` at any
+    // moment, so read it at write time. Capturing it once at boot would make the
+    // snapshot quietly lie about what the bot is doing, which is the one thing a
+    // health snapshot must never do.
+    health.clipMode = activeClipMode();
     await writeFile(HEARTBEAT_FILE, JSON.stringify({ ts: Date.now(), ...health }));
   } catch {
     /* best effort */
@@ -201,8 +206,7 @@ async function main() {
   // restores the Helix-clip-only behaviour; 'both' does each.
   // Lives in RTDB (`config/clipMode`), seeded once from config.clip.defaultMode and
   // changed live by mods with `!clipmode` — there is no env var to disagree with.
-  const clipMode = activeClipMode();
-  health.clipMode = clipMode;
+  const clipMode = activeClipMode(); // logged once; the snapshot re-reads it live
   logger.info('clip mode', { mode: clipMode, localCapture: captureReady() });
   if (clipMode === 'local' && !captureReady()) {
     logger.warn(

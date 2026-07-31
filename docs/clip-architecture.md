@@ -96,10 +96,15 @@ The vendor requests that matter:
 | `save_backtrack` | `{output: "Vertical Backtrack"}` |
 
 ⚠ **`save_backtrack` returning `{"success": true}` does not mean a file exists** —
-see invariant 5. Setting it up requires a **recording path, a length, and a video
-encoder** on that output in the Aitum settings; miss any and it silently writes
-nothing. **OBS's own log is the source of truth** (`Wrote replay buffer to '…'`) —
-check it before believing either the API or a filesystem listing.
+it reports acceptance, and the vendor API exposes no way to read back the written
+path (invariant 5). Configure the output in Aitum Stream Suite Settings → Output →
+(Backtrack) Output Settings: recording path, Maximum Replay Time, Maximum Memory.
+
+**OBS's own log is the source of truth** (`Wrote replay buffer to '…'`). During
+bring-up this was verified the hard way in the opposite direction: captures were
+landing correctly for over an hour while a WSL directory listing showed nothing —
+`/mnt/c` served stale metadata, and `ls -t` even reported a four-day-old file as the
+newest. Trust the log over the API's reply *and* over the filesystem.
 
 ### Clip length — set in OBS, not in kennyBot
 

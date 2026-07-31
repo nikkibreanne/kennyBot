@@ -13,8 +13,12 @@
 // kennyBot does for the archiver is the `!start` sync anchor (src/db/clipSync.js).
 //
 // Backend-agnostic on purpose: obs-websocket today (free, password-authed, built
-// into OBS 28+), Aitum's :7777 rule API later. Commands call `triggerCapture()`
-// and never learn which one is configured.
+// into OBS 28+). Commands call `triggerCapture()` and never learn what is behind it.
+//
+// NOTE: Aitum is ALREADY integrated — but through obs-websocket VENDOR REQUESTS on
+// this same connection, not as a separate backend and not via Aitum Nexus's :7777
+// API (Nexus is a different product and is not on this path). CAPTURE_BACKEND has
+// no 'aitum' value by design; see obsWebsocket.js verticalBacktrackSequence.
 //
 // EVERY failure here is non-fatal and RESOLVES rather than throwing. The
 // streamer's PC may be off, OBS may be closed, the tailnet may be down — the
@@ -34,7 +38,8 @@ let cfg = null;
 let lastAt = 0;
 
 /**
- * @param {{ backend?: string, url?: string, password?: string, timeoutMs?: number }} [opts]
+ * @param {{ backend?: string, url?: string, password?: string, timeoutMs?: number,
+ *          minIntervalMs?: number, verticalOutput?: string }} [opts]
  * @param {any} [logger]
  */
 export function initCapture(opts = {}, logger = console) {
@@ -89,7 +94,14 @@ export function captureReady() {
 
 /**
  * Fire the local capture. Never throws.
- * @returns {Promise<{ ok: boolean, path?: string|null, started?: boolean, reason?: string }>}
+ *
+ * `vertical` is present only when a vertical output is configured. Note it reports
+ * `requested`, NOT `saved` — Aitum answers success on acceptance and gives us no way
+ * to confirm a file was written.
+ *
+ * @returns {Promise<{ ok: boolean, path?: string|null, started?: boolean, reason?: string,
+ *   retryInMs?: number,
+ *   vertical?: { ok: boolean, requested?: boolean, started?: boolean, reason?: string } }>}
  */
 export async function triggerCapture(logger = console, now = Date.now()) {
   if (!cfg) return { ok: false, reason: 'not configured' };
