@@ -67,6 +67,8 @@ scripts/synthetic-chat.js no-stream harness that drives the whole loop
 | `!equip <item>` | everyone | equip an owned item into its slot |
 | `!grab` / `!loot` | **subs** | roll for the active drop (independent rolls within the window) |
 | `!muster` | everyone* | sign up for this season's raid roster (during muster) / see status |
+| `!clip` | everyone | capture the last ~60s — 16:9 + 9:16 local files by default; Twitch clip only if the mode says so |
+| `!clipmode <targets>` | mod | pick which of `!clip`'s three outputs run — `horizontal` · `vertical` · `twitch`, combined freely (see below) |
 | `!exp on\|off\|auto\|status` | mod | control the EXP gate (`on` bypasses live for testing) |
 | `!mute on\|off\|status` | mod | silence the bot's chat output when it gets noisy; it keeps listening, tracking EXP, and holding the lease — bare `!mute` toggles |
 | `!drop [item]` | mod | force a single loot drop |
@@ -175,6 +177,50 @@ Two things that are commonly assumed and are false:
 Both ingest paths are bounded by the same ceiling: **the OBS canvas resolution and
 Recording settings.** Neither exceeds stream quality until those are raised.
 
+### Switching what `!clip` does, live
+
+`!clip` can produce **three independent outputs**, and the mode is the *set* of them
+you want — so every combination is one command, with no extra config values:
+
+| Target | What you get |
+|---|---|
+| `horizontal` | OBS's main replay buffer → **16:9** file on the streamer's PC |
+| `vertical` | Aitum's Backtrack output → **9:16** file, natively framed for portrait |
+| `twitch` | Helix Create Clip → a public **clip link** posted in chat |
+
+```
+!clipmode horizontal vertical         both local files, nothing on Twitch (default)
+!clipmode horizontal                  16:9 only
+!clipmode vertical twitch             9:16 file + a Twitch link
+!clipmode horizontal vertical twitch  everything
+!clipmode local                       alias for horizontal+vertical
+!clipmode all                         alias for all three
+!clipmode off                         !clip disabled
+!clipmode status                      what's set, and whether each part can run
+```
+
+Order doesn't matter and commas are optional — `vertical,horizontal` stores the same
+value as `horizontal vertical`. One unrecognised word rejects the whole line rather
+than silently applying part of it, because the symptom of a half-applied mode is a
+clip that quietly never gets made.
+
+`vertical` also needs `CAPTURE_VERTICAL_OUTPUT` set (that's the output's *name* —
+plumbing); the mode decides *whether* to save it. Both must hold, and `status` says
+which one is missing.
+
+Mod-only, takes effect on the **next** `!clip`, and persists across restarts.
+
+This is deliberately a **runtime** setting with **no environment variable**. If the
+streamer's OBS dies mid-stream, `local` mode leaves `!clip` with nothing to do;
+recovering via SSH, an env-file edit and a container restart is not a route anyone
+takes mid-show. The value lives in RTDB (`config/clipMode`), seeded once from
+`clip.defaultMode` in `src/config.js` — the same shape as the EXP gate. There is no
+second place that can disagree with it.
+
+`!clipmode status` reports the mode *and* whether each half can actually run, and a
+switch to a mode nothing is configured for warns immediately rather than leaving a
+viewer to discover it.
+
 The one point of contact is `!start` (`src/db/clipSync.js`), which writes a per-stream
 sync anchor to RTDB — *data the archiver reads*, not a file handoff, and it works
 whether or not local capture is configured.
@@ -196,8 +242,8 @@ gitignored). Secrets arrive at runtime, never baked into the image.
 | `FIREBASE_DATABASE_EMULATOR_HOST` | *local only* — targets the emulator; leave empty in prod |
 | `TOKEN_STORE_DIR` | dir for the persisted refresh-token store (the `/data` volume) |
 | `TWITCH_SEND_MODE` | chat transport — `auto` (default, Helix + IRC fallback) · `helix` (Chat Bot badge) · `irc` |
-| `CLIP_MODE` | what `!clip` does — `local` (**default**: OBS/Aitum capture only, nothing posted to Twitch) · `twitch` · `both` |
 | `OBS_WEBSOCKET_URL` / `OBS_WEBSOCKET_PASSWORD` | the streamer's OBS (obs-websocket, over the tailnet) — required for the local capture |
+| `CAPTURE_VERTICAL_OUTPUT` | *optional* — Aitum Stream Suite Backtrack output name (e.g. `Vertical Backtrack`); also saves a natively-framed 9:16 clip. Unset = horizontal only |
 | `OBS_TIMEOUT_MS` / `CAPTURE_MIN_INTERVAL_MS` / `CAPTURE_BACKEND` | *optional* capture knobs — request deadline, channel-wide gap between local saves, backend |
 | `INSTANCE_ID` / `LOG_LEVEL` / `HEARTBEAT_FILE` | optional runtime knobs |
 

@@ -14,6 +14,11 @@ const mirror = {
   // connected — listening, granting EXP, processing drops, holding the lease —
   // but sends nothing to chat. Persisted so a restart keeps the mods' choice.
   chatMuted: false,
+  // What !clip does: 'local' | 'twitch' | 'both'. Seeded once from
+  // config.clip.defaultMode; RTDB is then the only source, so a mod can flip it
+  // from chat — the streamer's OBS can die mid-stream, and re-deploying the
+  // container to get Twitch clips back is not an acceptable recovery path.
+  clipMode: null, // null until the mirror is warm; readers fall back to the config default
   season: null,
   raid: null, // config/raid: { seasonId, weekId, phase, locksAt, startsAt }
   dropScheduler: { enabled: gameConfig.loot.scheduler.enabled, intervalSec: gameConfig.loot.scheduler.intervalSec },
@@ -34,10 +39,15 @@ export async function startConfigMirror(logger = console) {
   await db.ref(PATHS.configExpMode()).transaction((v) => (v == null ? gameConfig.liveGate.defaultExpMode : v));
   await db.ref(PATHS.configLive()).transaction((v) => (v == null ? false : v));
   await db.ref(PATHS.configChatMuted()).transaction((v) => (v == null ? false : v));
+  // Seeded once from config.js, exactly like expMode above — never clobbered, so a
+  // mod's `!clipmode` survives every restart. There is deliberately no env var:
+  // one source of truth beats two that can disagree.
+  await db.ref(PATHS.configClipMode()).transaction((v) => (v == null ? parseClipMode(gameConfig.clip.defaultMode) : v));
 
   const liveRef = db.ref(PATHS.configLive());
   const expRef = db.ref(PATHS.configExpMode());
   const mutedRef = db.ref(PATHS.configChatMuted());
+  const clipRef = db.ref(PATHS.configClipMode());
   const seasonRef = db.ref(PATHS.seasonCurrent());
   const raidRef = db.ref(PATHS.configRaid());
   const dropRef = db.ref(PATHS.configDropScheduler());
@@ -48,26 +58,36 @@ export async function startConfigMirror(logger = console) {
   liveRef.on('value', (s) => { mirror.live = Boolean(s.val()); });
   expRef.on('value', (s) => { mirror.expMode = s.val() || gameConfig.liveGate.defaultExpMode; });
   mutedRef.on('value', (s) => { mirror.chatMuted = Boolean(s.val()); });
+  clipRef.on('value', (s) => { mirror.clipMode = parseClipMode(s.val()); });
   seasonRef.on('value', (s) => { mirror.season = s.val(); });
   raidRef.on('value', (s) => { mirror.raid = s.val(); });
   dropRef.on('value', (s) => { if (s.val()) mirror.dropScheduler = s.val(); });
 
   // Wait for the initial reads so the mirror is warm before chat starts.
-  const [liveSnap, expSnap, mutedSnap, seasonSnap, raidSnap, dropSnap] = await Promise.all([
-    liveRef.get(), expRef.get(), mutedRef.get(), seasonRef.get(), raidRef.get(), dropRef.get(),
+  const [liveSnap, expSnap, mutedSnap, clipSnap, seasonSnap, raidSnap, dropSnap] = await Promise.all([
+    liveRef.get(), expRef.get(), mutedRef.get(), clipRef.get(), seasonRef.get(), raidRef.get(), dropRef.get(),
   ]);
   mirror.live = Boolean(liveSnap.val());
   mirror.expMode = expSnap.val() || gameConfig.liveGate.defaultExpMode;
   mirror.chatMuted = Boolean(mutedSnap.val());
+  mirror.clipMode = parseClipMode(clipSnap.val());
   mirror.season = seasonSnap.val();
   mirror.raid = raidSnap.val();
   if (dropSnap.val()) mirror.dropScheduler = dropSnap.val();
-  logger.info?.('config mirror warm', { live: mirror.live, expMode: mirror.expMode, chatMuted: mirror.chatMuted });
+  logger.info?.('config mirror warm', {
+    live: mirror.live, expMode: mirror.expMode, chatMuted: mirror.chatMuted, clipMode: mirror.clipMode,
+  });
 }
 
 /** Current in-memory config view (hot path). */
 export function getConfig() {
-  return { live: mirror.live, expMode: mirror.expMode, chatMuted: mirror.chatMuted, season: mirror.season };
+  return {
+    live: mirror.live,
+    expMode: mirror.expMode,
+    chatMuted: mirror.chatMuted,
+    clipMode: mirror.clipMode,
+    season: mirror.season,
+  };
 }
 
 /** True when a mod has muted the bot's outbound chat (`!mute`). Hot-path read. */
@@ -116,6 +136,111 @@ export async function setLive(value, source = 'unknown', logger = console) {
   await database().ref(PATHS.configLive()).set(next);
   logger.info?.('live status changed', { live: next, source });
   return true;
+}
+
+/**
+ * Test seam: prime the in-memory mirror without RTDB. Unit tests run with no
+ * database, so the mirror is otherwise stuck at its cold defaults and any
+ * "live config wins" behaviour is untestable offline.
+ * @param {Partial<typeof mirror>} patch
+ */
+export function primeConfigForTest(patch) {
+  Object.assign(mirror, patch);
+}
+
+/**
+ * The three things `!clip` can independently produce. The mode is a SET of these,
+ * not a fixed preset, so every combination is expressible with one config value:
+ *   horizontal — OBS's main replay buffer  → 16:9 file on the streamer's PC
+ *   vertical   — Aitum's Backtrack output  → 9:16 file, natively framed
+ *   twitch     — Helix Create Clip         → a public clip link in chat
+ */
+export const CLIP_TARGETS = ['horizontal', 'vertical', 'twitch'];
+
+/**
+ * Shorthands, kept so existing values and muscle memory keep working. `local`
+ * predates the vertical canvas and has always meant "the local capture", which is
+ * now explicitly both local files.
+ */
+export const CLIP_MODE_ALIASES = {
+  local: ['horizontal', 'vertical'],
+  both: ['horizontal', 'vertical', 'twitch'],
+  all: ['horizontal', 'vertical', 'twitch'],
+  off: [],
+  none: [],
+};
+
+/** Legal single words for `!clipmode`, for usage messages. */
+export const CLIP_MODES = [...CLIP_TARGETS, ...Object.keys(CLIP_MODE_ALIASES)];
+
+/**
+ * Parse a clip mode from any source (RTDB, chat, config). Anything unrecognised —
+ * including null/undefined — falls back to the configured default, because the
+ * failure that matters is a typo quietly turning Twitch clipping back on.
+ *
+ * Lives here rather than in commands/clip.js so configStore can validate and seed
+ * without importing the command that imports it.
+ */
+export function parseClipMode(raw) {
+  const targets = readClipTargets(raw);
+  if (targets === null) return parseClipMode(gameConfig.clip.defaultMode);
+  // 'off' is a real, storable choice — an empty string would round-trip back to
+  // the default on the next read, silently re-enabling clipping a mod turned off.
+  return targets.length ? targets.join(',') : 'off';
+}
+
+/**
+ * Parse a mode into its target list, or `null` if ANY token is unrecognised.
+ *
+ * All-or-nothing on purpose: silently dropping a bad token would leave a mode that
+ * looks accepted but does less than asked, and the failure that matters here is a
+ * clip quietly not being made. Callers decide what to do with `null` — RTDB reads
+ * fall back to the default, `!clipmode` shows usage.
+ *
+ * Accepts commas or spaces, any order, aliases mixed in: `local twitch`,
+ * `horizontal,vertical`, `all`.
+ *
+ * @returns {string[]|null} canonical targets in CLIP_TARGETS order, deduped
+ */
+export function readClipTargets(raw) {
+  const words = String(raw ?? '').toLowerCase().split(/[\s,]+/).filter(Boolean);
+  if (!words.length) return null;
+  const set = new Set();
+  for (const w of words) {
+    if (CLIP_TARGETS.includes(w)) set.add(w);
+    else if (w in CLIP_MODE_ALIASES) CLIP_MODE_ALIASES[w].forEach((t) => set.add(t));
+    else return null;
+  }
+  return CLIP_TARGETS.filter((t) => set.has(t)); // canonical order, so 'a,b' === 'b,a'
+}
+
+/**
+ * The stored mode as booleans, for callers that just want to know what to do.
+ * @returns {{ horizontal: boolean, vertical: boolean, twitch: boolean, none: boolean }}
+ */
+export function clipTargets(mode) {
+  const list = readClipTargets(mode) ?? readClipTargets(gameConfig.clip.defaultMode) ?? [];
+  return {
+    horizontal: list.includes('horizontal'),
+    vertical: list.includes('vertical'),
+    twitch: list.includes('twitch'),
+    none: list.length === 0,
+  };
+}
+
+/**
+ * Change what `!clip` does, live (`!clipmode`). Updates the mirror synchronously
+ * so the very next `!clip` obeys it without waiting for the RTDB round-trip, then
+ * persists so the choice survives every restart.
+ */
+export async function setClipMode(mode) {
+  if (readClipTargets(mode) === null) throw new Error(`invalid clipMode: ${mode}`);
+  // Store the CANONICAL form, so 'local', 'vertical horizontal' and
+  // 'horizontal,vertical' all persist identically and comparisons are trivial.
+  const canonical = parseClipMode(mode);
+  mirror.clipMode = canonical;
+  await database().ref(PATHS.configClipMode()).set(canonical);
+  return canonical;
 }
 
 /** Set the EXP gate override mode (on|off|auto). */

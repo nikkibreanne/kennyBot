@@ -18,9 +18,8 @@ import { buildAuth } from './src/twitch/auth.js';
 import { createSender } from './src/twitch/sender.js';
 import { initClips } from './src/twitch/clips.js';
 import { initCapture, captureReady } from './src/integrations/capture.js';
-// The !clip command owns CLIP_MODE; index.js only resolves it once at boot so a
-// typo is caught in the startup log rather than on the first viewer's !clip.
-import { resolveClipMode } from './src/commands/clip.js';
+// Read once at boot purely to log what's in force; the live value is RTDB-backed.
+import { activeClipMode } from './src/commands/clip.js';
 import { startLivePoll } from './src/twitch/liveGate.js';
 import { startEventSub } from './src/twitch/eventsub.js';
 import { advanceRaidPhases, refreshMusteredRoster } from './src/db/raid.js';
@@ -72,6 +71,11 @@ function requireEnv() {
 
 async function touchHeartbeat() {
   try {
+    // clipMode is RUNTIME config — a mod can change it with `!clipmode` at any
+    // moment, so read it at write time. Capturing it once at boot would make the
+    // snapshot quietly lie about what the bot is doing, which is the one thing a
+    // health snapshot must never do.
+    health.clipMode = activeClipMode();
     await writeFile(HEARTBEAT_FILE, JSON.stringify({ ts: Date.now(), ...health }));
   } catch {
     /* best effort */
@@ -200,16 +204,13 @@ async function main() {
   // capture and post NO Twitch clip — a Twitch clip is capped at the stream
   // resolution, so the local recording is the copy worth keeping. 'twitch'
   // restores the Helix-clip-only behaviour; 'both' does each.
-  const rawClipMode = (process.env.CLIP_MODE || '').toLowerCase();
-  const clipMode = resolveClipMode(rawClipMode);
-  if (rawClipMode && rawClipMode !== clipMode) {
-    logger.warn('unknown CLIP_MODE — using local', { value: process.env.CLIP_MODE });
-  }
-  health.clipMode = clipMode;
+  // Lives in RTDB (`config/clipMode`), seeded once from config.clip.defaultMode and
+  // changed live by mods with `!clipmode` — there is no env var to disagree with.
+  const clipMode = activeClipMode(); // logged once; the snapshot re-reads it live
   logger.info('clip mode', { mode: clipMode, localCapture: captureReady() });
   if (clipMode === 'local' && !captureReady()) {
     logger.warn(
-      '!clip has nothing to do: CLIP_MODE=local but no capture backend is configured — set OBS_WEBSOCKET_URL, or CLIP_MODE=twitch/both',
+      '!clip has nothing to do: clip mode is local but no capture backend is configured — set OBS_WEBSOCKET_URL, or switch with `!clipmode twitch` in chat',
     );
   }
 

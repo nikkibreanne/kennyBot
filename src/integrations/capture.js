@@ -4,7 +4,7 @@
 // A Twitch clip is capped at the STREAM resolution, so it can never be a 4K
 // keepsake. This fires a capture at full recording quality on the streamer's
 // machine (reached over their private network) — the default half of `!clip`
-// (CLIP_MODE).
+// (see the live clip mode / `!clipmode`).
 //
 // This is a SELF-CONTAINED workflow: the file it saves is the finished artefact.
 // It is NOT an input to okra-clip-archiver, which is an unrelated tool that
@@ -13,8 +13,12 @@
 // kennyBot does for the archiver is the `!start` sync anchor (src/db/clipSync.js).
 //
 // Backend-agnostic on purpose: obs-websocket today (free, password-authed, built
-// into OBS 28+), Aitum's :7777 rule API later. Commands call `triggerCapture()`
-// and never learn which one is configured.
+// into OBS 28+). Commands call `triggerCapture()` and never learn what is behind it.
+//
+// NOTE: Aitum is ALREADY integrated — but through obs-websocket VENDOR REQUESTS on
+// this same connection, not as a separate backend and not via Aitum Nexus's :7777
+// API (Nexus is a different product and is not on this path). CAPTURE_BACKEND has
+// no 'aitum' value by design; see obsWebsocket.js verticalBacktrackSequence.
 //
 // EVERY failure here is non-fatal and RESOLVES rather than throwing. The
 // streamer's PC may be off, OBS may be closed, the tailnet may be down — the
@@ -34,7 +38,8 @@ let cfg = null;
 let lastAt = 0;
 
 /**
- * @param {{ backend?: string, url?: string, password?: string, timeoutMs?: number }} [opts]
+ * @param {{ backend?: string, url?: string, password?: string, timeoutMs?: number,
+ *          minIntervalMs?: number, verticalOutput?: string }} [opts]
  * @param {any} [logger]
  */
 export function initCapture(opts = {}, logger = console) {
@@ -63,14 +68,29 @@ export function initCapture(opts = {}, logger = console) {
     password: opts.password ?? process.env.OBS_WEBSOCKET_PASSWORD ?? '',
     timeoutMs: opts.timeoutMs ?? Number(process.env.OBS_TIMEOUT_MS || 8000),
     minIntervalMs: opts.minIntervalMs ?? Number(process.env.CAPTURE_MIN_INTERVAL_MS || 60_000),
+    // Aitum Stream Suite's vertical (9:16) Backtrack output, saved alongside the
+    // horizontal replay buffer on the same connection. Unset = horizontal only.
+    verticalOutput: opts.verticalOutput ?? process.env.CAPTURE_VERTICAL_OUTPUT ?? '',
   };
   lastAt = 0;
-  logger.info?.('local capture ready', { backend, url, minIntervalMs: cfg.minIntervalMs });
+  logger.info?.('local capture ready', {
+    backend,
+    url,
+    minIntervalMs: cfg.minIntervalMs,
+    vertical: cfg.verticalOutput || 'disabled',
+  });
 }
 
-/** Test seam: inject a fake trigger. Pass `null` to disable capture. */
-export function initCaptureWith(fn, { minIntervalMs = 0 } = {}) {
-  cfg = fn ? { backend: 'test', trigger: fn, minIntervalMs } : null;
+/**
+ * Test seam: inject a fake trigger. Pass `null` to disable capture.
+ *
+ * The fake stands in for a FULLY configured backend, vertical output included —
+ * otherwise vertical-only modes resolve to "not configured" in tests for a reason
+ * that has nothing to do with the behaviour under test. Pass `verticalOutput: ''`
+ * to model a rig with no vertical output configured.
+ */
+export function initCaptureWith(fn, { minIntervalMs = 0, verticalOutput = 'test-vertical' } = {}) {
+  cfg = fn ? { backend: 'test', trigger: fn, minIntervalMs, verticalOutput } : null;
   lastAt = 0;
 }
 
@@ -80,11 +100,32 @@ export function captureReady() {
 }
 
 /**
- * Fire the local capture. Never throws.
- * @returns {Promise<{ ok: boolean, path?: string|null, started?: boolean, reason?: string }>}
+ * True when the vertical (Aitum Backtrack) output has a name configured. Separate
+ * from captureReady: the clip mode decides WHETHER to save vertical, this decides
+ * whether we know WHAT to save. Both must hold.
  */
-export async function triggerCapture(logger = console, now = Date.now()) {
+export function verticalReady() {
+  return Boolean(cfg?.verticalOutput);
+}
+
+/**
+ * Fire the local capture. Never throws.
+ *
+ * `vertical` is present only when a vertical output is configured. Note it reports
+ * `requested`, NOT `saved` — Aitum answers success on acceptance and gives us no way
+ * to confirm a file was written.
+ *
+ * @returns {Promise<{ ok: boolean, path?: string|null, started?: boolean, reason?: string,
+ *   retryInMs?: number,
+ *   vertical?: { ok: boolean, requested?: boolean, started?: boolean, reason?: string } }>}
+ */
+export async function triggerCapture(logger = console, now = Date.now(), targets = {}) {
   if (!cfg) return { ok: false, reason: 'not configured' };
+  const { horizontal = true, vertical = true } = targets;
+  // Vertical also needs its output NAME (env). Asking for vertical-only without one
+  // configured is a no-op, not a silent horizontal capture.
+  const verticalOutput = vertical ? cfg.verticalOutput : '';
+  if (!horizontal && !verticalOutput) return { ok: false, reason: 'not configured' };
 
   const since = now - lastAt;
   if (cfg.minIntervalMs && lastAt && since < cfg.minIntervalMs) {
@@ -96,9 +137,31 @@ export async function triggerCapture(logger = console, now = Date.now()) {
   lastAt = now;
 
   try {
-    const res = cfg.backend === 'test' ? await cfg.trigger() : await saveReplayBuffer(cfg);
-    logger.info?.('local capture saved', { path: res?.path ?? null, startedBuffer: Boolean(res?.started) });
-    return { ok: true, path: res?.path ?? null, started: Boolean(res?.started) };
+    const res = cfg.backend === 'test'
+      ? await cfg.trigger({ horizontal, vertical: Boolean(verticalOutput) })
+      : await saveReplayBuffer({ ...cfg, horizontal, verticalOutput });
+    // `vertical.requested` is NOT proof of a file — Aitum answers success on
+    // acceptance and writes nothing when its output has no recording path. Logged
+    // as what it is so a silent misconfiguration is visible in `docker logs`.
+    logger.info?.('local capture saved', {
+      path: res?.path ?? null,
+      startedBuffer: Boolean(res?.started),
+      ...(res?.vertical
+        ? {
+            verticalRequested: Boolean(res.vertical.requested),
+            verticalStartedBuffer: Boolean(res.vertical.started),
+            ...(res.vertical.ok ? {} : { verticalError: res.vertical.reason }),
+          }
+        : {}),
+    });
+    // `vertical` is present only when a vertical output is configured, so callers
+    // (and tests) that predate it see exactly the shape they always did.
+    return {
+      ok: true,
+      path: res?.path ?? null,
+      started: Boolean(res?.started),
+      ...(res?.vertical ? { vertical: res.vertical } : {}),
+    };
   } catch (err) {
     // A failed attempt shouldn't burn the rate-limit window — let the next !clip
     // retry immediately (the PC may have just come back).

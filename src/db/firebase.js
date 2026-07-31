@@ -82,6 +82,7 @@ export const PATHS = {
   configLive: () => 'config/live',
   configExpMode: () => 'config/expMode',
   configChatMuted: () => 'config/chatMuted',
+  configClipMode: () => 'config/clipMode',
   seasonCurrent: () => 'config/season/current',
   configRaid: () => 'config/raid',
   configDropScheduler: () => 'config/dropScheduler',

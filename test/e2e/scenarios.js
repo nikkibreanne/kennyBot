@@ -13,7 +13,7 @@ import { openMarket } from '../../src/db/market.js';
 import { setDrop } from '../../src/db/drops.js';
 import { setupRaidWeek, enlist } from '../../src/db/raid.js';
 import { seedCuratedFacts } from '../../src/db/facts.js';
-import { getRaidPointer, getConfig, setLive } from '../../src/db/configStore.js';
+import { getRaidPointer, getConfig, setLive, setClipMode } from '../../src/db/configStore.js';
 import { initClipsWith } from '../../src/twitch/clips.js';
 import { initCaptureWith } from '../../src/integrations/capture.js';
 import { defaultBoss } from '../../src/content/bosses.js';
@@ -70,22 +70,62 @@ export const SCENARIOS = [
       initClipsWith(async () => 'TestClipId123'); // fake Helix Create Clip
       initCaptureWith(async () => ({ path: 'D:/rec/Replay.mkv' })); // fake OBS
       try {
-        // Default CLIP_MODE=local: the streamer's OBS saves the moment at full
+        // Default mode is local: the streamer's OBS saves the moment at full
         // recording quality and nothing is posted to Twitch.
         // The reply is a bare confirmation — chat learns nothing about the rig.
         const local = await bot.send(alice, '!clip');
         assert.match(local, /clipped it/i);
         assert.doesNotMatch(local, /clips\.twitch\.tv/, 'the default must not make a Twitch clip');
 
-        // CLIP_MODE=both puts the Twitch clip back alongside it (needs live).
-        process.env.CLIP_MODE = 'both';
+        // 'both' puts the Twitch clip back alongside it (needs live). The mode is
+        // RTDB-only — there is no env var — so switch it the way a mod does.
+        await setClipMode('both');
         await setLive(true, 'test');
         await until(() => getConfig().live === true); // mirror is async
         assert.match(await bot.send(bob, '!clip'), /clips\.twitch\.tv\/TestClipId123/);
       } finally {
-        delete process.env.CLIP_MODE;
+        await setClipMode('local'); // reset shared config for later scenarios
         initCaptureWith(null);
         await setLive(false, 'test'); // reset shared live state for later scenarios
+      }
+    },
+  },
+  {
+    command: 'clipmode', title: 'a mod switches what !clip does, and it persists',
+    run: async ({ bot, u }) => {
+      const mod = u('e2e_clipmode', { login: 'nikki', name: 'Nikki', mod: true });
+      const viewer = u('e2e_clipmode_v', { login: 'carl', name: 'Carl' });
+      initCaptureWith(async () => ({ path: 'D:/rec/Replay.mkv' }));
+      try {
+        assert.match(await bot.send(mod, '!clipmode status'), /!clip mode: \w+/);
+
+        // Switching to twitch must take effect for the very next !clip, without
+        // waiting on an RTDB round-trip — that's why setClipMode writes the mirror first.
+        await bot.send(mod, '!clipmode twitch');
+        assert.equal(getConfig().clipMode, 'twitch', 'mirror updated synchronously');
+        const snap = await database().ref('config/clipMode').get();
+        assert.equal(snap.val(), 'twitch', 'and persisted, so it survives a restart');
+
+        // Not live → the twitch half is impossible, and local is switched off.
+        assert.match(await bot.send(viewer, '!clip'), /only clip while the stream is live/i);
+
+        // Aliases expand to the canonical target list on the way in.
+        await bot.send(mod, '!clipmode local');
+        assert.equal(getConfig().clipMode, 'horizontal,vertical');
+
+        // The combinations the old local|twitch|both presets could not express.
+        await bot.send(mod, '!clipmode horizontal');
+        assert.equal(getConfig().clipMode, 'horizontal');
+        await bot.send(mod, '!clipmode vertical twitch');
+        assert.equal(getConfig().clipMode, 'vertical,twitch', 'order-normalised');
+
+        // All-or-nothing: one bad token must reject the whole line, not part of it.
+        assert.match(await bot.send(mod, '!clipmode horizontal nonsense'), /Usage: !clipmode/);
+        assert.equal(getConfig().clipMode, 'vertical,twitch', 'a bad value changes nothing');
+      } finally {
+        // Scenarios share one emulator DB — leave the mode as the next one expects.
+        await setClipMode('local');
+        initCaptureWith(null);
       }
     },
   },

@@ -1,13 +1,14 @@
 // !clip mode selection. The default is LOCAL: !clip triggers the streamer's
 // OBS/Aitum capture and posts NOTHING to Twitch. These lock down which half of
-// the command fires for each CLIP_MODE — the failure that matters is a mode
+// the command fires for each clip mode — the failure that matters is a mode
 // quietly making a Twitch clip the streamer didn't ask for.
 //
 // The live mirror is `false` throughout (no RTDB here), which is exactly the
 // interesting case: the local buffer works offline, Twitch's Create Clip doesn't.
 import { test, afterEach } from 'node:test';
 import assert from 'node:assert/strict';
-import clip, { resolveClipMode } from '../../src/commands/clip.js';
+import clip, { activeClipMode } from '../../src/commands/clip.js';
+import { parseClipMode, readClipTargets, clipTargets, primeConfigForTest } from '../../src/db/configStore.js';
 import { initClipsWith } from '../../src/twitch/clips.js';
 import { initCaptureWith } from '../../src/integrations/capture.js';
 
@@ -22,17 +23,70 @@ async function runClip() {
 }
 
 afterEach(() => {
-  delete process.env.CLIP_MODE;
+  primeConfigForTest({ clipMode: null }); // back to a cold mirror
   initClipsWith(null);
   initCaptureWith(null);
 });
 
-test('CLIP_MODE parses the three modes and defaults to local', () => {
-  assert.equal(resolveClipMode(undefined), 'local', 'unset → local');
-  assert.equal(resolveClipMode(''), 'local');
-  assert.equal(resolveClipMode('  BOTH '), 'both', 'trimmed + case-insensitive');
-  assert.equal(resolveClipMode('twitch'), 'twitch');
-  assert.equal(resolveClipMode('nonsense'), 'local', 'a typo must not silently enable Twitch clips');
+test('the mode is a SET of targets, in any order, with aliases', () => {
+  // Canonical form, so 'a b' and 'b,a' are the same stored value.
+  assert.equal(parseClipMode('horizontal vertical'), 'horizontal,vertical');
+  assert.equal(parseClipMode('vertical,horizontal'), 'horizontal,vertical', 'order-independent');
+  assert.equal(parseClipMode('HORIZONTAL'), 'horizontal', 'case-insensitive');
+  assert.equal(parseClipMode('horizontal twitch'), 'horizontal,twitch');
+  assert.equal(parseClipMode('twitch'), 'twitch');
+  assert.equal(parseClipMode('vertical'), 'vertical');
+  // Shorthands, kept so old stored values and muscle memory keep working.
+  assert.equal(parseClipMode('local'), 'horizontal,vertical');
+  assert.equal(parseClipMode('both'), 'horizontal,vertical,twitch');
+  assert.equal(parseClipMode('all'), 'horizontal,vertical,twitch');
+  assert.equal(parseClipMode('local twitch'), 'horizontal,vertical,twitch', 'alias + target mixes');
+});
+
+test("'off' is storable and does not decay back to the default", () => {
+  // An empty target list must not round-trip through '' — that would read back as
+  // "unrecognised" and silently re-enable clipping a mod had turned off.
+  assert.equal(parseClipMode('off'), 'off');
+  assert.equal(parseClipMode(parseClipMode('off')), 'off', 'stable across a re-read');
+  assert.equal(clipTargets('off').none, true);
+});
+
+test('a mode is all-or-nothing — one bad token rejects the whole thing', () => {
+  // Dropping the bad token would leave a mode that looks accepted but does less
+  // than asked, and the symptom is a clip that silently is not made.
+  assert.equal(readClipTargets('horizontal nonsense'), null);
+  assert.equal(readClipTargets('nonsense'), null);
+  // Bad input from RTDB still lands on the safe default, never on Twitch.
+  for (const bad of [undefined, null, '', 'nonsense', 42, {}]) {
+    assert.equal(parseClipMode(bad), 'horizontal,vertical', `${JSON.stringify(bad)} must not enable Twitch`);
+  }
+});
+
+test('clipTargets turns a mode into what to actually do', () => {
+  assert.deepEqual(clipTargets('horizontal'), { horizontal: true, vertical: false, twitch: false, none: false });
+  assert.deepEqual(clipTargets('vertical,twitch'), { horizontal: false, vertical: true, twitch: true, none: false });
+  assert.deepEqual(clipTargets('all'), { horizontal: true, vertical: true, twitch: true, none: false });
+});
+
+// The point of making this runtime config: a mod flips it from chat the moment the
+// streamer's OBS dies, without an SSH session and a redeploy.
+test('the live RTDB value is what !clip obeys', async () => {
+  let captures = 0;
+  primeConfigForTest({ clipMode: 'twitch' }); // a mod ran `!clipmode twitch`
+  assert.equal(activeClipMode(), 'twitch');
+  initClipsWith(async () => 'TwitchClipId');
+  initCaptureWith(async () => { captures += 1; return { path: 'x.mkv' }; });
+
+  const reply = await runClip(); // not live, so the twitch half is gated
+  assert.equal(captures, 0, 'local capture must not fire — the live mode is twitch');
+  assert.match(reply, /only clip while the stream is live/i);
+});
+
+test('a cold mirror falls back to the configured default, never to Twitch', () => {
+  // clipMode is null until startConfigMirror lands its first snapshot — true in
+  // unit tests, and true for the window during boot before the mirror is warm.
+  primeConfigForTest({ clipMode: null });
+  assert.equal(activeClipMode(), 'horizontal,vertical');
 });
 
 test('by default !clip captures locally and makes NO Twitch clip', async () => {
@@ -85,9 +139,9 @@ test('local mode never falls back to Twitch when no capture backend is configure
   assert.match(reply, /clipping isn't set up/i);
 });
 
-test("CLIP_MODE=twitch restores the old behaviour and doesn't touch OBS", async () => {
+test("mode 'twitch' restores the old behaviour and doesn't touch OBS", async () => {
   let captures = 0;
-  process.env.CLIP_MODE = 'twitch';
+  primeConfigForTest({ clipMode: 'twitch' });
   initClipsWith(async () => 'TwitchClipId');
   initCaptureWith(async () => { captures += 1; return { path: 'x.mkv' }; });
 
@@ -96,15 +150,63 @@ test("CLIP_MODE=twitch restores the old behaviour and doesn't touch OBS", async 
   assert.match(reply, /only clip while the stream is live/i);
 });
 
-test('CLIP_MODE=both while offline still saves locally instead of failing', async () => {
+test("mode 'both' while offline still saves locally instead of failing", async () => {
   let clips = 0;
-  process.env.CLIP_MODE = 'both';
+  primeConfigForTest({ clipMode: 'both' });
   initClipsWith(async () => { clips += 1; return 'TwitchClipId'; });
   initCaptureWith(async () => ({ path: 'D:/rec/Replay.mkv' }));
 
   const reply = await runClip(); // not live → Twitch half is impossible
   assert.equal(clips, 0, 'Create Clip would be rejected offline — do not call it');
   assert.match(reply, /clipped it/i);
+});
+
+// The combinations the old local|twitch|both presets could NOT express. Each
+// asserts what the capture layer was actually asked for, not just the reply text.
+test('horizontal-only does not ask for the vertical save', async () => {
+  let asked = null;
+  primeConfigForTest({ clipMode: 'horizontal' });
+  initCaptureWith(async (t) => { asked = t; return { path: 'h.mkv' }; });
+  assert.match(await runClip(), /clipped it/i);
+  assert.deepEqual(asked, { horizontal: true, vertical: false });
+});
+
+test('vertical-only does not ask for the horizontal save', async () => {
+  let asked = null;
+  primeConfigForTest({ clipMode: 'vertical' });
+  initCaptureWith(async (t) => { asked = t; return { path: null, vertical: { ok: true, requested: true } }; });
+  assert.match(await runClip(), /clipped it/i);
+  assert.deepEqual(asked, { horizontal: false, vertical: true });
+});
+
+test('horizontal + twitch captures locally without the vertical file', async () => {
+  let asked = null;
+  let clips = 0;
+  primeConfigForTest({ clipMode: 'horizontal,twitch' });
+  initClipsWith(async () => { clips += 1; return 'TwitchClipId'; });
+  initCaptureWith(async (t) => { asked = t; return { path: 'h.mkv' }; });
+  await runClip(); // offline → twitch half drops, local still runs
+  assert.deepEqual(asked, { horizontal: true, vertical: false });
+  assert.equal(clips, 0, 'Create Clip is impossible offline — do not call it');
+});
+
+test('asking for vertical with no vertical output configured is a no-op, not a horizontal capture', async () => {
+  let captures = 0;
+  primeConfigForTest({ clipMode: 'vertical' });
+  initCaptureWith(async () => { captures += 1; return { path: 'h.mkv' }; }, { verticalOutput: '' });
+  assert.match(await runClip(), /clipping isn't set up/i);
+  assert.equal(captures, 0, 'must not silently save the horizontal instead');
+});
+
+test("'off' disables !clip entirely without touching either backend", async () => {
+  let captures = 0;
+  let clips = 0;
+  primeConfigForTest({ clipMode: 'off' });
+  initClipsWith(async () => { clips += 1; return 'TwitchClipId'; });
+  initCaptureWith(async () => { captures += 1; return { path: 'x.mkv' }; });
+  assert.match(await runClip(), /clipping isn't set up/i);
+  assert.equal(captures, 0);
+  assert.equal(clips, 0);
 });
 
 test('a cold replay buffer reads as an ordinary miss, not a status report', async () => {

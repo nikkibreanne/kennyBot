@@ -4,7 +4,13 @@
 import { test, afterEach } from 'node:test';
 import assert from 'node:assert/strict';
 import { initCapture, initCaptureWith, captureReady, triggerCapture } from '../../src/integrations/capture.js';
-import { deriveAuth, websocketAvailable, replayBufferSequence } from '../../src/integrations/obsWebsocket.js';
+import {
+  deriveAuth,
+  websocketAvailable,
+  replayBufferSequence,
+  verticalBacktrackSequence,
+  AITUM_VENDOR,
+} from '../../src/integrations/obsWebsocket.js';
 
 const noopLogger = { info() {}, warn() {}, error() {}, debug() {} };
 
@@ -17,7 +23,9 @@ test('capture is disabled when no OBS url is configured', () => {
 
 test('an unknown backend disables capture rather than guessing', () => {
   initCapture({ backend: 'aitum', url: 'ws://x:4455' }, noopLogger);
-  assert.equal(captureReady(), false, 'aitum is not implemented yet — must not silently use obs');
+  // Aitum IS supported — but via obs-websocket vendor requests on the obs-websocket
+  // backend, not as a backend name. An unknown name must disable capture, never guess.
+  assert.equal(captureReady(), false, 'an unrecognised backend must not silently use obs');
 });
 
 test('a valid obs-websocket config enables capture', () => {
@@ -157,4 +165,80 @@ test('warm buffer: a path that never changes is reported as null, not stale', as
   const res = await replayBufferSequence(obs.request, noSleep);
   assert.equal(res.path, null, 'better no path than the wrong one');
   assert.ok(obs.calls.includes('SaveReplayBuffer'), 'the save still happened');
+});
+
+
+// ── Aitum vertical Backtrack ────────────────────────────────────────────────
+// The 9:16 canvas has its own replay buffer ("Backtrack"), reached through
+// obs-websocket vendor requests on the SAME connection as the horizontal save.
+
+/** A fake Aitum Stream Suite vendor endpoint. */
+function fakeAitum({ outputs, saveResult = { success: true } } = {}) {
+  const calls = [];
+  const state = new Map(outputs.map((o) => [o.name, o.active]));
+  return {
+    calls,
+    request: async (type, data) => {
+      if (type !== 'CallVendorRequest') throw new Error(`unexpected ${type}`);
+      const { vendorName, requestType, requestData } = data;
+      assert.equal(vendorName, AITUM_VENDOR, 'must address the Stream Suite vendor');
+      calls.push(requestType);
+      switch (requestType) {
+        case 'get_outputs':
+          return { responseData: { success: true, outputs: [...state].map(([name, active]) => ({ name, active, type: 'backtrack' })) } };
+        case 'start_output':
+          state.set(requestData.output, true); // flips on the next poll
+          return { responseData: { success: true } };
+        case 'save_backtrack':
+          return { responseData: saveResult };
+        default:
+          throw new Error(`unexpected vendor request ${requestType}`);
+      }
+    },
+  };
+}
+
+test('vertical: an inactive Backtrack is started and NOT treated as a save', async () => {
+  const aitum = fakeAitum({ outputs: [{ name: 'Vertical Backtrack', active: false }] });
+  const res = await verticalBacktrackSequence(aitum.request, 'Vertical Backtrack', noSleep);
+  assert.deepEqual(res, { ok: true, requested: false, started: true });
+  assert.ok(!aitum.calls.includes('save_backtrack'), 'nothing buffered yet — saving would be a lie');
+});
+
+test('vertical: an active Backtrack is saved', async () => {
+  const aitum = fakeAitum({ outputs: [{ name: 'Vertical Backtrack', active: true }] });
+  const res = await verticalBacktrackSequence(aitum.request, 'Vertical Backtrack', noSleep);
+  assert.deepEqual(res, { ok: true, requested: true, started: false });
+  assert.ok(aitum.calls.includes('save_backtrack'));
+});
+
+// Found against a real Stream Suite 1.2.1: with a 15-minute-full buffer,
+// save_backtrack answered {success:true} and wrote NO file, because the output
+// had no recording path. The vendor API can't read that path back, so we must
+// never promote acceptance to "saved".
+test('vertical: success means REQUESTED, never a file on disk', async () => {
+  const aitum = fakeAitum({ outputs: [{ name: 'Vertical Backtrack', active: true }] });
+  const res = await verticalBacktrackSequence(aitum.request, 'Vertical Backtrack', noSleep);
+  assert.equal(res.requested, true);
+  assert.ok(!('path' in res), 'no path field — we cannot know it, so we must not imply it');
+  assert.ok(!('saved' in res), 'must not claim a save it cannot verify');
+});
+
+test('vertical: an explicit failure from the plugin is surfaced', async () => {
+  const aitum = fakeAitum({
+    outputs: [{ name: 'Vertical Backtrack', active: true }],
+    saveResult: { success: false, error: "'output' not set" },
+  });
+  await assert.rejects(
+    () => verticalBacktrackSequence(aitum.request, 'Vertical Backtrack', noSleep),
+    /output' not set/,
+  );
+});
+
+test('vertical: a missing output names itself rather than failing vaguely', async () => {
+  const aitum = fakeAitum({ outputs: [{ name: 'Vertical Stream', active: true }] });
+  await assert.rejects(
+    () => verticalBacktrackSequence(aitum.request, 'Vertical Backtrack', noSleep),
+    /no Aitum output named "Vertical Backtrack"/,
+  );
 });

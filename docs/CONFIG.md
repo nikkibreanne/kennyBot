@@ -39,15 +39,16 @@ so a mod can change them **while the bot is running**. These are the
 | **EXP gate** — on / off / auto | `!exp on` · `!exp off` · `!exp auto` · `!exp status` | `config/expMode` |
 | **Chat output mute** — silence sends, keep listening | `!mute on` · `!mute off` · `!mute status` (bare `!mute` toggles) | `config/chatMuted` |
 | **Auto drop scheduler** — on/off + interval | `!drops on` · `!drops off` · `!drops every <min>` · `!drops status` | `config/dropScheduler` |
+| **Clip mode** — which of `!clip`'s outputs run | `!clipmode horizontal vertical twitch` · `!clipmode local\|all\|off` · `!clipmode status` | `config/clipMode` |
 | **Live status** (set automatically by Twitch) | _(no command — EventSub / Helix poll set it)_ | `config/live` |
 | **Active season** | `!season start <id>` · `!season rollover <id>` | `config/season/current` |
 | **Active raid / boss / phase** | `!boss set <name>` · `!boss next` · `!raidnight` | `config/raid`, `bosses/...` |
 
-**Important seeding caveat.** For the two settings that have *both* a `config.js`
-default *and* an RTDB home — the **EXP mode** (`liveGate.defaultExpMode`) and the
-**drop scheduler** (`loot.scheduler.enabled` / `intervalSec`) — the `config.js`
-value is only used to **seed RTDB the very first time** the bot connects to an
-empty database. After that first boot, the live value lives in RTDB and is
+**Important seeding caveat.** For the settings that have *both* a `config.js`
+default *and* an RTDB home — the **EXP mode** (`liveGate.defaultExpMode`), the
+**drop scheduler** (`loot.scheduler.enabled` / `intervalSec`) and the **clip mode**
+(`clip.defaultMode`) — the `config.js` value is only used to **seed RTDB the very
+first time** the bot connects to an empty database. After that first boot, the live value lives in RTDB and is
 controlled by the chat commands above. Editing those defaults in `config.js`
 later and restarting will **not** override what's already in RTDB. Use the chat
 commands to change them once the bot has run once.
@@ -204,6 +205,25 @@ unless you're also changing the website.
 |---|---|---|---|
 | `pollIntervalMs` | `45000` (45 s) | How often the bot polls Twitch (Helix) for live status as a fallback to EventSub. | Lower = faster live-detection but more API calls; 30–60 s is the safe band. |
 | `defaultExpMode` | `'auto'` | The **seed default** for the EXP gate: `on` (always grant), `off` (never), `auto` (follow live status). Stored in RTDB on first boot; thereafter controlled by `!exp`. | Leave `auto` for normal operation. `on` is the offline-testing / watch-party mode. (Change it live with `!exp`, not by editing this after first boot — see the seeding caveat.) |
+
+---
+
+## `clip` — what `!clip` does
+
+| Key | Default | What it controls | Effect of changing it |
+|---|---|---|---|
+| `defaultMode` | `'horizontal,vertical'` | The **seed default** for `!clip`, as a set of targets: `horizontal` (16:9 local file), `vertical` (9:16 local file), `twitch` (public clip link) — any combination, plus the shorthands `local`, `all`, `off`. Stored in RTDB on first boot; thereafter controlled by `!clipmode`. | Leave it. A Twitch clip is capped at your *stream* resolution, so it can never be the high-quality keepsake — that's the whole point of the local capture. (Change it live with `!clipmode`, not by editing this after first boot — see the seeding caveat.) |
+
+Same seeding rule as `defaultExpMode`: **editing this does nothing to an existing
+deployment**, because `config/clipMode` is already populated. Use `!clipmode` in chat.
+
+`!clipmode status` also reports whether each half can actually run — useful when
+`!clip` is telling viewers clipping isn't set up and you want to know which piece is
+missing.
+
+> Clip **length** is not configured here, or anywhere in kennyBot — it comes from
+> OBS's Replay Buffer and Aitum's Backtrack settings on the streamer's PC. See
+> [`clip-architecture.md`](clip-architecture.md).
 
 ---
 

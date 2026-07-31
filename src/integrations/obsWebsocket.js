@@ -135,8 +135,75 @@ export async function withObs({ url, password = '', timeoutMs = 8000 }, fn) {
  *
  * @returns {Promise<{ path: string|null, started: boolean }>}
  */
-export async function saveReplayBuffer({ url, password, timeoutMs }) {
-  return withObs({ url, password, timeoutMs }, (request) => replayBufferSequence(request));
+export async function saveReplayBuffer({ url, password, timeoutMs, horizontal = true, verticalOutput = '' }) {
+  if (!horizontal && !verticalOutput) throw new Error('nothing requested: neither horizontal nor vertical');
+  return withObs({ url, password, timeoutMs }, async (request) => {
+    // `skipped` distinguishes "not asked for" from "asked for, produced no path" —
+    // otherwise a vertical-only save looks exactly like a failed horizontal one.
+    const h = horizontal
+      ? await replayBufferSequence(request)
+      : { path: null, started: false, skipped: true };
+    if (!verticalOutput) return h;
+    // Vertical rides the SAME connection — one handshake, one deadline.
+    const vertical = await verticalBacktrackSequence(request, verticalOutput)
+      .catch((err) => ({ ok: false, reason: String(err?.message || err) }));
+    // When horizontal ran, vertical is strictly best-effort: a misconfigured
+    // vertical output must never cost us the capture we already have. When it did
+    // NOT run, vertical is the whole job, so its failure is the call's failure.
+    if (!horizontal && !vertical.ok) throw new Error(vertical.reason || 'vertical capture failed');
+    return { ...h, vertical };
+  });
+}
+
+/** obs-websocket vendor name registered by the Aitum Stream Suite plugin. */
+export const AITUM_VENDOR = 'aitum-stream-suite';
+
+/**
+ * Save the vertical canvas's "Backtrack" — Aitum's replay buffer for its second
+ * (9:16) canvas, which carries the natively-framed portrait layout rather than a
+ * crop of the landscape one.
+ *
+ * IMPORTANT: `save_backtrack` answers `{success: true}` as soon as it ACCEPTS the
+ * request. Verified against a real Stream Suite 1.2.1: with a full buffer it
+ * returns success and writes NO FILE when the output has no recording path
+ * configured. The vendor API exposes no way to read that path back, so we cannot
+ * confirm a write. This returns `requested`, never `saved`, precisely so callers
+ * can't mistake acceptance for a file on disk.
+ *
+ * @param {(type: string, data?: object) => Promise<any>} request
+ * @param {string} outputName e.g. "Vertical Backtrack" (see the `get_outputs` vendor request)
+ * @param {(ms: number) => Promise<void>} [sleep] injectable for tests
+ * @returns {Promise<{ ok: boolean, requested: boolean, started: boolean, reason?: string }>}
+ */
+export async function verticalBacktrackSequence(request, outputName, sleep = (ms) => new Promise((r) => setTimeout(r, ms))) {
+  const vendor = (requestType, requestData = {}) =>
+    request('CallVendorRequest', { vendorName: AITUM_VENDOR, requestType, requestData })
+      .then((r) => r?.responseData ?? r);
+
+  const find = async () => {
+    const { outputs = [] } = (await vendor('get_outputs')) || {};
+    return outputs.find((o) => o.name === outputName) || null;
+  };
+
+  const output = await find();
+  if (!output) throw new Error(`no Aitum output named "${outputName}"`);
+
+  if (!output.active) {
+    // Same lesson as the main replay buffer: outputs come up asynchronously, and
+    // a buffer that just started holds nothing worth saving. Start it and let the
+    // NEXT clip have content.
+    await vendor('start_output', { output: outputName });
+    for (const wait of [150, 250, 500, 1000]) {
+      await sleep(wait);
+      const s = await find();
+      if (s?.active) break;
+    }
+    return { ok: true, requested: false, started: true };
+  }
+
+  const res = await vendor('save_backtrack', { output: outputName });
+  if (res && res.success === false) throw new Error(res.error || `save_backtrack refused for "${outputName}"`);
+  return { ok: true, requested: true, started: false };
 }
 
 /**

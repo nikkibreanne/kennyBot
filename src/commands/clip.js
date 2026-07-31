@@ -1,27 +1,31 @@
 // !clip — grab the last ~30–60s of the stream.
 //
-// TWO independent halves, selected by CLIP_MODE:
-//   local  (default) — tell the streamer's OBS/Aitum to save its replay buffer at
-//                      full recording quality. Nothing is posted to Twitch.
-//   twitch           — Helix Create Clip only (the original behaviour).
-//   both             — do each; the reply carries the Twitch link plus a note.
+// THREE independent outputs, each switched on or off by the live clip mode
+// (`!clipmode`, stored in RTDB):
+//   horizontal — OBS's main replay buffer → 16:9 file at full recording quality
+//   vertical   — Aitum's Backtrack output → 9:16 file, framed for portrait
+//   twitch     — Helix Create Clip        → a public clip link in chat
 //
-// Local is the default because a Twitch clip is capped at the STREAM resolution
-// (≤1080p here) while the local recording is whatever the camera actually shot —
-// the high-quality copy is the point of the command.
-import { getConfig } from '../db/configStore.js';
+// The default is horizontal+vertical and no Twitch, because a Twitch clip is capped
+// at the STREAM resolution (≤1080p here) while the local recording is whatever the
+// camera actually shot — the high-quality copy is the point of the command.
+import { getConfig, parseClipMode, clipTargets, CLIP_MODES } from '../db/configStore.js';
+import { config as gameConfig } from '../config.js';
 import { createChannelClip, clipsReady } from '../twitch/clips.js';
-import { triggerCapture, captureReady } from '../integrations/capture.js';
+import { triggerCapture, captureReady, verticalReady } from '../integrations/capture.js';
 
-export const CLIP_MODES = ['local', 'twitch', 'both'];
+export { CLIP_MODES };
 
 /**
- * Resolve CLIP_MODE, defaulting to 'local'. An unrecognised value falls back to
- * the default rather than failing boot — index.js warns about it once at startup.
+ * The mode in force right now — RTDB `config/clipMode`, changed live by mods with
+ * `!clipmode`. There is no environment variable: one source of truth, seeded once
+ * from `config.clip.defaultMode`, exactly like the EXP gate.
+ *
+ * The fallback only covers the window before the config mirror is warm (early
+ * boot, and unit tests that run without a database).
  */
-export function resolveClipMode(raw = process.env.CLIP_MODE) {
-  const v = String(raw ?? '').trim().toLowerCase();
-  return CLIP_MODES.includes(v) ? v : 'local';
+export function activeClipMode() {
+  return getConfig().clipMode ?? parseClipMode(gameConfig.clip.defaultMode);
 }
 
 /**
@@ -44,11 +48,13 @@ export default {
   names: ['clip'],
   mod: false,
   cooldownMs: 60_000, // per-user: a viewer can clip at most once a minute
-  help: '!clip — clip the last ~30s of the stream',
+  help: '!clip — capture the last ~60s of the stream',
   async run({ user, reply, logger }) {
-    const mode = resolveClipMode();
-    let twitch = mode !== 'local' && clipsReady();
-    const local = mode !== 'twitch' && captureReady();
+    const want = clipTargets(activeClipMode());
+    let twitch = want.twitch && clipsReady();
+    // Vertical needs a configured output NAME (env) as well as being asked for.
+    const vertical = want.vertical && verticalReady();
+    const local = (want.horizontal || vertical) && captureReady();
 
     // One wording for every unconfigured mode — which half is missing is an
     // operator concern (the boot log spells it out), not a thing to tell chat.
@@ -70,7 +76,9 @@ export default {
     // Fire the local capture FIRST and in parallel: the replay buffer holds the
     // last N seconds, so the sooner it's told to save, the less the moment has
     // aged out of it. Its failure never affects the Twitch clip.
-    const capture = local ? triggerCapture(logger) : null;
+    const capture = local
+      ? triggerCapture(logger, Date.now(), { horizontal: want.horizontal, vertical })
+      : null;
 
     if (!twitch) {
       reply(`@${user.displayName} ${localOnlyReply(await capture)}`);
