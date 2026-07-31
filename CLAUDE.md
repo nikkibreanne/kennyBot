@@ -26,8 +26,10 @@ about the capture rig · the capture rate limit is channel-wide, not per-user ·
 vertical (Aitum Backtrack) capture reports `requested`, **never** `saved` — the
 plugin answers `success` on acceptance and gives no way to confirm the write.
 
-The clip mode has **no env var**: it lives in RTDB (`config/clipMode`), seeded once
-from `clip.defaultMode` in `src/config.js`, and mods change it live via `!clipmode`.
+The clip mode is a **set of targets** — `horizontal` · `vertical` · `twitch`, combined
+freely (`local`/`all`/`off` are aliases) — with **no env var**: it lives in RTDB
+(`config/clipMode`), seeded once from `clip.defaultMode`, changed live via `!clipmode`.
+`CAPTURE_VERTICAL_OUTPUT` is separate and says only what the vertical output is *named*.
 
 When verifying a capture, **read OBS's own log** (`Wrote replay buffer to '…'`) —
 not the vendor API's return value, and not a filesystem listing (WSL serves stale

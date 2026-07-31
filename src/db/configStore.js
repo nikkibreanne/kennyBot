@@ -148,8 +148,30 @@ export function primeConfigForTest(patch) {
   Object.assign(mirror, patch);
 }
 
-/** What `!clip` may do. `local` = OBS/Aitum capture only, no Twitch clip. */
-export const CLIP_MODES = ['local', 'twitch', 'both'];
+/**
+ * The three things `!clip` can independently produce. The mode is a SET of these,
+ * not a fixed preset, so every combination is expressible with one config value:
+ *   horizontal — OBS's main replay buffer  → 16:9 file on the streamer's PC
+ *   vertical   — Aitum's Backtrack output  → 9:16 file, natively framed
+ *   twitch     — Helix Create Clip         → a public clip link in chat
+ */
+export const CLIP_TARGETS = ['horizontal', 'vertical', 'twitch'];
+
+/**
+ * Shorthands, kept so existing values and muscle memory keep working. `local`
+ * predates the vertical canvas and has always meant "the local capture", which is
+ * now explicitly both local files.
+ */
+export const CLIP_MODE_ALIASES = {
+  local: ['horizontal', 'vertical'],
+  both: ['horizontal', 'vertical', 'twitch'],
+  all: ['horizontal', 'vertical', 'twitch'],
+  off: [],
+  none: [],
+};
+
+/** Legal single words for `!clipmode`, for usage messages. */
+export const CLIP_MODES = [...CLIP_TARGETS, ...Object.keys(CLIP_MODE_ALIASES)];
 
 /**
  * Parse a clip mode from any source (RTDB, chat, config). Anything unrecognised —
@@ -160,8 +182,50 @@ export const CLIP_MODES = ['local', 'twitch', 'both'];
  * without importing the command that imports it.
  */
 export function parseClipMode(raw) {
-  const v = String(raw ?? '').trim().toLowerCase();
-  return CLIP_MODES.includes(v) ? v : gameConfig.clip.defaultMode;
+  const targets = readClipTargets(raw);
+  if (targets === null) return parseClipMode(gameConfig.clip.defaultMode);
+  // 'off' is a real, storable choice — an empty string would round-trip back to
+  // the default on the next read, silently re-enabling clipping a mod turned off.
+  return targets.length ? targets.join(',') : 'off';
+}
+
+/**
+ * Parse a mode into its target list, or `null` if ANY token is unrecognised.
+ *
+ * All-or-nothing on purpose: silently dropping a bad token would leave a mode that
+ * looks accepted but does less than asked, and the failure that matters here is a
+ * clip quietly not being made. Callers decide what to do with `null` — RTDB reads
+ * fall back to the default, `!clipmode` shows usage.
+ *
+ * Accepts commas or spaces, any order, aliases mixed in: `local twitch`,
+ * `horizontal,vertical`, `all`.
+ *
+ * @returns {string[]|null} canonical targets in CLIP_TARGETS order, deduped
+ */
+export function readClipTargets(raw) {
+  const words = String(raw ?? '').toLowerCase().split(/[\s,]+/).filter(Boolean);
+  if (!words.length) return null;
+  const set = new Set();
+  for (const w of words) {
+    if (CLIP_TARGETS.includes(w)) set.add(w);
+    else if (w in CLIP_MODE_ALIASES) CLIP_MODE_ALIASES[w].forEach((t) => set.add(t));
+    else return null;
+  }
+  return CLIP_TARGETS.filter((t) => set.has(t)); // canonical order, so 'a,b' === 'b,a'
+}
+
+/**
+ * The stored mode as booleans, for callers that just want to know what to do.
+ * @returns {{ horizontal: boolean, vertical: boolean, twitch: boolean, none: boolean }}
+ */
+export function clipTargets(mode) {
+  const list = readClipTargets(mode) ?? readClipTargets(gameConfig.clip.defaultMode) ?? [];
+  return {
+    horizontal: list.includes('horizontal'),
+    vertical: list.includes('vertical'),
+    twitch: list.includes('twitch'),
+    none: list.length === 0,
+  };
 }
 
 /**
@@ -170,10 +234,13 @@ export function parseClipMode(raw) {
  * persists so the choice survives every restart.
  */
 export async function setClipMode(mode) {
-  if (!CLIP_MODES.includes(mode)) throw new Error(`invalid clipMode: ${mode}`);
-  mirror.clipMode = mode;
-  await database().ref(PATHS.configClipMode()).set(mode);
-  return mode;
+  if (readClipTargets(mode) === null) throw new Error(`invalid clipMode: ${mode}`);
+  // Store the CANONICAL form, so 'local', 'vertical horizontal' and
+  // 'horizontal,vertical' all persist identically and comparisons are trivial.
+  const canonical = parseClipMode(mode);
+  mirror.clipMode = canonical;
+  await database().ref(PATHS.configClipMode()).set(canonical);
+  return canonical;
 }
 
 /** Set the EXP gate override mode (on|off|auto). */

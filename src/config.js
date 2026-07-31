@@ -152,14 +152,18 @@ export const config = {
 
   // ── !clip ────────────────────────────────────────────────────────────────
   clip: {
-    // What !clip does on a BRAND-NEW database: local | twitch | both.
-    // 'local' = trigger the streamer's OBS/Aitum capture, post nothing to Twitch
-    // (a Twitch clip is capped at stream resolution, so it can't be the keepsake).
+    // Which of !clip's three outputs are produced on a BRAND-NEW database. Any
+    // combination of: horizontal (16:9 local file) · vertical (9:16 local file) ·
+    // twitch (public clip link). 'local', 'all' and 'off' are shorthands.
     //
-    // This seeds config/clipMode once. After that RTDB is the ONLY source and
-    // mods change it live with `!clipmode` — same as defaultExpMode above.
-    // Editing this value does not move an existing deployment.
-    defaultMode: 'local',
+    // Default is the two local files and NO Twitch clip: a Twitch clip is capped
+    // at your stream resolution, so it can never be the high-quality keepsake —
+    // which is the entire point of the command.
+    //
+    // This seeds config/clipMode once. After that RTDB is the ONLY source and mods
+    // change it live with `!clipmode` — same as defaultExpMode above. Editing this
+    // value does not move an existing deployment.
+    defaultMode: 'horizontal,vertical',
   },
 
   // ── Single-instance lease (IMPLEMENTATION §E/§J) ─────────────────────────

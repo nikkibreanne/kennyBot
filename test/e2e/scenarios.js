@@ -109,12 +109,22 @@ export const SCENARIOS = [
         // Not live → the twitch half is impossible, and local is switched off.
         assert.match(await bot.send(viewer, '!clip'), /only clip while the stream is live/i);
 
+        // Aliases expand to the canonical target list on the way in.
         await bot.send(mod, '!clipmode local');
-        assert.equal(getConfig().clipMode, 'local');
+        assert.equal(getConfig().clipMode, 'horizontal,vertical');
 
-        assert.match(await bot.send(mod, '!clipmode nonsense'), /Usage: !clipmode/);
-        assert.equal(getConfig().clipMode, 'local', 'a bad value changes nothing');
+        // The combinations the old local|twitch|both presets could not express.
+        await bot.send(mod, '!clipmode horizontal');
+        assert.equal(getConfig().clipMode, 'horizontal');
+        await bot.send(mod, '!clipmode vertical twitch');
+        assert.equal(getConfig().clipMode, 'vertical,twitch', 'order-normalised');
+
+        // All-or-nothing: one bad token must reject the whole line, not part of it.
+        assert.match(await bot.send(mod, '!clipmode horizontal nonsense'), /Usage: !clipmode/);
+        assert.equal(getConfig().clipMode, 'vertical,twitch', 'a bad value changes nothing');
       } finally {
+        // Scenarios share one emulator DB — leave the mode as the next one expects.
+        await setClipMode('local');
         initCaptureWith(null);
       }
     },

@@ -81,15 +81,31 @@ export function initCapture(opts = {}, logger = console) {
   });
 }
 
-/** Test seam: inject a fake trigger. Pass `null` to disable capture. */
-export function initCaptureWith(fn, { minIntervalMs = 0 } = {}) {
-  cfg = fn ? { backend: 'test', trigger: fn, minIntervalMs } : null;
+/**
+ * Test seam: inject a fake trigger. Pass `null` to disable capture.
+ *
+ * The fake stands in for a FULLY configured backend, vertical output included —
+ * otherwise vertical-only modes resolve to "not configured" in tests for a reason
+ * that has nothing to do with the behaviour under test. Pass `verticalOutput: ''`
+ * to model a rig with no vertical output configured.
+ */
+export function initCaptureWith(fn, { minIntervalMs = 0, verticalOutput = 'test-vertical' } = {}) {
+  cfg = fn ? { backend: 'test', trigger: fn, minIntervalMs, verticalOutput } : null;
   lastAt = 0;
 }
 
 /** True when a capture backend is configured. */
 export function captureReady() {
   return cfg !== null;
+}
+
+/**
+ * True when the vertical (Aitum Backtrack) output has a name configured. Separate
+ * from captureReady: the clip mode decides WHETHER to save vertical, this decides
+ * whether we know WHAT to save. Both must hold.
+ */
+export function verticalReady() {
+  return Boolean(cfg?.verticalOutput);
 }
 
 /**
@@ -103,8 +119,13 @@ export function captureReady() {
  *   retryInMs?: number,
  *   vertical?: { ok: boolean, requested?: boolean, started?: boolean, reason?: string } }>}
  */
-export async function triggerCapture(logger = console, now = Date.now()) {
+export async function triggerCapture(logger = console, now = Date.now(), targets = {}) {
   if (!cfg) return { ok: false, reason: 'not configured' };
+  const { horizontal = true, vertical = true } = targets;
+  // Vertical also needs its output NAME (env). Asking for vertical-only without one
+  // configured is a no-op, not a silent horizontal capture.
+  const verticalOutput = vertical ? cfg.verticalOutput : '';
+  if (!horizontal && !verticalOutput) return { ok: false, reason: 'not configured' };
 
   const since = now - lastAt;
   if (cfg.minIntervalMs && lastAt && since < cfg.minIntervalMs) {
@@ -116,7 +137,9 @@ export async function triggerCapture(logger = console, now = Date.now()) {
   lastAt = now;
 
   try {
-    const res = cfg.backend === 'test' ? await cfg.trigger() : await saveReplayBuffer(cfg);
+    const res = cfg.backend === 'test'
+      ? await cfg.trigger({ horizontal, vertical: Boolean(verticalOutput) })
+      : await saveReplayBuffer({ ...cfg, horizontal, verticalOutput });
     // `vertical.requested` is NOT proof of a file — Aitum answers success on
     // acceptance and writes nothing when its output has no recording path. Logged
     // as what it is so a silent misconfiguration is visible in `docker logs`.

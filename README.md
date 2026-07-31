@@ -67,8 +67,8 @@ scripts/synthetic-chat.js no-stream harness that drives the whole loop
 | `!equip <item>` | everyone | equip an owned item into its slot |
 | `!grab` / `!loot` | **subs** | roll for the active drop (independent rolls within the window) |
 | `!muster` | everyone* | sign up for this season's raid roster (during muster) / see status |
-| `!clip` | everyone | capture the last ~60s — local 9:16 + 16:9 by default, Twitch clip if the mode says so |
-| `!clipmode local\|twitch\|both\|status` | mod | change what `!clip` does, live — no redeploy (see below) |
+| `!clip` | everyone | capture the last ~60s — 16:9 + 9:16 local files by default; Twitch clip only if the mode says so |
+| `!clipmode <targets>` | mod | pick which of `!clip`'s three outputs run — `horizontal` · `vertical` · `twitch`, combined freely (see below) |
 | `!exp on\|off\|auto\|status` | mod | control the EXP gate (`on` bypasses live for testing) |
 | `!mute on\|off\|status` | mod | silence the bot's chat output when it gets noisy; it keeps listening, tracking EXP, and holding the lease — bare `!mute` toggles |
 | `!drop [item]` | mod | force a single loot drop |
@@ -179,8 +179,36 @@ Recording settings.** Neither exceeds stream quality until those are raised.
 
 ### Switching what `!clip` does, live
 
-`!clipmode local|twitch|both|status` — mod-only, takes effect on the **next**
-`!clip`, and persists across restarts.
+`!clip` can produce **three independent outputs**, and the mode is the *set* of them
+you want — so every combination is one command, with no extra config values:
+
+| Target | What you get |
+|---|---|
+| `horizontal` | OBS's main replay buffer → **16:9** file on the streamer's PC |
+| `vertical` | Aitum's Backtrack output → **9:16** file, natively framed for portrait |
+| `twitch` | Helix Create Clip → a public **clip link** posted in chat |
+
+```
+!clipmode horizontal vertical         both local files, nothing on Twitch (default)
+!clipmode horizontal                  16:9 only
+!clipmode vertical twitch             9:16 file + a Twitch link
+!clipmode horizontal vertical twitch  everything
+!clipmode local                       alias for horizontal+vertical
+!clipmode all                         alias for all three
+!clipmode off                         !clip disabled
+!clipmode status                      what's set, and whether each part can run
+```
+
+Order doesn't matter and commas are optional — `vertical,horizontal` stores the same
+value as `horizontal vertical`. One unrecognised word rejects the whole line rather
+than silently applying part of it, because the symptom of a half-applied mode is a
+clip that quietly never gets made.
+
+`vertical` also needs `CAPTURE_VERTICAL_OUTPUT` set (that's the output's *name* —
+plumbing); the mode decides *whether* to save it. Both must hold, and `status` says
+which one is missing.
+
+Mod-only, takes effect on the **next** `!clip`, and persists across restarts.
 
 This is deliberately a **runtime** setting with **no environment variable**. If the
 streamer's OBS dies mid-stream, `local` mode leaves `!clip` with nothing to do;

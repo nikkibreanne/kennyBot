@@ -135,16 +135,23 @@ export async function withObs({ url, password = '', timeoutMs = 8000 }, fn) {
  *
  * @returns {Promise<{ path: string|null, started: boolean }>}
  */
-export async function saveReplayBuffer({ url, password, timeoutMs, verticalOutput = '' }) {
+export async function saveReplayBuffer({ url, password, timeoutMs, horizontal = true, verticalOutput = '' }) {
+  if (!horizontal && !verticalOutput) throw new Error('nothing requested: neither horizontal nor vertical');
   return withObs({ url, password, timeoutMs }, async (request) => {
-    const horizontal = await replayBufferSequence(request);
-    if (!verticalOutput) return horizontal;
-    // Vertical rides the SAME connection — one handshake, one deadline. It is
-    // strictly best-effort: a missing plugin or a misconfigured output must not
-    // cost us the horizontal capture we already have.
+    // `skipped` distinguishes "not asked for" from "asked for, produced no path" —
+    // otherwise a vertical-only save looks exactly like a failed horizontal one.
+    const h = horizontal
+      ? await replayBufferSequence(request)
+      : { path: null, started: false, skipped: true };
+    if (!verticalOutput) return h;
+    // Vertical rides the SAME connection — one handshake, one deadline.
     const vertical = await verticalBacktrackSequence(request, verticalOutput)
       .catch((err) => ({ ok: false, reason: String(err?.message || err) }));
-    return { ...horizontal, vertical };
+    // When horizontal ran, vertical is strictly best-effort: a misconfigured
+    // vertical output must never cost us the capture we already have. When it did
+    // NOT run, vertical is the whole job, so its failure is the call's failure.
+    if (!horizontal && !vertical.ok) throw new Error(vertical.reason || 'vertical capture failed');
+    return { ...h, vertical };
   });
 }
 
