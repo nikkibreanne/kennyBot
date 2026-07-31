@@ -10,14 +10,26 @@ turn-by-turn (spec §5.8). Authoritative game state lives in **Firebase Realtime
 Database**; the website reads it (read-only). The bot is **outbound-only** and
 ships as a container.
 
-> Design & implementation specs live in `docs/` (public): `raid-game-spec.md`
-> (the game, incl. §5.8 the active automated-combat model) and `IMPLEMENTATION.md`
-> (the build, incl. §L the combat engine). Private/local notes go in `.workspace/`
-> (gitignored).
+> **Docs** (all in `docs/`):
+> [`raid-game-spec.md`](docs/raid-game-spec.md) — the game, incl. §5.8 the
+> automated-combat model ·
+> [`IMPLEMENTATION.md`](docs/IMPLEMENTATION.md) — the build & deployment contract;
+> this is what the `§E` / `§G` / `§L` markers throughout the source refer to ·
+> [`CONFIG.md`](docs/CONFIG.md) — every tunable, for the channel owner ·
+> [`clip-architecture.md`](docs/clip-architecture.md) — **read before touching
+> anything clip-related.**
+>
+> Operational specifics — hostnames, addresses, credentials, network topology —
+> are deliberately **not** in this repo; they live in a private runbook. Local
+> scratch notes go in `.workspace/` (gitignored).
 
 ## Status
 
-**Implemented and verified locally** against the Firebase emulator:
+**Running in production** on the `nikkibreanne` channel (containerised, see
+Releasing below). The game loop, the chat integration and the clip pipeline are all
+live; the pieces still in flight are listed at the end of this section.
+
+Implemented and verified:
 
 - `!create <class>` → character + starter gear (subscriber-gated)
 - live-gated chat EXP → seeded, unit-tested level-up (fixed threshold +
@@ -29,9 +41,22 @@ ships as a container.
 - locked RTDB rules with an automated **client-write-rejection** test
 - single-instance lease, persisted Twitch refresh token, graceful shutdown
 - a **dev console** + automated harness that drive the whole loop with no Twitch
+- **credits + wagering**: `!daily`, OKRAMARKET bets, coin-flip duels, item trades/gifts
+- **Twitch Chat Bot badge** via the Helix send path, with automatic IRC fallback so
+  the bot can never go silent because a grant is missing
+- **`!clip` capture**: horizontal 16:9 + natively-framed vertical 9:16 saved on the
+  streamer's PC over obs-websocket / Aitum — see [Clip capture](#clip-capture)
+- **automated releases** from Conventional Commits (release-please), with `main`
+  protected for everyone including admins
 
-Verified by `npm test` (30 engine tests), `npm run test:emulator` (rules), and
-`npm run synthetic` (full muster→battle→victory e2e with UI-contract assertions).
+Verified by `npm test` (92 offline unit tests), `npm run test:emulator` (50 — RTDB
+rules + client-write rejection), `npm run test:e2e` (29 — every command driven
+through the real dispatcher), and `npm run synthetic` (full muster→battle→victory
+run with UI-contract assertions).
+
+**Not yet done:** a full-session local recording (see
+[`docs/clip-architecture.md`](docs/clip-architecture.md) "Ingest B"), and the
+YouTube Shorts / TikTok upload step in the separate okra-clip-archiver.
 
 ## Architecture
 
@@ -40,7 +65,13 @@ Twitch (chat WSS, Helix, EventSub WSS)  ──►  kennyBot (Node, twurple)  ─
                                                    │  Admin SDK (bypasses rules)      ▲ read-only
                                                    ▼                                  │
                                             pure engine (rules/*)            Website (GitHub Pages)
+                                                   │
+                                                   ▼  obs-websocket, over the tailnet
+                                     streamer's OBS + Aitum  ──►  16:9 + 9:16 files on their PC
 ```
+
+The bot is outbound-only in both directions: it *dials* Twitch, Firebase and OBS,
+and never listens on a port.
 
 ```
 index.js                  wiring: auth, chat, live gate, lock, resolve-on-boot, shutdown
@@ -50,32 +81,71 @@ src/
   content/                your own data: classes.js (class→role), items.js (catalog + starter gear)
   rules/                  PURE, RNG-injected, unit-tested: leveling, rating, loot, raidResolve
   db/                     firebase, configStore (live mirror), players, raid, drops, lock, tokenStore
-  twitch/                 auth (RefreshingAuthProvider), liveGate (Helix poll), eventsub (WS)
+  twitch/                 auth (RefreshingAuthProvider), liveGate (Helix poll), eventsub (WS),
+                          sender (Helix/IRC send + badge), clips (Helix Create Clip)
+  integrations/           obsWebsocket (v5 client + Aitum vendor requests), capture (facade + rate limit)
   events/                 chat (gate→EXP→raid tick + dispatch), twitchEvents (sub/cheer/raid)
   commands/               one module per command + registry; mod/ subdir for mod commands
-test/                     rules/*.test.js (offline) + firebase-rules.test.js (emulator)
+test/                     rules/*.test.js (offline) · firebase-rules.test.js (emulator) · e2e/ (dispatcher)
 scripts/synthetic-chat.js no-stream harness that drives the whole loop
 ```
 
 ## Chat commands
 
+`!kennycommands` prints this list in chat. Aliases are shown after the `/`.
+
+**Hero & loot**
+
 | Command | Who | Effect |
 |---|---|---|
 | `!create <class>` | **subs** | create character (Guardian/Mender/Berserker/Arcanist/Ranger) + starter gear |
 | `!char` / `!me` | everyone | view class, level, role rating, combat stats |
-| `!bag` / `!inventory` | everyone | view unequipped loot |
-| `!equip <item>` | everyone | equip an owned item into its slot |
-| `!grab` / `!loot` | **subs** | roll for the active drop (independent rolls within the window) |
-| `!muster` | everyone* | sign up for this season's raid roster (during muster) / see status |
-| `!clip` | everyone | capture the last ~60s — 16:9 + 9:16 local files by default; Twitch clip only if the mode says so |
+| `!bag` / `!inventory` / `!inv` | everyone | view unequipped loot |
+| `!equip <item\|#>` | everyone | equip an item from your bag (by name or bag number) |
+| `!unequip <slot\|item>` | everyone | bare a slot (weapon/armor/trinket) back into your bag |
+| `!grab` / `!loot` | **subs** | enter the drawing for the active loot drop |
+| `!muster` | **subs**\* | sign up for this season's raid roster (during muster) / see status |
+| `!top [damage]` | everyone | season leaderboard (top 5) |
+
+**Credits & wagering**
+
+| Command | Who | Effect |
+|---|---|---|
+| `!credits` / `!points` / `!bal` / `!balance` | everyone | your credit balance |
+| `!daily` | everyone | claim your daily credits |
+| `!market` | everyone | list open OKRAMARKETs · `!market suggest <question>` proposes one |
+| `!bet` / `!wager` `<market#> <yes\|no> <amount>` | everyone | wager credits on a market |
+| `!duel <@user> <amount>` | everyone | coin-flip duel for credits · `!duel accept \| deny` |
+| `!trade @user <item\|#> [+ credits]` | everyone | offer a **swap**; the other player counters, then `!trade accept` / `decline` |
+| `!offer` / `!gift` `@user <item\|#> [+ credits]` | everyone | **give** an item/credits one-way; they reply `!offer accept` / `decline` |
+
+**Clips**
+
+| Command | Who | Effect |
+|---|---|---|
+| `!clip` | everyone | capture the last ~60s — 16:9 + 9:16 local files by default; a Twitch clip only if the mode says so |
 | `!clipmode <targets>` | mod | pick which of `!clip`'s three outputs run — `horizontal` · `vertical` · `twitch`, combined freely (see below) |
+| `!start` / `!slate` | mod | set a stream sync point for the clip archiver |
+
+**Other**
+
+| Command | Who | Effect |
+|---|---|---|
+| `!fact` / `!facts` | everyone | a random fact · `!fact suggest <text>` submits one for approval |
+| `!kennycommands` / `!kennybot` / `!kcommands` | everyone | the full command list, in chat |
+
+**Mod / operations**
+
+| Command | Who | Effect |
+|---|---|---|
 | `!exp on\|off\|auto\|status` | mod | control the EXP gate (`on` bypasses live for testing) |
 | `!mute on\|off\|status` | mod | silence the bot's chat output when it gets noisy; it keeps listening, tracking EXP, and holding the lease — bare `!mute` toggles |
-| `!drop [item]` | mod | force a single loot drop |
-| `!drops on\|off\|every <min>` | mod | auto chat-drop scheduler (rarity-weighted, while live) |
+| `!drop [itemId]` | mod | force a single loot drop |
+| `!drops on\|off\|every <min>\|status` | mod | auto chat-drop scheduler (rarity-weighted, while live) |
 | `!boss set <name>` / `!boss next` | mod | custom boss / advance to the next scripted season boss |
 | `!raidnight` | mod | lock the roster and run the battle now |
 | `!season start <id>` / `!season rollover <id>` | mod | start a tier / roll to the next (gear reset, renown kept) |
+| `!todo` / `!todos` | mod | date-organised to-do list, published to [okrafans.com/todo](https://okrafans.com/todo/) |
 
 \* Viewing raid status is open to everyone, but **mustering** (signing up with
 `!muster`) needs an active sub — same as `!create` and `!grab`. A lapsed sub keeps
@@ -102,12 +172,19 @@ npm test
 # 2) Locked-rules + client-write-rejection test (boots the RTDB emulator)
 npm run test:emulator
 
-# 3) Drive the entire game loop with no stream (automated muster→battle e2e)
+# 3) Every command through the real dispatcher (boots the RTDB emulator)
+npm run test:e2e
+
+# 4) Drive the entire game loop with no stream (automated muster→battle e2e)
 npm run synthetic
 
-# 4) …or drive it interactively by typing chat commands (no Twitch)
+# 5) …or drive it interactively by typing chat commands (no Twitch)
 npm run dev:console
 ```
+
+To exercise the bot against a **real Twitch channel** without touching production
+state, `npm run dev:live` runs it against a throwaway emulator DB and a separate
+token store (`.tokens-dev`) — this is how `!clip` was verified end to end.
 
 ### Full local integration (backend + website together)
 
@@ -310,9 +387,11 @@ The site reads `config/raid` (`{seasonId, weekId, phase, locksAt, startsAt}`),
 `bosses/<season>/<week>`, `raids/<season>/<week>/{signups, team, combat, result}`
 (the muster roster, aggregates, and the append-only combat-event `log`),
 `players/<id>`, `usernames/<login>` (login→id index), and `leaderboard/<season>`.
-The combat-log + signup shapes are specified in `docs/raid-game-spec.md §5.8` /
-`docs/IMPLEMENTATION.md §L` and the UI's `docs/raid-game-ui.md`. **Changing any
-path/shape means telling the UI track.**
+The combat-log + signup shapes are specified in
+[`docs/raid-game-spec.md`](docs/raid-game-spec.md) §5.8 and
+[`docs/IMPLEMENTATION.md`](docs/IMPLEMENTATION.md) §L. The UI side (`raid-game-ui.md`)
+lives in the **website repo**, not here. **Changing any path/shape means telling the
+UI track.**
 
 ## Decisions (confirmed with the owner)
 
