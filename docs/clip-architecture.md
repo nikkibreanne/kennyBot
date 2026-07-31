@@ -183,8 +183,14 @@ configured.
 | Full-session recording (Ingest B) | not established |
 | okra-clip-archiver | processing half built; ingest source unsettled |
 
-`CLIP_MODE` and `CAPTURE_*` are **environment variables read once at boot**, not RTDB
-config — changing them needs a container restart, unlike the EXP gate or chat mute.
+**`CLIP_MODE` is runtime config, not env-only.** `CLIP_MODE` seeds the *first boot*;
+after that `config/clipMode` in RTDB is authoritative and mods change it from chat
+with `!clipmode local|twitch|both`. This exists because the streamer's OBS can die
+mid-stream, and recovering by SSH + env edit + container restart is not a route
+anyone takes mid-show. **The env var does not win it back on the next restart.**
+
+`CAPTURE_*` and `OBS_*` remain env-only — they describe the deployment's topology
+(which machine, which credentials), not an operational choice a mod should make.
 
 ---
 

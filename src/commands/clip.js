@@ -9,19 +9,29 @@
 // Local is the default because a Twitch clip is capped at the STREAM resolution
 // (≤1080p here) while the local recording is whatever the camera actually shot —
 // the high-quality copy is the point of the command.
-import { getConfig } from '../db/configStore.js';
+import { getConfig, parseClipMode, CLIP_MODES } from '../db/configStore.js';
 import { createChannelClip, clipsReady } from '../twitch/clips.js';
 import { triggerCapture, captureReady } from '../integrations/capture.js';
 
-export const CLIP_MODES = ['local', 'twitch', 'both'];
+export { CLIP_MODES };
 
 /**
- * Resolve CLIP_MODE, defaulting to 'local'. An unrecognised value falls back to
- * the default rather than failing boot — index.js warns about it once at startup.
+ * Resolve the mode from the ENV var, defaulting to 'local'. This is only the
+ * first-boot seed and the fallback before the config mirror is warm — the live
+ * value comes from RTDB (see activeClipMode).
  */
 export function resolveClipMode(raw = process.env.CLIP_MODE) {
-  const v = String(raw ?? '').trim().toLowerCase();
-  return CLIP_MODES.includes(v) ? v : 'local';
+  return parseClipMode(raw);
+}
+
+/**
+ * The mode in force right now. RTDB (`config/clipMode`, set by `!clipmode`) wins
+ * over the environment, so a mod can switch to Twitch clips the moment the
+ * streamer's OBS dies — without an SSH session, a file edit and a redeploy.
+ * Falls back to env only while the mirror is cold (boot, or unit tests).
+ */
+export function activeClipMode() {
+  return getConfig().clipMode ?? resolveClipMode();
 }
 
 /**
@@ -46,7 +56,7 @@ export default {
   cooldownMs: 60_000, // per-user: a viewer can clip at most once a minute
   help: '!clip — clip the last ~30s of the stream',
   async run({ user, reply, logger }) {
-    const mode = resolveClipMode();
+    const mode = activeClipMode();
     let twitch = mode !== 'local' && clipsReady();
     const local = mode !== 'twitch' && captureReady();
 

@@ -7,7 +7,8 @@
 // interesting case: the local buffer works offline, Twitch's Create Clip doesn't.
 import { test, afterEach } from 'node:test';
 import assert from 'node:assert/strict';
-import clip, { resolveClipMode } from '../../src/commands/clip.js';
+import clip, { resolveClipMode, activeClipMode } from '../../src/commands/clip.js';
+import { parseClipMode, CLIP_MODES, primeConfigForTest } from '../../src/db/configStore.js';
 import { initClipsWith } from '../../src/twitch/clips.js';
 import { initCaptureWith } from '../../src/integrations/capture.js';
 
@@ -23,6 +24,7 @@ async function runClip() {
 
 afterEach(() => {
   delete process.env.CLIP_MODE;
+  primeConfigForTest({ clipMode: null }); // back to a cold mirror
   initClipsWith(null);
   initCaptureWith(null);
 });
@@ -33,6 +35,39 @@ test('CLIP_MODE parses the three modes and defaults to local', () => {
   assert.equal(resolveClipMode('  BOTH '), 'both', 'trimmed + case-insensitive');
   assert.equal(resolveClipMode('twitch'), 'twitch');
   assert.equal(resolveClipMode('nonsense'), 'local', 'a typo must not silently enable Twitch clips');
+  // Same guarantees wherever the value comes from — env, RTDB, or chat.
+  assert.deepEqual(CLIP_MODES, ['local', 'twitch', 'both']);
+  assert.equal(parseClipMode(null), 'local', 'a wiped RTDB value must not enable Twitch');
+});
+
+// The whole point of making this dynamic: a mod flips it from chat when the
+// streamer's OBS dies, and the container's env must not quietly win it back.
+test('the live RTDB value overrides the environment', () => {
+  process.env.CLIP_MODE = 'twitch';
+  assert.equal(resolveClipMode(), 'twitch', 'env alone says twitch');
+  primeConfigForTest({ clipMode: 'local' }); // a mod ran `!clipmode local`
+  assert.equal(activeClipMode(), 'local', 'the live value wins');
+});
+
+test('activeClipMode falls back to env only while the mirror is cold', () => {
+  // clipMode is null until startConfigMirror lands its first snapshot — true in
+  // unit tests, and true for the window during boot before the mirror is warm.
+  process.env.CLIP_MODE = 'both';
+  primeConfigForTest({ clipMode: null });
+  assert.equal(activeClipMode(), 'both', 'cold mirror → env');
+});
+
+test('!clip obeys the live mode, not the environment', async () => {
+  let clips = 0;
+  let captures = 0;
+  process.env.CLIP_MODE = 'local'; // env says local…
+  primeConfigForTest({ clipMode: 'twitch' }); // …but a mod switched to twitch
+  initClipsWith(async () => { clips += 1; return 'TwitchClipId'; });
+  initCaptureWith(async () => { captures += 1; return { path: 'x.mkv' }; });
+
+  const reply = await runClip(); // not live, so the twitch half is gated
+  assert.equal(captures, 0, 'local capture must not fire — the live mode is twitch');
+  assert.match(reply, /only clip while the stream is live/i);
 });
 
 test('by default !clip captures locally and makes NO Twitch clip', async () => {

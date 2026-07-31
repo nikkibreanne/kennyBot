@@ -14,6 +14,11 @@ const mirror = {
   // connected — listening, granting EXP, processing drops, holding the lease —
   // but sends nothing to chat. Persisted so a restart keeps the mods' choice.
   chatMuted: false,
+  // What !clip does: 'local' | 'twitch' | 'both'. Seeded from CLIP_MODE at first
+  // boot, then RTDB is authoritative so a mod can flip it from chat — the
+  // streamer's OBS can die mid-stream, and re-deploying the container to get
+  // Twitch clips back is not an acceptable recovery path.
+  clipMode: null, // null until the mirror is warm; readers fall back to env
   season: null,
   raid: null, // config/raid: { seasonId, weekId, phase, locksAt, startsAt }
   dropScheduler: { enabled: gameConfig.loot.scheduler.enabled, intervalSec: gameConfig.loot.scheduler.intervalSec },
@@ -34,10 +39,14 @@ export async function startConfigMirror(logger = console) {
   await db.ref(PATHS.configExpMode()).transaction((v) => (v == null ? gameConfig.liveGate.defaultExpMode : v));
   await db.ref(PATHS.configLive()).transaction((v) => (v == null ? false : v));
   await db.ref(PATHS.configChatMuted()).transaction((v) => (v == null ? false : v));
+  // CLIP_MODE seeds the FIRST boot only; after that RTDB wins, so a mod's `!clipmode`
+  // is not silently undone by whatever the container's env still says.
+  await db.ref(PATHS.configClipMode()).transaction((v) => (v == null ? parseClipMode(process.env.CLIP_MODE) : v));
 
   const liveRef = db.ref(PATHS.configLive());
   const expRef = db.ref(PATHS.configExpMode());
   const mutedRef = db.ref(PATHS.configChatMuted());
+  const clipRef = db.ref(PATHS.configClipMode());
   const seasonRef = db.ref(PATHS.seasonCurrent());
   const raidRef = db.ref(PATHS.configRaid());
   const dropRef = db.ref(PATHS.configDropScheduler());
@@ -48,26 +57,36 @@ export async function startConfigMirror(logger = console) {
   liveRef.on('value', (s) => { mirror.live = Boolean(s.val()); });
   expRef.on('value', (s) => { mirror.expMode = s.val() || gameConfig.liveGate.defaultExpMode; });
   mutedRef.on('value', (s) => { mirror.chatMuted = Boolean(s.val()); });
+  clipRef.on('value', (s) => { mirror.clipMode = parseClipMode(s.val()); });
   seasonRef.on('value', (s) => { mirror.season = s.val(); });
   raidRef.on('value', (s) => { mirror.raid = s.val(); });
   dropRef.on('value', (s) => { if (s.val()) mirror.dropScheduler = s.val(); });
 
   // Wait for the initial reads so the mirror is warm before chat starts.
-  const [liveSnap, expSnap, mutedSnap, seasonSnap, raidSnap, dropSnap] = await Promise.all([
-    liveRef.get(), expRef.get(), mutedRef.get(), seasonRef.get(), raidRef.get(), dropRef.get(),
+  const [liveSnap, expSnap, mutedSnap, clipSnap, seasonSnap, raidSnap, dropSnap] = await Promise.all([
+    liveRef.get(), expRef.get(), mutedRef.get(), clipRef.get(), seasonRef.get(), raidRef.get(), dropRef.get(),
   ]);
   mirror.live = Boolean(liveSnap.val());
   mirror.expMode = expSnap.val() || gameConfig.liveGate.defaultExpMode;
   mirror.chatMuted = Boolean(mutedSnap.val());
+  mirror.clipMode = parseClipMode(clipSnap.val());
   mirror.season = seasonSnap.val();
   mirror.raid = raidSnap.val();
   if (dropSnap.val()) mirror.dropScheduler = dropSnap.val();
-  logger.info?.('config mirror warm', { live: mirror.live, expMode: mirror.expMode, chatMuted: mirror.chatMuted });
+  logger.info?.('config mirror warm', {
+    live: mirror.live, expMode: mirror.expMode, chatMuted: mirror.chatMuted, clipMode: mirror.clipMode,
+  });
 }
 
 /** Current in-memory config view (hot path). */
 export function getConfig() {
-  return { live: mirror.live, expMode: mirror.expMode, chatMuted: mirror.chatMuted, season: mirror.season };
+  return {
+    live: mirror.live,
+    expMode: mirror.expMode,
+    chatMuted: mirror.chatMuted,
+    clipMode: mirror.clipMode,
+    season: mirror.season,
+  };
 }
 
 /** True when a mod has muted the bot's outbound chat (`!mute`). Hot-path read. */
@@ -119,6 +138,44 @@ export async function setLive(value, source = 'unknown', logger = console) {
 }
 
 /** Set the EXP gate override mode (on|off|auto). */
+/**
+ * Test seam: prime the in-memory mirror without RTDB. Unit tests run with no
+ * database, so the mirror is otherwise stuck at its cold defaults and any
+ * "live config wins" behaviour is untestable offline.
+ * @param {Partial<typeof mirror>} patch
+ */
+export function primeConfigForTest(patch) {
+  Object.assign(mirror, patch);
+}
+
+/** What `!clip` may do. `local` = OBS/Aitum capture only, no Twitch clip. */
+export const CLIP_MODES = ['local', 'twitch', 'both'];
+
+/**
+ * Parse a clip mode from any source (env, RTDB, chat). Anything unrecognised —
+ * including null/undefined — becomes 'local', because the failure that matters is
+ * a typo quietly turning Twitch clipping back on.
+ *
+ * Lives here rather than in commands/clip.js so configStore can validate and seed
+ * without importing the command that imports it.
+ */
+export function parseClipMode(raw) {
+  const v = String(raw ?? '').trim().toLowerCase();
+  return CLIP_MODES.includes(v) ? v : 'local';
+}
+
+/**
+ * Change what `!clip` does, live (`!clipmode`). Updates the mirror synchronously
+ * so the very next `!clip` obeys it without waiting for the RTDB round-trip, then
+ * persists so the choice survives a restart — and outlives the container's env.
+ */
+export async function setClipMode(mode) {
+  if (!CLIP_MODES.includes(mode)) throw new Error(`invalid clipMode: ${mode}`);
+  mirror.clipMode = mode;
+  await database().ref(PATHS.configClipMode()).set(mode);
+  return mode;
+}
+
 export async function setExpMode(mode) {
   if (!['on', 'off', 'auto'].includes(mode)) throw new Error(`invalid expMode: ${mode}`);
   await database().ref(PATHS.configExpMode()).set(mode);

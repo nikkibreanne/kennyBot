@@ -13,7 +13,7 @@ import { openMarket } from '../../src/db/market.js';
 import { setDrop } from '../../src/db/drops.js';
 import { setupRaidWeek, enlist } from '../../src/db/raid.js';
 import { seedCuratedFacts } from '../../src/db/facts.js';
-import { getRaidPointer, getConfig, setLive } from '../../src/db/configStore.js';
+import { getRaidPointer, getConfig, setLive, setClipMode } from '../../src/db/configStore.js';
 import { initClipsWith } from '../../src/twitch/clips.js';
 import { initCaptureWith } from '../../src/integrations/capture.js';
 import { defaultBoss } from '../../src/content/bosses.js';
@@ -77,15 +77,46 @@ export const SCENARIOS = [
         assert.match(local, /clipped it/i);
         assert.doesNotMatch(local, /clips\.twitch\.tv/, 'the default must not make a Twitch clip');
 
-        // CLIP_MODE=both puts the Twitch clip back alongside it (needs live).
-        process.env.CLIP_MODE = 'both';
+        // 'both' puts the Twitch clip back alongside it (needs live). Set the LIVE
+        // value rather than the env var — RTDB deliberately overrides the
+        // environment, so setting CLIP_MODE here would (correctly) be ignored.
+        await setClipMode('both');
         await setLive(true, 'test');
         await until(() => getConfig().live === true); // mirror is async
         assert.match(await bot.send(bob, '!clip'), /clips\.twitch\.tv\/TestClipId123/);
       } finally {
-        delete process.env.CLIP_MODE;
+        await setClipMode('local'); // reset shared config for later scenarios
         initCaptureWith(null);
         await setLive(false, 'test'); // reset shared live state for later scenarios
+      }
+    },
+  },
+  {
+    command: 'clipmode', title: 'a mod switches what !clip does, and it persists',
+    run: async ({ bot, u }) => {
+      const mod = u('e2e_clipmode', { login: 'nikki', name: 'Nikki', mod: true });
+      const viewer = u('e2e_clipmode_v', { login: 'carl', name: 'Carl' });
+      initCaptureWith(async () => ({ path: 'D:/rec/Replay.mkv' }));
+      try {
+        assert.match(await bot.send(mod, '!clipmode status'), /!clip mode: \w+/);
+
+        // Switching to twitch must take effect for the very next !clip, without
+        // waiting on an RTDB round-trip — that's why setClipMode writes the mirror first.
+        await bot.send(mod, '!clipmode twitch');
+        assert.equal(getConfig().clipMode, 'twitch', 'mirror updated synchronously');
+        const snap = await database().ref('config/clipMode').get();
+        assert.equal(snap.val(), 'twitch', 'and persisted, so it survives a restart');
+
+        // Not live → the twitch half is impossible, and local is switched off.
+        assert.match(await bot.send(viewer, '!clip'), /only clip while the stream is live/i);
+
+        await bot.send(mod, '!clipmode local');
+        assert.equal(getConfig().clipMode, 'local');
+
+        assert.match(await bot.send(mod, '!clipmode nonsense'), /Usage: !clipmode/);
+        assert.equal(getConfig().clipMode, 'local', 'a bad value changes nothing');
+      } finally {
+        initCaptureWith(null);
       }
     },
   },
