@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.10.1](https://github.com/nikkibreanne/kennyBot/compare/kennybot-v0.10.0...kennybot-v0.10.1) (2026-08-04)
+
+
+### Bug Fixes
+
+* **deps:** omnibus dependency and action bumps (closes 4 alerts) ([#50](https://github.com/nikkibreanne/kennyBot/issues/50)) ([dabd873](https://github.com/nikkibreanne/kennyBot/commit/dabd87364b05ffe66fd2d5c0426d05ed2710d7c9))
+
 ## [0.10.0](https://github.com/nikkibreanne/kennyBot/compare/kennybot-v0.9.0...kennybot-v0.10.0) (2026-08-04)
 
 
