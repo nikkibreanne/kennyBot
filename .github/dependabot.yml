@@ -1,0 +1,33 @@
+# Dependabot's default PR title is "Bump X from A to B", which the `pr-title` check
+# rejects — merges are squash-only, so that title would become a non-conventional
+# commit on main and release-please would ignore the bump entirely.
+#
+# `fix(deps)` is deliberate, not cosmetic: a dependency bump on this repo is almost
+# always a SECURITY fix, and `fix` cuts a patch release, which builds a new image.
+# Without that the fix sits on main and never reaches the running container.
+# Dev-only bumps use `chore` so they don't cut a release nobody needs.
+version: 2
+updates:
+  - package-ecosystem: npm
+    directory: "/"
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 5
+    commit-message:
+      prefix: "fix(deps)"
+      prefix-development: "chore(deps-dev)"
+    # One PR per ecosystem-wide bump run instead of one per package — the runtime
+    # deps here are a handful of twurple/firebase trees that move together.
+    groups:
+      production:
+        dependency-type: production
+      development:
+        dependency-type: development
+
+  # The workflows pin actions by major tag; keep them current too.
+  - package-ecosystem: github-actions
+    directory: "/"
+    schedule:
+      interval: monthly
+    commit-message:
+      prefix: "ci(deps)"
