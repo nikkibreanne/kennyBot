@@ -100,10 +100,54 @@ export async function rejectFact(id) {
   return { ok: true, text: sub.text };
 }
 
-/** A random approved fact (for the bare `!fact` command), or null if none. */
-export async function randomApprovedFact() {
+/**
+ * The /info/ page's display order, mirrored EXACTLY: curated facts first in their
+ * seeded `order`, then viewer submissions newest-first.
+ *
+ * This is a duplicate of `sortFacts` in the website's `_includes/info.html`, and it
+ * has to stay one — `!fact <n>` promises the number a viewer can see on the page,
+ * and the page numbers its `<ol>` positionally, storing no number anywhere. If the
+ * two orderings drift, `!fact 3` starts quoting a different fact than the site
+ * shows, silently. Change one, change the other.
+ *
+ * Pure and exported so it can be unit-tested without a database.
+ */
+export function sortFacts(facts) {
+  return facts.slice().sort((a, b) => {
+    const ca = a.source === 'curated';
+    const cb = b.source === 'curated';
+    if (ca && cb) return (a.order || 0) - (b.order || 0);
+    if (ca !== cb) return ca ? -1 : 1;
+    return (b.at || 0) - (a.at || 0);
+  });
+}
+
+/** Every approved fact, in the same order the /info/ page numbers them. */
+export async function orderedFacts() {
   const snap = await database().ref(PATHS.facts()).get();
-  const facts = Object.values(snap.val() || {}).filter((f) => f && f.text);
+  return sortFacts(Object.values(snap.val() || {}).filter((f) => f && f.text));
+}
+
+/**
+ * The fact shown as **#n** on /info/ (1-based).
+ * @returns {Promise<{ fact: object|null, number?: number, total: number }>}
+ *   `fact` is null when n is out of range; `total` always lets the caller say
+ *   what the valid range is instead of guessing for the viewer.
+ */
+export async function factByNumber(n) {
+  const facts = await orderedFacts();
+  if (!Number.isInteger(n) || n < 1 || n > facts.length) return { fact: null, total: facts.length };
+  return { fact: facts[n - 1], number: n, total: facts.length };
+}
+
+/**
+ * A random approved fact — carrying the number it shows as on /info/, so the
+ * numbering is discoverable from chat without visiting the page.
+ * @returns {Promise<(object & { number: number, total: number })|null>}
+ */
+export async function randomApprovedFact() {
+  const facts = await orderedFacts();
   if (!facts.length) return null;
-  return facts[Math.floor(Math.random() * facts.length)];
+  const i = Math.floor(Math.random() * facts.length);
+  return { ...facts[i], number: i + 1, total: facts.length };
 }

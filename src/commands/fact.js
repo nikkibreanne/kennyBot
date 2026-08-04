@@ -1,8 +1,18 @@
-// !fact — NIKKI FUN FACTS. Public: `!fact` shows a random approved fact;
-// `!fact suggest <text>` queues one for mod approval. Mod-only:
+// !fact — NIKKI FUN FACTS. Public: `!fact` shows a random approved fact, `!fact <n>`
+// shows the one numbered n on the /info/ page (see sortFacts in db/facts.js — the
+// page numbers its <ol> positionally and stores no number, so the bot has to derive
+// the identical ordering); `!fact suggest <text>` queues one for mod approval. Mod-only:
 // `!fact pending`, `!fact approve <#>`, `!fact reject <#>`. Mixed public/mod, so
 // it stays `mod:false` and gates the moderation subcommands on isMod inline.
-import { suggestFact, listPendingFacts, approveFact, rejectFact, randomApprovedFact, cleanFactText } from '../db/facts.js';
+import {
+  suggestFact,
+  listPendingFacts,
+  approveFact,
+  rejectFact,
+  randomApprovedFact,
+  factByNumber,
+  cleanFactText,
+} from '../db/facts.js';
 import { config } from '../config.js';
 
 // Per-user suggest throttle (single instance → in-memory is authoritative).
@@ -13,7 +23,7 @@ export default {
   names: ['fact', 'facts'],
   mod: false,
   cooldownMs: 3_000,
-  help: '!fact — a random Nikki fun fact · !fact suggest <text> — suggest one for approval',
+  help: '!fact — a random Nikki fun fact · !fact <#> — the one numbered # on /info/ · !fact suggest <text> — suggest one',
   async run({ user, args, reply }) {
     const sub = (args[0] || '').toLowerCase();
     const isMod = user.isMod || user.isBroadcaster;
@@ -61,11 +71,27 @@ export default {
       return;
     }
 
+    // ── public: a specific fact by its /info/ number ──
+    // Digits only, so this can never shadow a subcommand word.
+    if (/^\d+$/.test(sub)) {
+      const { fact, number, total } = await factByNumber(Number.parseInt(sub, 10));
+      if (!fact) {
+        reply(
+          total
+            ? `@${user.displayName} there ${total === 1 ? 'is only 1 fact' : `are only ${total} facts`} — try !fact 1-${total}  ·  ${config.siteUrl}/info/`
+            : `No facts yet — be the first! !fact suggest <your fact>  (${config.siteUrl}/info/)`,
+        );
+        return;
+      }
+      reply(`NIKKI FUN FACT #${number}: ${fact.text}${fact.by ? ` (— ${fact.by})` : ''}`);
+      return;
+    }
+
     // ── public: a random Nikki fun fact ──
     const fact = await randomApprovedFact();
     reply(
       fact
-        ? `NIKKI FUN FACT: ${fact.text}${fact.by ? ` (— ${fact.by})` : ''}  ·  suggest yours: !fact suggest <text>`
+        ? `NIKKI FUN FACT #${fact.number}: ${fact.text}${fact.by ? ` (— ${fact.by})` : ''}  ·  !fact <#> for a specific one  ·  suggest yours: !fact suggest <text>`
         : `No facts yet — be the first! !fact suggest <your fact>  (${config.siteUrl}/info/)`,
     );
   },

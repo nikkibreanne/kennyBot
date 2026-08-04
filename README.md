@@ -131,7 +131,7 @@ scripts/synthetic-chat.js no-stream harness that drives the whole loop
 
 | Command | Who | Effect |
 |---|---|---|
-| `!fact` / `!facts` | everyone | a random fact · `!fact suggest <text>` submits one for approval |
+| `!fact` / `!facts` | everyone | a random fact, with its number · `!fact <#>` the one numbered `#` on [/info/](https://okrafans.com/info/) · `!fact suggest <text>` submits one for approval |
 | `!kennycommands` / `!kennybot` / `!kcommands` | everyone | the full command list, in chat |
 
 **Mod / operations**
