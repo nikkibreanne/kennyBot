@@ -12,7 +12,7 @@ import { ensureWallet } from '../../src/db/wallet.js';
 import { openMarket } from '../../src/db/market.js';
 import { setDrop } from '../../src/db/drops.js';
 import { setupRaidWeek, enlist } from '../../src/db/raid.js';
-import { seedCuratedFacts } from '../../src/db/facts.js';
+import { seedCuratedFacts, orderedFacts } from '../../src/db/facts.js';
 import { getRaidPointer, getConfig, setLive, setClipMode } from '../../src/db/configStore.js';
 import { initClipsWith } from '../../src/twitch/clips.js';
 import { initCaptureWith } from '../../src/integrations/capture.js';
@@ -220,11 +220,30 @@ export const SCENARIOS = [
     },
   },
   {
-    command: 'fact', title: 'returns a random fun fact',
+    command: 'fact', title: 'random fact, and a specific one by its /info/ number',
     run: async ({ bot, u, fx }) => {
       await fx.facts();
-      const reply = await bot.send(u('e2e_fact', { login: 'viewer' }), '!fact');
-      assert.match(reply, /FUN FACT/i);
+      const viewer = u('e2e_fact', { login: 'viewer' });
+
+      // Bare !fact — random, but it reports which number it is so the numbering
+      // is discoverable from chat.
+      const random = await bot.send(viewer, '!fact');
+      assert.match(random, /FUN FACT #\d+:/i);
+
+      // !fact <n> must return the fact the /info/ page shows at position n. The
+      // page numbers positionally, so assert against the same ordering the site
+      // uses rather than against a hardcoded string.
+      const ordered = await orderedFacts();
+      assert.ok(ordered.length >= 2, 'need at least two facts to test numbering');
+      const third = await bot.send(u('e2e_fact3', { login: 'v3' }), '!fact 2');
+      assert.match(third, /FUN FACT #2:/);
+      assert.ok(third.includes(ordered[1].text), 'must be the SAME fact the page numbers 2');
+
+      // Out of range says what the range is, rather than silently answering with
+      // some other fact — a typo must not look like a successful lookup.
+      const oor = await bot.send(u('e2e_fact4', { login: 'v4' }), `!fact ${ordered.length + 5}`);
+      assert.match(oor, new RegExp(`only ${ordered.length} facts`, 'i'));
+      assert.doesNotMatch(oor, /FUN FACT #/, 'must not fall back to a random fact');
     },
   },
   {
