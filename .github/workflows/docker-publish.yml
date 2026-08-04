@@ -35,7 +35,7 @@ jobs:
       contents: read
       packages: write # lets GITHUB_TOKEN push to GHCR — no PAT in CI
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v7
         with:
           ref: ${{ inputs.ref }}
       # docker-container driver — required to attach the SBOM/provenance attestations below.
