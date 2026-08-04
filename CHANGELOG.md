@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.10.0](https://github.com/nikkibreanne/kennyBot/compare/kennybot-v0.9.0...kennybot-v0.10.0) (2026-08-04)
+
+
+### Features
+
+* !fact &lt;n&gt; returns the fact numbered n on the /info/ page ([#39](https://github.com/nikkibreanne/kennyBot/issues/39)) ([930ff5c](https://github.com/nikkibreanne/kennyBot/commit/930ff5c846b066b687f1049dcadc3b2f91db866e))
+
 ## [0.9.0](https://github.com/nikkibreanne/kennyBot/compare/kennybot-v0.8.0...kennybot-v0.9.0) (2026-07-31)
 
 
