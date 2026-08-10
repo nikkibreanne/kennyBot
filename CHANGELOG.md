@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.11.1](https://github.com/nikkibreanne/kennyBot/compare/kennybot-v0.11.0...kennybot-v0.11.1) (2026-08-10)
+
+
+### Bug Fixes
+
+* a 6-minute timer now gets its 5-minute heads-up ([#57](https://github.com/nikkibreanne/kennyBot/issues/57)) ([720cda5](https://github.com/nikkibreanne/kennyBot/commit/720cda5527bdf6b197ccaa2f13f640d4932d10f7))
+
 ## [0.11.0](https://github.com/nikkibreanne/kennyBot/compare/kennybot-v0.10.1...kennybot-v0.11.0) (2026-08-10)
 
 
