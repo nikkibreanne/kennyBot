@@ -372,6 +372,30 @@ export const SCENARIOS = [
     },
   },
   {
+    command: 'timer', title: 'mod sets/extends the stream timer; anyone can read it',
+    run: async ({ bot, u }) => {
+      const mod = u('e2e_timer', { login: 'mod', name: 'Mod', mod: true });
+      const viewer = u('e2e_timer_v', { login: 'viewer', name: 'Viewer' });
+      try {
+        assert.match(await bot.send(mod, '!timer 10m Coffee break'), /Timer set — Coffee break: 10m/i);
+        assert.match(await bot.send(mod, '!timer +5'), /\+5m/, 'extends without restarting');
+        // A viewer can ask how long is left…
+        const status = await bot.send(viewer, '!timer');
+        assert.match(status, /Coffee break: 1[45]m/, '~15m left');
+        // …but cannot touch the clock: no reply, and the timer is untouched.
+        assert.equal(await bot.send(viewer, '!timer stop'), '', 'a non-mod control is ignored');
+        assert.ok((await database().ref('config/timer').get()).exists(), 'still running');
+
+        assert.match(await bot.send(mod, '!timer pause'), /Paused/i);
+        assert.match(await bot.send(mod, '!timer resume'), /Resumed/i);
+        assert.match(await bot.send(mod, '!timer stop'), /dismissed/i);
+        assert.equal((await database().ref('config/timer').get()).exists(), false, 'cleared from RTDB');
+      } finally {
+        await bot.send(mod, '!timer stop'); // never leak a timer into the next scenario
+      }
+    },
+  },
+  {
     command: 'season', title: 'mod starts a new season',
     run: async ({ bot, u }) => {
       const reply = await bot.send(u('e2e_season', { login: 'mod', name: 'Mod', mod: true }), '!season start t2');

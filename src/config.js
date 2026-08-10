@@ -144,6 +144,25 @@ export const config = {
     },
   },
 
+  // ── Mod stream timer (`!timer`) ──────────────────────────────────────────
+  // One shared countdown a mod can set from chat ("brb 10", "raid starts in
+  // 5m"). Not a game system — it announces heads-ups and a "time's up" line and
+  // owns no state beyond config/timer, so a restart resumes it from `endsAt`.
+  timer: {
+    minMs: 5_000, // shortest settable timer (a 1s timer is just noise)
+    maxMs: 12 * 60 * 60 * 1000, // longest — a typo like "!timer 999" can't camp forever
+    // Heads-up announcements, fired as the clock CROSSES each mark (longest
+    // first). A mark is skipped unless the timer had at least 1.5× that long
+    // left when it was set/adjusted, so a 5-minute timer doesn't immediately
+    // shout "5 minutes left".
+    warnAtMs: [5 * 60 * 1000, 60 * 1000],
+    // If the bot was down when a timer expired, announcing "time's up" minutes
+    // late is worse than silence: past this much overdue it's cleared quietly.
+    graceMs: 2 * 60 * 1000,
+    tickMs: 1_000, // countdown resolution (in-memory read; hits RTDB only on fire)
+    maxLabelLen: 60,
+  },
+
   // ── Live gate (spec §5.1) ────────────────────────────────────────────────
   liveGate: {
     pollIntervalMs: 45_000, // Helix poll fallback cadence (30–60s)

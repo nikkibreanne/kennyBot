@@ -86,6 +86,10 @@ export const PATHS = {
   seasonCurrent: () => 'config/season/current',
   configRaid: () => 'config/raid',
   configDropScheduler: () => 'config/dropScheduler',
+  // MOD TIMER (`!timer`): the single shared countdown. Stored (not just held in
+  // memory) so a restart resumes it from `endsAt` instead of losing it — the
+  // same "never a timer a restart could lose" rule the raid phases follow.
+  configTimer: () => 'config/timer',
   configLock: () => 'config/lock',
   // OKRA FACTS (/info/): approved facts are client-read-only; the submission
   // queue + counter are admin-only.

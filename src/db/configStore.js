@@ -6,7 +6,7 @@
 import { database, PATHS, SERVER_TIMESTAMP } from './firebase.js';
 import { config as gameConfig } from '../config.js';
 
-/** @type {{ live: boolean, expMode: string, chatMuted: boolean, season: any, raid: any, dropScheduler: any }} */
+/** @type {{ live: boolean, expMode: string, chatMuted: boolean, season: any, raid: any, dropScheduler: any, timer: any }} */
 const mirror = {
   live: false,
   expMode: gameConfig.liveGate.defaultExpMode,
@@ -22,6 +22,9 @@ const mirror = {
   season: null,
   raid: null, // config/raid: { seasonId, weekId, phase, locksAt, startsAt }
   dropScheduler: { enabled: gameConfig.loot.scheduler.enabled, intervalSec: gameConfig.loot.scheduler.intervalSec },
+  // config/timer: the one mod-set countdown, or null. Read once a second by the
+  // timer scheduler, so it belongs in the mirror rather than an RTDB read loop.
+  timer: null,
 };
 
 let started = false;
@@ -51,6 +54,7 @@ export async function startConfigMirror(logger = console) {
   const seasonRef = db.ref(PATHS.seasonCurrent());
   const raidRef = db.ref(PATHS.configRaid());
   const dropRef = db.ref(PATHS.configDropScheduler());
+  const timerRef = db.ref(PATHS.configTimer());
 
   // Seed drop-scheduler defaults once (never clobber a mod's settings).
   await dropRef.transaction((v) => (v == null ? { enabled: gameConfig.loot.scheduler.enabled, intervalSec: gameConfig.loot.scheduler.intervalSec } : v));
@@ -62,10 +66,12 @@ export async function startConfigMirror(logger = console) {
   seasonRef.on('value', (s) => { mirror.season = s.val(); });
   raidRef.on('value', (s) => { mirror.raid = s.val(); });
   dropRef.on('value', (s) => { if (s.val()) mirror.dropScheduler = s.val(); });
+  timerRef.on('value', (s) => { mirror.timer = s.val() || null; });
 
   // Wait for the initial reads so the mirror is warm before chat starts.
-  const [liveSnap, expSnap, mutedSnap, clipSnap, seasonSnap, raidSnap, dropSnap] = await Promise.all([
+  const [liveSnap, expSnap, mutedSnap, clipSnap, seasonSnap, raidSnap, dropSnap, timerSnap] = await Promise.all([
     liveRef.get(), expRef.get(), mutedRef.get(), clipRef.get(), seasonRef.get(), raidRef.get(), dropRef.get(),
+    timerRef.get(),
   ]);
   mirror.live = Boolean(liveSnap.val());
   mirror.expMode = expSnap.val() || gameConfig.liveGate.defaultExpMode;
@@ -74,6 +80,7 @@ export async function startConfigMirror(logger = console) {
   mirror.season = seasonSnap.val();
   mirror.raid = raidSnap.val();
   if (dropSnap.val()) mirror.dropScheduler = dropSnap.val();
+  mirror.timer = timerSnap.val() || null;
   logger.info?.('config mirror warm', {
     live: mirror.live, expMode: mirror.expMode, chatMuted: mirror.chatMuted, clipMode: mirror.clipMode,
   });
@@ -114,6 +121,23 @@ export function getDropScheduler() {
 export async function setDropScheduler(patch) {
   await database().ref(PATHS.configDropScheduler()).update(patch);
   return { ...mirror.dropScheduler, ...patch };
+}
+
+/** The active mod timer record (`!timer`), or null. See src/db/timer.js. */
+export function getTimer() {
+  return mirror.timer;
+}
+
+/**
+ * Replace (or clear, with null) the mod timer. Updates the mirror synchronously
+ * so a follow-up `!timer +5` — or the countdown tick a moment later — sees the
+ * new state without waiting for the RTDB listener to echo it back.
+ */
+export async function setTimerState(timer) {
+  mirror.timer = timer || null;
+  const ref = database().ref(PATHS.configTimer());
+  await (timer ? ref.set(timer) : ref.remove());
+  return mirror.timer;
 }
 
 /**

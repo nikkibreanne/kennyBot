@@ -40,6 +40,7 @@ so a mod can change them **while the bot is running**. These are the
 | **Chat output mute** — silence sends, keep listening | `!mute on` · `!mute off` · `!mute status` (bare `!mute` toggles) | `config/chatMuted` |
 | **Auto drop scheduler** — on/off + interval | `!drops on` · `!drops off` · `!drops every <min>` · `!drops status` | `config/dropScheduler` |
 | **Clip mode** — which of `!clip`'s outputs run | `!clipmode horizontal vertical twitch` · `!clipmode local\|all\|off` · `!clipmode status` | `config/clipMode` |
+| **Stream timer** — the one mod countdown | `!timer 10m [label]` · `!timer +5` · `!timer -2m` · `!timer pause` / `resume` · `!timer stop` | `config/timer` |
 | **Live status** (set automatically by Twitch) | _(no command — EventSub / Helix poll set it)_ | `config/live` |
 | **Active season** | `!season start <id>` · `!season rollover <id>` | `config/season/current` |
 | **Active raid / boss / phase** | `!boss set <name>` · `!boss next` · `!raidnight` | `config/raid`, `bosses/...` |
@@ -224,6 +225,28 @@ missing.
 > Clip **length** is not configured here, or anywhere in kennyBot — it comes from
 > OBS's Replay Buffer and Aitum's Backtrack settings on the streamer's PC. See
 > [`clip-architecture.md`](clip-architecture.md).
+
+---
+
+## `timer` — the mod stream countdown (`!timer`)
+
+The chat-set countdown for breaks and intermissions ("brb 10", "starting in 5").
+It isn't part of the game: no EXP, no credits, no live gate — a mod can set one
+before going live. There is only ever **one** timer; setting another replaces it.
+
+The countdown is stored as an absolute deadline in RTDB (`config/timer`), so a
+bot restart resumes the same timer instead of losing it. What a restart *does*
+reset is which heads-up marks have already been announced — deliberately, so a
+restart can't make the bot repeat a "1 minute left" it already posted.
+
+| Key | Default | What it controls | Effect of changing it |
+|---|---|---|---|
+| `minMs` | `5000` (5 s) | Shortest timer that can be set. | Below a few seconds a timer is just chat noise. Rarely worth changing. |
+| `maxMs` | `43200000` (12 h) | Longest timer that can be set, and the ceiling `!timer +X` can push one to. | The guard against a typo (`!timer 999`) camping a countdown for weeks. |
+| `warnAtMs` | `[300000, 60000]` (5 min, 1 min) | The heads-up announcements, fired as the clock **crosses** each mark. | Add marks for a chattier countdown (e.g. `[600000, 300000, 60000]`), or set `[]` for a silent timer that only speaks when it's up. A mark is skipped unless the timer had **1.5×** that long left when it was set or last adjusted, so a 5-minute timer never opens with "5 minutes left". |
+| `graceMs` | `120000` (2 min) | How overdue an expired timer may be and still get its "time's up" announced. Past this it's cleared silently. | This only matters when the bot was down at the moment a timer expired. Raise it if you'd rather hear a late call than none; lower it to keep the bot from ever announcing stale news. |
+| `tickMs` | `1000` (1 s) | Countdown resolution. Each tick reads memory only — RTDB is touched just when the timer actually fires. | Higher = a "time's up" that can land that much late. Little reason to change. |
+| `maxLabelLen` | `60` | Longest timer label; longer ones are clipped with `…`. | Keeps a pasted paragraph out of every heads-up line. |
 
 ---
 
