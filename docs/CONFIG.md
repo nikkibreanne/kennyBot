@@ -41,6 +41,7 @@ so a mod can change them **while the bot is running**. These are the
 | **Auto drop scheduler** — on/off + interval | `!drops on` · `!drops off` · `!drops every <min>` · `!drops status` | `config/dropScheduler` |
 | **Clip mode** — which of `!clip`'s outputs run | `!clipmode horizontal vertical twitch` · `!clipmode local\|all\|off` · `!clipmode status` | `config/clipMode` |
 | **Stream timer** — the one mod countdown | `!timer 10m [label]` · `!timer +5` · `!timer -2m` · `!timer pause` / `resume` · `!timer stop` | `config/timer` |
+| **Reminders** — schedules, text, on/off | `!reminder` · `!reminder at ghosty 08:00 17:00` · `!reminder every hydration 60` · `!reminder off <id>` | `config/reminders/<id>` |
 | **Live status** (set automatically by Twitch) | _(no command — EventSub / Helix poll set it)_ | `config/live` |
 | **Active season** | `!season start <id>` · `!season rollover <id>` | `config/season/current` |
 | **Active raid / boss / phase** | `!boss set <name>` · `!boss next` · `!raidnight` | `config/raid`, `bosses/...` |
@@ -225,6 +226,45 @@ missing.
 > Clip **length** is not configured here, or anywhere in kennyBot — it comes from
 > OBS's Replay Buffer and Aitum's Backtrack settings on the streamer's PC. See
 > [`clip-architecture.md`](clip-architecture.md).
+
+---
+
+## `reminders` — scheduled chat nudges (`!reminder`)
+
+The recurring pings: the Wallpaper Engine check, Ghosty's meal times, the hourly
+hydration nudge. **The schedules are not in this file.** Each reminder is a
+record in RTDB at `config/reminders/<id>`, seeded once from
+[`src/content/reminders.js`](../src/content/reminders.js) and edited from chat
+with `!reminder` — so re-timing Ghosty's dinner never needs a deploy, and a time
+you changed is **never** overwritten by a later release.
+
+The settings below are only the engine-wide bounds that apply to every reminder.
+
+| Key | Default | What it controls | Effect of changing it |
+|---|---|---|---|
+| `tickMs` | `20000` (20 s) | How often schedules are checked. | A daily slot can land up to this late. Minute-accuracy is all these need; lower only burns CPU. |
+| `dailyGraceMs` | `300000` (5 min) | How long after its wall-clock time a daily slot may still fire. Past it, the slot is skipped. | This is what stops a bot that boots at noon from announcing the 08:00 meal. Raise it if you'd rather have a slightly late ping than none; a per-reminder `graceMs` overrides it. |
+| `afterLiveWindowMs` | `7200000` (2 h) | How late an "N minutes after going live" reminder may still be announced. Past it the session is marked handled and nothing is said. | Only matters when the bot boots hours into a stream. |
+| `defaultTimeZone` | `'America/Los_Angeles'` | The zone a daily reminder uses when it names none of its own. | Per-reminder `timeZone` (set with `!reminder zone <id> <IANA>`) always wins. |
+| `maxTextLen` | `200` | Longest message text accepted from chat; longer is clipped with `…`. | Keeps a pasted paragraph out of a recurring announcement. |
+
+### The reminder record
+
+One of three `kind`s. Fields not used by a kind are simply ignored.
+
+| Field | Applies to | Meaning |
+|---|---|---|
+| `id` | all | Short name mods type: `!reminder off ghosty`. |
+| `enabled` | all | `false` makes it inert without deleting it (`!reminder on\|off <id>`). |
+| `channel` | all | Fires **only** on this Twitch channel. `null` = any channel the bot runs in. This is what makes a reminder channel-specific — there is no per-channel code. |
+| `liveOnly` | all | Default `true`: nothing is announced while the channel is offline. |
+| `text` | all | What it says. |
+| `afterMs` | `afterLive` | How long into a live session it fires. Once per session. |
+| `times` / `timeZone` | `daily` | Wall-clock `HH:MM` times in an IANA zone (DST-aware — 08:00 stays 08:00 across the change). |
+| `leadMs` / `leadText` | `daily` | An optional heads-up this long before each slot. `0` disables it; without `leadText` the wording is generated. |
+| `graceMs` | `daily` | Per-reminder override of `dailyGraceMs`. |
+| `everyMs` / `jitterMs` | `interval` | Period of **live** time between pings, ± the jitter (jitter is capped at half the period). |
+| `state` | all | Bot-managed: what has already fired. Persisted so a restart can't repeat an announcement. Don't hand-edit. |
 
 ---
 

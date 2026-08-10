@@ -144,6 +144,7 @@ scripts/synthetic-chat.js no-stream harness that drives the whole loop
 | `!timer +5` / `!timer -2m` | mod | add/remove time without restarting the countdown (bare number = minutes) |
 | `!timer pause\|resume\|stop` | mod | freeze / un-freeze / dismiss it |
 | `!timer` | everyone | how long is left. One timer at a time (a new one replaces it); the bot posts heads-ups at 5 min + 1 min, then calls time. Stored as a deadline in `config/timer`, so a restart resumes it |
+| `!reminder` | mod | list the scheduled reminders; `on\|off\|test <id>`, `at <id> <HH:MM…>`, `every\|jitter\|after\|lead <id> <min>`, `text\|leadtext <id> <msg>`, `zone`, `channel` — see below |
 | `!drop [itemId]` | mod | force a single loot drop |
 | `!drops on\|off\|every <min>\|status` | mod | auto chat-drop scheduler (rarity-weighted, while live) |
 | `!boss set <name>` / `!boss next` | mod | custom boss / advance to the next scripted season boss |
@@ -154,6 +155,30 @@ scripts/synthetic-chat.js no-stream harness that drives the whole loop
 \* Viewing raid status is open to everyone, but **mustering** (signing up with
 `!muster`) needs an active sub — same as `!create` and `!grab`. A lapsed sub keeps
 the hero they built and keeps earning EXP, but must re-sub to muster.
+
+### Scheduled reminders
+
+kennyBot posts recurring nudges on three schedule shapes. Every schedule is a
+**record in RTDB** (`config/reminders/<id>`), not a rule in code — a mod re-times
+one from chat with `!reminder` and it takes effect on the next tick.
+
+| id | Schedule | What it does |
+|---|---|---|
+| `wallpaper` | 30 min after going live, once per stream | "is Wallpaper Engine still running?" |
+| `ghosty` | daily 08:00 + 17:00 Pacific, 20-min heads-up | Ghosty's meal times |
+| `hydration` | every 60 min of live time, ±10 min jitter | drink some water |
+
+A reminder carries a `channel`: it fires **only** on that Twitch channel, and
+`channel: null` fires wherever the bot runs (that's hydration). So "this one is a
+Nikki thing" is a property of the data — there's no per-channel branch anywhere
+in the code, and `!reminder channel <id> <name|any>` re-points one from chat.
+
+All three are **live-gated** by default. A daily slot missed while offline is
+skipped rather than announced hours late, an `afterLive` reminder fires once per
+live session (a bot restart mid-stream doesn't repeat it), and an interval that
+came due during a long offline stretch is quietly re-armed instead of dumping a
+backlog. The defaults are seeded from `src/content/reminders.js` on first boot
+and **never** clobbered afterwards, so edited times survive every deploy.
 
 Mustering writes a snapshot of your hero onto the season roster. When a new boss
 is scheduled in the same season, participating adventurers roll forward into that

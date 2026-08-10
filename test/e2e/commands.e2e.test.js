@@ -55,6 +55,7 @@ beforeEach(async () => {
   // season, a raid pointing at wiped data). Season 'e2e' + passive EXP off + not
   // muted + no active raid is the clean slate every scenario starts from.
   await database().ref('config/raid').remove().catch(() => {});
+  await database().ref('config/reminders').remove().catch(() => {}); // scenarios re-seed what they need
   await setChatMuted(false);
   await setExpMode('off'); // passive EXP off → replies aren't polluted by level-ups
   await setSeason({ id: 'e2e', name: 'E2E Season', startsAt: Date.now() });

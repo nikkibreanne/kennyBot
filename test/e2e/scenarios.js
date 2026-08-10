@@ -13,6 +13,7 @@ import { openMarket } from '../../src/db/market.js';
 import { setDrop } from '../../src/db/drops.js';
 import { setupRaidWeek, enlist } from '../../src/db/raid.js';
 import { seedCuratedFacts, orderedFacts } from '../../src/db/facts.js';
+import { seedReminders, listReminders } from '../../src/db/reminders.js';
 import { getRaidPointer, getConfig, setLive, setClipMode } from '../../src/db/configStore.js';
 import { initClipsWith } from '../../src/twitch/clips.js';
 import { initCaptureWith } from '../../src/integrations/capture.js';
@@ -58,7 +59,14 @@ async function raidWeek({ bossName = 'The Test Warden', enlistUsers = [] } = {})
   return { seasonId, weekId };
 }
 
-export const fixtures = { player, loot, wallet, market, drop, facts, leaderboard, raidWeek };
+/** Seed the default reminders and wait for the config mirror to see them. */
+async function reminders() {
+  const res = await seedReminders();
+  await until(() => listReminders().length >= res.seeded.length + res.kept.length);
+  return res;
+}
+
+export const fixtures = { player, loot, wallet, market, drop, facts, leaderboard, raidWeek, reminders };
 
 // ── scenarios (one per command primary name) ─────────────────────────────────
 export const SCENARIOS = [
@@ -369,6 +377,26 @@ export const SCENARIOS = [
       await fx.raidWeek({ enlistUsers: [u('e2e_rn_hero', { login: 'hero', name: 'Hero' })] });
       const reply = await bot.send(u('e2e_rn_mod', { login: 'mod', name: 'Mod', mod: true }), '!raidnight');
       assert.match(reply, /RAID NIGHT/i);
+    },
+  },
+  {
+    command: 'reminder', title: 'mod lists and re-times a scheduled reminder',
+    run: async ({ bot, u, fx }) => {
+      await fx.reminders();
+      const mod = u('e2e_rem', { login: 'mod', name: 'Mod', mod: true });
+      assert.match(await bot.send(mod, '!reminder'), /ghosty.*daily 08:00, 17:00/i);
+
+      // Re-time Ghosty's meals from chat — the point of keeping schedules in the DB.
+      assert.match(await bot.send(mod, '!reminder at ghosty 09:30 18:30'), /09:30, 18:30/);
+      assert.deepEqual((await database().ref('config/reminders/ghosty/times').get()).val(), ['09:30', '18:30']);
+
+      assert.match(await bot.send(mod, '!reminder at ghosty half-past-nine'), /isn't a time/i);
+      assert.match(await bot.send(mod, '!reminder off hydration'), /hydration off/i);
+      assert.match(await bot.send(mod, '!reminder test wallpaper'), /Wallpaper Engine/i);
+      assert.match(await bot.send(mod, '!reminder every hydration 45'), /every 45m/);
+      assert.match(await bot.send(mod, '!reminder nope ghosty'), /Usage/i);
+      // A non-mod gets nothing at all (the whole command is mod-gated).
+      assert.equal(await bot.send(u('e2e_rem_v', { login: 'viewer' }), '!reminder'), '');
     },
   },
   {
