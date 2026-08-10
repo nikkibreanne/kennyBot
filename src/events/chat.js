@@ -35,8 +35,19 @@ export function createMessageHandler({ sender, channel, botUserId, logger, onAct
 
   async function dispatchCommand(user, args, name) {
     const def = getCommand(name);
-    if (!def) return;
-    if (def.mod && !user.isMod && !user.isBroadcaster) return; // silently ignore non-mods
+    if (!def) {
+      // Staying quiet is deliberate — the channel runs other bots, and answering
+      // every stray `!` would be noise. But it must not be INVISIBLE: a viewer
+      // typing `!accept` (instead of `!offer accept`) got no reply and left no
+      // trace, which is indistinguishable from the bot being broken. Debug-level,
+      // so it costs nothing until someone goes looking.
+      logger.debug('unknown command ignored', { command: name, userId: user.id, login: user.login });
+      return;
+    }
+    if (def.mod && !user.isMod && !user.isBroadcaster) {
+      logger.debug('mod-only command ignored', { command: name, userId: user.id, login: user.login });
+      return;
+    }
 
     // Per-user command cooldown. Commands whose sub-verbs ANSWER a prompt the bot
     // posted (`!offer accept`, `!trade counter`) opt into keying it per sub-verb:

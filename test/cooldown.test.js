@@ -26,10 +26,14 @@ const giver = { id: 'u_cd_giver', login: 'nikkibreanne', name: 'NikkiBreAnne' };
 const taker = { id: 'u_cd_taker', login: 'okrafan', name: 'OkraFan' };
 
 const sent = [];
-const drops = []; // what the dispatcher logged when it dropped a command
+const drops = [];   // what the dispatcher logged when it dropped a command
+const unknown = []; // …and when it ignored one it doesn't know
 const logger = {
   info() {}, warn() {}, error() {},
-  debug: (msg, meta) => { if (String(msg).includes('cooldown')) drops.push(meta); },
+  debug: (msg, meta) => {
+    if (String(msg).includes('cooldown')) drops.push(meta);
+    if (String(msg).includes('unknown command')) unknown.push(meta);
+  },
 };
 const sender = { say: (t) => { sent.push(t); return Promise.resolve(); }, action: () => Promise.resolve() };
 
@@ -58,6 +62,7 @@ after(async () => { if (host) await closeFirebase(); });
 beforeEach(async () => {
   if (!host) return;
   drops.length = 0;
+  unknown.length = 0;
   for (const p of ['players', 'usernames', 'trades', 'wallets', 'counters', 'facts']) {
     await database().ref(p).remove().catch(() => {});
   }
@@ -101,6 +106,18 @@ runOrSkip('cooldown is per sub-verb only where a command opts in', async () => {
   assert.match(await say(taker, '!fact'), /./, 'first !fact answers');
   assert.equal(await say(taker, '!fact 2'), '', '!fact does not opt in — the whole command shares one window');
   assert.deepEqual(drops.map((d) => d.command), ['fact']);
+});
+
+runOrSkip('an unknown command stays quiet in chat but leaves a trace in the log', async () => {
+  // `!accept` is what a viewer types when the bot says "Reply: !offer accept".
+  // Answering every stray `!` would be noise (the channel runs other bots), so
+  // silence in CHAT is right — silence in the LOGS is what made this undebuggable.
+  await say(giver, `!offer @${taker.login} ${ITEM}`);
+  assert.equal(await say(taker, '!accept'), '', 'no reply — other bots own their own commands');
+  assert.deepEqual(
+    unknown.map((u) => u.command), ['accept'],
+    'but the bot must record that it saw and ignored it',
+  );
 });
 
 runOrSkip('cooldowns are per user, not global', async () => {
