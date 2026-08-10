@@ -1,6 +1,6 @@
 {
   "name": "kennybot",
-  "version": "0.11.1",
+  "version": "0.11.2",
   "description": "Customizable Twitch helper bot for nikkibreanne (https://twitch.tv/nikkibreanne) — clips, stream timer, scheduled reminders, to-do board, fun facts, a credits economy, and a chat raid game. State in Firebase RTDB; outbound-only.",
   "type": "module",
   "main": "index.js",
