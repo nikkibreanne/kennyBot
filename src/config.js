@@ -152,10 +152,14 @@ export const config = {
     minMs: 5_000, // shortest settable timer (a 1s timer is just noise)
     maxMs: 12 * 60 * 60 * 1000, // longest — a typo like "!timer 999" can't camp forever
     // Heads-up announcements, fired as the clock CROSSES each mark (longest
-    // first). A mark is skipped unless the timer had at least 1.5× that long
-    // left when it was set/adjusted, so a 5-minute timer doesn't immediately
-    // shout "5 minutes left".
+    // first).
     warnAtMs: [5 * 60 * 1000, 60 * 1000],
+    // A mark is only used when the timer has at least this much runway BEFORE
+    // it — otherwise a 5-minute timer would open by shouting "5 minutes left".
+    // Expressed as a lead rather than a ratio on purpose: a ratio scales with
+    // the mark, so it quietly swallowed sensible cases (at 1.5× the 5-minute
+    // mark needed a 7.5-minute timer, and a 6-minute one got no warning).
+    warnMinLeadMs: 30_000,
     // If the bot was down when a timer expired, announcing "time's up" minutes
     // late is worse than silence: past this much overdue it's cleared quietly.
     graceMs: 2 * 60 * 1000,

@@ -11,7 +11,7 @@
 //
 // Not gated on live status: a mod setting a pre-stream countdown is the point.
 import { getTimer } from '../db/configStore.js';
-import { clearTimer, remainingMs, formatDuration } from '../db/timer.js';
+import { clearTimer, remainingMs, formatDuration, eligibleWarnMarks } from '../db/timer.js';
 import { config } from '../config.js';
 
 /**
@@ -21,9 +21,6 @@ import { config } from '../config.js';
  * @returns {() => void} stop function
  */
 export function startTimerScheduler({ send, logger }) {
-  // Marks are checked longest-first so a single slow tick can only fire the
-  // nearest one that matters, not a burst of "5 minutes… 1 minute" together.
-  const marks = [...config.timer.warnAtMs].sort((a, b) => b - a);
   let seen = { id: null, remaining: Infinity };
   let busy = false;
 
@@ -60,10 +57,10 @@ export function startTimerScheduler({ send, logger }) {
       return;
     }
 
-    for (const mark of marks) {
-      // Skip a mark the timer was never comfortably longer than — a 5-minute
-      // timer shouldn't open with "5 minutes left".
-      if (timer.durationMs < mark * 1.5) continue;
+    // Longest first, so one slow tick fires the nearest mark that matters
+    // rather than a burst of "5 minutes… 1 minute" together. Which marks this
+    // timer is long enough for is decided in one place — see eligibleWarnMarks.
+    for (const mark of eligibleWarnMarks(timer.durationMs)) {
       if (remaining <= mark && seen.remaining > mark) {
         send.say(`⏳ ${timer.label ? `${timer.label}: ` : ''}${formatDuration(mark)} left.`);
         break;

@@ -103,6 +103,25 @@ export function formatDuration(ms) {
   return `${s}s`;
 }
 
+/**
+ * Which heads-up marks a timer of this span should use, longest first.
+ *
+ * A mark only counts when the timer has `warnMinLeadMs` of runway before it, so
+ * a 5-minute timer never opens with "5 minutes left" — but a 6-minute one does
+ * warn at 5 minutes, a minute in. (This was a ratio once; because a ratio scales
+ * with the mark it demanded a 7.5-minute timer for the 5-minute warning and
+ * silently dropped it on anything shorter.)
+ *
+ * @param {number} spanMs time left when the timer was set or last adjusted
+ * @returns {number[]} marks to announce, longest first
+ */
+export function eligibleWarnMarks(spanMs, cfg = config.timer) {
+  const lead = Math.max(0, Number(cfg.warnMinLeadMs) || 0);
+  return [...(cfg.warnAtMs || [])]
+    .sort((a, b) => b - a)
+    .filter((mark) => Number(spanMs) >= mark + lead);
+}
+
 /** Milliseconds left on a timer record (0 when expired/absent; frozen when paused). */
 export function remainingMs(timer, now = Date.now()) {
   if (!timer) return 0;
