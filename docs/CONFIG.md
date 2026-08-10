@@ -1,14 +1,16 @@
 # kennyBot — Configuration Reference (for the channel owner)
 
-This is the operator's guide to **every game-balance knob** in kennyBot. All of
-them live in one file: [`src/config.js`](../src/config.js). The game logic
-(`src/rules/*`) is pure and reads only what it's handed, so you can rebalance the
-whole game here without touching any code logic.
+This is the operator's guide to **every tunable** in kennyBot — the stream
+features (the timer, reminders, clips) as well as raid-game balance. They all
+live in one file: [`src/config.js`](../src/config.js). The engine modules
+(`src/rules/*`) are pure and read only what they're handed, so you can retune
+everything here without touching any logic.
 
-If you just want to *play* (start a season, schedule a boss, force a drop), you
-don't need this file at all — use the mod chat commands (see the README's command
-table). This doc is for when you want to change *how the game feels*: faster
-leveling, rarer loot, harder bosses, a different raid-night slot, and so on.
+For day-to-day running — starting a season, re-timing Ghosty's reminder, muting
+the bot, switching what `!clip` does — you don't need this file at all: those are
+**mod chat commands**, listed in the next section and in the README's command
+tables. This doc is for the settings that are baked in at boot: how fast leveling
+feels, how rare loot is, how long a timer waits before its first heads-up.
 
 ---
 

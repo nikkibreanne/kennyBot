@@ -1,14 +1,32 @@
 # kennyBot
 
-A Twitch chat bot and **raid-game backend** for the `nikkibreanne` channel
-(dev/test channel: `scasplte2`). Subscribers create a character, earn EXP by
-chatting while live, level up and gear up over the week (**muster**), and sign
-up for a weekly raid. At a scheduled **raid night** the roster locks and an
-automated, seeded turn-based **battle plays out** — the backend writes it as an
-append-only combat-event log that the [website](https://okrafans.com) replays
-turn-by-turn (spec §5.8). Authoritative game state lives in **Firebase Realtime
-Database**; the website reads it (read-only). The bot is **outbound-only** and
-ships as a container.
+A customizable **helper bot** for the `nikkibreanne` Twitch channel (dev/test
+channel: `scasplte2`). It captures clips, runs a stream countdown, posts
+scheduled reminders, keeps a public to-do board, serves the channel's fun facts,
+and runs a credits economy with prediction markets — plus a chat **raid game**.
+Anything worth changing mid-stream (clip mode, reminder times, the EXP gate) is
+a mod chat command backed by RTDB, not a redeploy.
+
+State lives in **Firebase Realtime Database**, written only by this process
+through the Admin SDK; the [website](https://okrafans.com) reads it (read-only)
+and renders the public pages. The bot is **outbound-only** — it dials Twitch,
+Firebase and OBS, and never listens on a port — and ships as a container.
+
+| Feature | Commands | Notes |
+|---|---|---|
+| **Clips** | `!clip` · `!clipmode` · `!start` | 16:9 + natively-framed 9:16 captured on the streamer's PC over obs-websocket / Aitum |
+| **Stream timer** | `!timer` | one countdown, heads-up marks, survives a restart |
+| **Reminders** | `!reminder` | schedules are RTDB records, not code — daily / after-live / interval |
+| **To-do board** | `!todo` | chat-controlled, rendered on [/todo/](https://okrafans.com/todo/) |
+| **Fun facts** | `!fact` | viewer submissions + mod approval → [/info/](https://okrafans.com/info/) |
+| **Credits & OKRAMARKET** | `!daily` · `!bet` · `!market` · `!duel` · `!trade` | parimutuel prediction markets; earned, never bought |
+| **Raid game** | `!create` · `!muster` · `!raidnight` | the chat RPG: muster → raid night → seeded battle the site replays |
+| **Operations** | `!mute` · `!exp` · `!drops` | live mod control over what the bot does |
+
+The raid game is the largest single feature and has the most machinery behind it
+(a pure seeded combat engine, a phase machine, a season/leaderboard model), so it
+dominates `docs/` and much of `src/` — but it is **one feature of several**, and
+most of what kennyBot does day to day has nothing to do with it.
 
 > **Docs** (all in `docs/`):
 > [`raid-game-spec.md`](docs/raid-game-spec.md) — the game, incl. §5.8 the
@@ -26,10 +44,27 @@ ships as a container.
 ## Status
 
 **Running in production** on the `nikkibreanne` channel (containerised, see
-Releasing below). The game loop, the chat integration and the clip pipeline are all
-live; the pieces still in flight are listed at the end of this section.
+Releasing below). Chat, the clip pipeline, the stream utilities and the game loop
+are all live; the pieces still in flight are listed at the end of this section.
 
-Implemented and verified:
+Implemented and verified — stream side:
+
+- **`!clip` capture**: horizontal 16:9 + natively-framed vertical 9:16 saved on the
+  streamer's PC over obs-websocket / Aitum, with a runtime-switchable clip mode —
+  see [Clip capture](#clip-capture)
+- **`!timer`**: one mod-set countdown with heads-up marks, stored as a deadline so
+  a restart resumes it
+- **`!reminder`**: scheduled nudges whose schedules are RTDB records, editable from
+  chat — see [Scheduled reminders](#scheduled-reminders)
+- **`!todo` / `!fact`**: the public to-do board and the fun-facts page, both
+  chat-controlled and read-only on the site
+- **credits + wagering**: `!daily`, OKRAMARKET parimutuel bets, coin-flip duels,
+  item trades/gifts
+- **`!mute` / `!exp` / `!clipmode` / `!drops`**: live mod control, no redeploy
+- **Twitch Chat Bot badge** via the Helix send path, with automatic IRC fallback so
+  the bot can never go silent because a grant is missing
+
+…and the raid game:
 
 - `!create <class>` → character + starter gear (subscriber-gated)
 - live-gated chat EXP → seeded, unit-tested level-up (fixed threshold +
@@ -38,21 +73,19 @@ Implemented and verified:
   on schedule, a pure seeded `simulateBattle` writes the combat-event log the
   site replays; **resolve-on-boot** phase machine (signup→locked→live→done)
 - loot drops/`!grab`/`!equip`, sub/cheer/raid levers, EventSub live-detection
+
+Underneath both:
+
 - locked RTDB rules with an automated **client-write-rejection** test
 - single-instance lease, persisted Twitch refresh token, graceful shutdown
 - a **dev console** + automated harness that drive the whole loop with no Twitch
-- **credits + wagering**: `!daily`, OKRAMARKET bets, coin-flip duels, item trades/gifts
-- **Twitch Chat Bot badge** via the Helix send path, with automatic IRC fallback so
-  the bot can never go silent because a grant is missing
-- **`!clip` capture**: horizontal 16:9 + natively-framed vertical 9:16 saved on the
-  streamer's PC over obs-websocket / Aitum — see [Clip capture](#clip-capture)
 - **automated releases** from Conventional Commits (release-please), with `main`
   protected for everyone including admins
 
-Verified by `npm test` (92 offline unit tests), `npm run test:emulator` (50 — RTDB
-rules + client-write rejection), `npm run test:e2e` (29 — every command driven
-through the real dispatcher), and `npm run synthetic` (full muster→battle→victory
-run with UI-contract assertions).
+Verified by `npm test` (139 offline unit tests), `npm run test:emulator` (69 — RTDB
+rules + client-write rejection, and the stateful command paths), `npm run test:e2e`
+(31 — every registered command driven through the real dispatcher), and
+`npm run synthetic` (full muster→battle→victory run with UI-contract assertions).
 
 **Not yet done:** a full-session local recording (see
 [`docs/clip-architecture.md`](docs/clip-architecture.md) "Ingest B"), and the
@@ -74,17 +107,22 @@ The bot is outbound-only in both directions: it *dials* Twitch, Firebase and OBS
 and never listens on a port.
 
 ```
-index.js                  wiring: auth, chat, live gate, lock, resolve-on-boot, shutdown
+index.js                  wiring: auth, chat, live gate, lock, seeds, schedulers, shutdown
 src/
-  config.js               all game tunables (EXP/leveling/rating/loot/raid) — see docs/CONFIG.md
+  config.js               every tunable — game balance AND the stream features
+                          (timer, reminders, clip) — see docs/CONFIG.md
   logger.js               structured JSON logs, secret-scrubbed
-  content/                your own data: classes.js (class→role), items.js (catalog + starter gear)
-  rules/                  PURE, RNG-injected, unit-tested: leveling, rating, loot, raidResolve
-  db/                     firebase, configStore (live mirror), players, raid, drops, lock, tokenStore
+  content/                your own data: classes.js (class→role), items.js (catalog +
+                          starter gear), facts.js, reminders.js (default schedules)
+  rules/                  PURE, RNG/clock-injected, unit-tested: leveling, rating, loot,
+                          combat, reminders (what's due now)
+  db/                     firebase, configStore (live mirror), players, raid, drops, wallet,
+                          market, timer, reminders, todo, facts, lock, tokenStore
   twitch/                 auth (RefreshingAuthProvider), liveGate (Helix poll), eventsub (WS),
                           sender (Helix/IRC send + badge), clips (Helix Create Clip)
   integrations/           obsWebsocket (v5 client + Aitum vendor requests), capture (facade + rate limit)
-  events/                 chat (gate→EXP→raid tick + dispatch), twitchEvents (sub/cheer/raid)
+  events/                 chat (gate→EXP→raid tick + dispatch), twitchEvents (sub/cheer/raid),
+                          dropScheduler · timerScheduler · reminderScheduler
   commands/               one module per command + registry; mod/ subdir for mod commands
 test/                     rules/*.test.js (offline) · firebase-rules.test.js (emulator) · e2e/ (dispatcher)
 scripts/synthetic-chat.js no-stream harness that drives the whole loop
@@ -94,18 +132,26 @@ scripts/synthetic-chat.js no-stream harness that drives the whole loop
 
 `!kennycommands` prints this list in chat. Aliases are shown after the `/`.
 
-**Hero & loot**
+**Clips**
 
 | Command | Who | Effect |
 |---|---|---|
-| `!create <class>` | **subs** | create character (Guardian/Mender/Berserker/Arcanist/Ranger) + starter gear |
-| `!char` / `!me` | everyone | view class, level, role rating, combat stats |
-| `!bag` / `!inventory` / `!inv` | everyone | view unequipped loot |
-| `!equip <item\|#>` | everyone | equip an item from your bag (by name or bag number) |
-| `!unequip <slot\|item>` | everyone | bare a slot (weapon/armor/trinket) back into your bag |
-| `!grab` / `!loot` | **subs** | enter the drawing for the active loot drop |
-| `!muster` | **subs**\* | sign up for this season's raid roster (during muster) / see status |
-| `!top [damage]` | everyone | season leaderboard (top 5) |
+| `!clip` | everyone | capture the last ~60s — 16:9 + 9:16 local files by default; a Twitch clip only if the mode says so |
+| `!clipmode <targets>` | mod | pick which of `!clip`'s three outputs run — `horizontal` · `vertical` · `twitch`, combined freely (see below) |
+| `!start` / `!slate` | mod | set a stream sync point for the clip archiver |
+
+**Around the stream**
+
+| Command | Who | Effect |
+|---|---|---|
+| `!timer` | everyone | how long is left. One timer at a time (a new one replaces it); the bot posts heads-ups at 5 min + 1 min, then calls time. Stored as a deadline in `config/timer`, so a restart resumes it |
+| `!timer <dur> [label]` | mod | set the stream countdown — `10` (minutes), `90s`, `1h30m`, `5:30`; the words after it are the label |
+| `!timer +5` / `!timer -2m` | mod | add/remove time without restarting the countdown (bare number = minutes) |
+| `!timer pause\|resume\|stop` | mod | freeze / un-freeze / dismiss it |
+| `!reminder` | mod | list the scheduled reminders; `on\|off\|test <id>`, `at <id> <HH:MM…>`, `every\|jitter\|after\|lead <id> <min>`, `text\|leadtext <id> <msg>`, `zone`, `channel` — see below |
+| `!todo` / `!todos` | mod | date-organised to-do list, published to [okrafans.com/todo](https://okrafans.com/todo/) |
+| `!fact` / `!facts` | everyone | a random fact, with its number · `!fact <#>` the one numbered `#` on [/info/](https://okrafans.com/info/) · `!fact suggest <text>` submits one for approval |
+| `!kennycommands` / `!kennybot` / `!kcommands` | everyone | the full command list, in chat |
 
 **Credits & wagering**
 
@@ -119,20 +165,18 @@ scripts/synthetic-chat.js no-stream harness that drives the whole loop
 | `!trade @user <item\|#> [+ credits]` | everyone | offer a **swap**; the other player counters, then `!trade accept` / `decline` |
 | `!offer` / `!gift` `@user <item\|#> [+ credits]` | everyone | **give** an item/credits one-way; they reply `!offer accept` / `decline` |
 
-**Clips**
+**Raid game — hero & loot**
 
 | Command | Who | Effect |
 |---|---|---|
-| `!clip` | everyone | capture the last ~60s — 16:9 + 9:16 local files by default; a Twitch clip only if the mode says so |
-| `!clipmode <targets>` | mod | pick which of `!clip`'s three outputs run — `horizontal` · `vertical` · `twitch`, combined freely (see below) |
-| `!start` / `!slate` | mod | set a stream sync point for the clip archiver |
-
-**Other**
-
-| Command | Who | Effect |
-|---|---|---|
-| `!fact` / `!facts` | everyone | a random fact, with its number · `!fact <#>` the one numbered `#` on [/info/](https://okrafans.com/info/) · `!fact suggest <text>` submits one for approval |
-| `!kennycommands` / `!kennybot` / `!kcommands` | everyone | the full command list, in chat |
+| `!create <class>` | **subs** | create character (Guardian/Mender/Berserker/Arcanist/Ranger) + starter gear |
+| `!char` / `!me` | everyone | view class, level, role rating, combat stats |
+| `!bag` / `!inventory` / `!inv` | everyone | view unequipped loot |
+| `!equip <item\|#>` | everyone | equip an item from your bag (by name or bag number) |
+| `!unequip <slot\|item>` | everyone | bare a slot (weapon/armor/trinket) back into your bag |
+| `!grab` / `!loot` | **subs** | enter the drawing for the active loot drop |
+| `!muster` | **subs**\* | sign up for this season's raid roster (during muster) / see status |
+| `!top [damage]` | everyone | season leaderboard (top 5) |
 
 **Mod / operations**
 
@@ -140,21 +184,23 @@ scripts/synthetic-chat.js no-stream harness that drives the whole loop
 |---|---|---|
 | `!exp on\|off\|auto\|status` | mod | control the EXP gate (`on` bypasses live for testing) |
 | `!mute on\|off\|status` | mod | silence the bot's chat output when it gets noisy; it keeps listening, tracking EXP, and holding the lease — bare `!mute` toggles |
-| `!timer <dur> [label]` | mod | set the stream countdown — `10` (minutes), `90s`, `1h30m`, `5:30`; the words after it are the label |
-| `!timer +5` / `!timer -2m` | mod | add/remove time without restarting the countdown (bare number = minutes) |
-| `!timer pause\|resume\|stop` | mod | freeze / un-freeze / dismiss it |
-| `!timer` | everyone | how long is left. One timer at a time (a new one replaces it); the bot posts heads-ups at 5 min + 1 min, then calls time. Stored as a deadline in `config/timer`, so a restart resumes it |
-| `!reminder` | mod | list the scheduled reminders; `on\|off\|test <id>`, `at <id> <HH:MM…>`, `every\|jitter\|after\|lead <id> <min>`, `text\|leadtext <id> <msg>`, `zone`, `channel` — see below |
 | `!drop [itemId]` | mod | force a single loot drop |
 | `!drops on\|off\|every <min>\|status` | mod | auto chat-drop scheduler (rarity-weighted, while live) |
 | `!boss set <name>` / `!boss next` | mod | custom boss / advance to the next scripted season boss |
 | `!raidnight` | mod | lock the roster and run the battle now |
 | `!season start <id>` / `!season rollover <id>` | mod | start a tier / roll to the next (gear reset, renown kept) |
-| `!todo` / `!todos` | mod | date-organised to-do list, published to [okrafans.com/todo](https://okrafans.com/todo/) |
 
 \* Viewing raid status is open to everyone, but **mustering** (signing up with
 `!muster`) needs an active sub — same as `!create` and `!grab`. A lapsed sub keeps
 the hero they built and keeps earning EXP, but must re-sub to muster.
+
+Mustering writes a snapshot of your hero onto the season roster. When a new boss
+is scheduled in the same season, participating adventurers roll forward into that
+boss's muster roster; starting or rolling over a season clears the roster. While
+the muster window is open, the bot re-snapshots signees from their live record on a timer
+(`raid.rosterRefreshMs`), so leveling or gearing up after you muster keeps showing
+on the site without a re-`!muster`. At **roster lock** (15 min before raid night)
+every card is frozen from the live record — that's the loadout that fights.
 
 ### Scheduled reminders
 
@@ -179,14 +225,6 @@ live session (a bot restart mid-stream doesn't repeat it), and an interval that
 came due during a long offline stretch is quietly re-armed instead of dumping a
 backlog. The defaults are seeded from `src/content/reminders.js` on first boot
 and **never** clobbered afterwards, so edited times survive every deploy.
-
-Mustering writes a snapshot of your hero onto the season roster. When a new boss
-is scheduled in the same season, participating adventurers roll forward into that
-boss's muster roster; starting or rolling over a season clears the roster. While
-the muster window is open, the bot re-snapshots signees from their live record on a timer
-(`raid.rosterRefreshMs`), so leveling or gearing up after you muster keeps showing
-on the site without a re-`!muster`. At **roster lock** (15 min before raid night)
-every card is frozen from the live record — that's the loadout that fights.
 
 ## Local development
 
