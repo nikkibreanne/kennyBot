@@ -38,9 +38,21 @@ export function createMessageHandler({ sender, channel, botUserId, logger, onAct
     if (!def) return;
     if (def.mod && !user.isMod && !user.isBroadcaster) return; // silently ignore non-mods
 
-    const key = `${user.id}:${name}`;
+    // Per-user command cooldown. Commands whose sub-verbs ANSWER a prompt the bot
+    // posted (`!offer accept`, `!trade counter`) opt into keying it per sub-verb:
+    // otherwise glancing at the offer — or fat-fingering it — burns the window and
+    // the accept that follows is dropped, which reads in chat as a broken bot.
+    // Per sub-verb still stops the thing the cooldown is for (the SAME command
+    // repeated), and each verb keeps its own window.
+    const sub = def.cooldownPerSubcommand ? `:${String(args[0] || '').toLowerCase()}` : '';
+    const key = `${user.id}:${name}${sub}`;
     const now = Date.now();
-    if (def.cooldownMs && now - (cmdCooldown.get(key) || 0) < def.cooldownMs) return;
+    if (def.cooldownMs && now - (cmdCooldown.get(key) || 0) < def.cooldownMs) {
+      // Never drop a command without a trace: "it did nothing and there was
+      // nothing in the logs" is how this cost a stream's worth of debugging.
+      logger.debug('command dropped by cooldown', { command: name, sub: args[0] || null, userId: user.id });
+      return;
+    }
     cmdCooldown.set(key, now);
 
     // Outbound mute (`!mute`): swallow every reply while muted EXCEPT for
