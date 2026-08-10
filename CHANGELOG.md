@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.11.2](https://github.com/nikkibreanne/kennyBot/compare/kennybot-v0.11.1...kennybot-v0.11.2) (2026-08-10)
+
+
+### Bug Fixes
+
+* !offer accept silently doing nothing ([#60](https://github.com/nikkibreanne/kennyBot/issues/60)) ([a133ae5](https://github.com/nikkibreanne/kennyBot/commit/a133ae5dede875d378e42ae8d4c218474e5ba701))
+
 ## [0.11.1](https://github.com/nikkibreanne/kennyBot/compare/kennybot-v0.11.0...kennybot-v0.11.1) (2026-08-10)
 
 
