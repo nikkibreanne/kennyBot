@@ -1,3 +1,12 @@
+# check=skip=SecretsUsedInArgOrEnv
+#
+# ^ BuildKit's secret-in-ENV lint matches on the NAME, and `TOKEN_STORE_DIR` is a
+# directory path (/data), not a credential — a false positive. Skipped so the
+# build log stays clean enough that a real warning is noticeable. The tradeoff is
+# that the rule is off for this whole file, which is acceptable only because no
+# secret is ever baked in here: every credential is runtime-injected (see the
+# README's environment contract), and the image ships none.
+#
 # kennyBot runtime image (IMPLEMENTATION §C). Multi-stage, slim, non-root.
 # Outbound-only — the bot listens on nothing, so there is no EXPOSE / -p.
 #
