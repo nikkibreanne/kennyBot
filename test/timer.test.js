@@ -33,14 +33,19 @@ async function wipe() { await setTimerState(null); }
  * is exactly how this suite went flaky once. Every timing below is also given
  * margin far larger than a tick, so nothing here rides on a millisecond.
  *
+ * `marks` are millisecond-scale so a crossing is observable in a test, which
+ * also means `warnMinLeadMs` has to shrink with them — at its real 30s a
+ * millisecond mark would never be eligible and every heads-up test would pass
+ * vacuously. Which marks a timer qualifies for is covered at REAL scale offline
+ * (test/rules/timer.test.js); what these tests own is the crossing behaviour.
+ *
  * @param {(startedAt:number) => object|null} plant builds the record from the
  *   instant observation actually begins
  */
-async function withScheduler(plant, { forMs = 400, marks, tickMs = 25 } = {}) {
+async function withScheduler(plant, { forMs = 400, marks, minLeadMs = 0, tickMs = 25 } = {}) {
   const said = [];
-  const originalMarks = config.timer.warnAtMs;
-  const originalTick = config.timer.tickMs;
-  if (marks) config.timer.warnAtMs = marks;
+  const original = { ...config.timer };
+  if (marks) { config.timer.warnAtMs = marks; config.timer.warnMinLeadMs = minLeadMs; }
   config.timer.tickMs = tickMs;
   const stop = startTimerScheduler({ send: { say: (t) => { said.push(t); } }, logger: silentLogger });
   try {
@@ -48,8 +53,7 @@ async function withScheduler(plant, { forMs = 400, marks, tickMs = 25 } = {}) {
     await sleep(forMs);
   } finally {
     stop();
-    config.timer.warnAtMs = originalMarks;
-    config.timer.tickMs = originalTick;
+    Object.assign(config.timer, original);
   }
   return said;
 }
@@ -169,12 +173,12 @@ runOrSkip('scheduler: heads-up fires as the clock crosses a mark, and only then'
   assert.deepEqual(headsUps(said), ['⏳ Break: 1s left.'], 'one heads-up, no repeats while below the mark');
 });
 
-runOrSkip('scheduler: a mark the timer was never long enough for is skipped', async () => {
-  // Span 2s against a 1.5s mark: it would fire almost immediately, which reads as
-  // nonsense ("5 minutes left" on a 5-minute timer). Requires 1.5x headroom.
+runOrSkip('scheduler: a mark the timer has no runway before is skipped', async () => {
+  // Span 2s against a 1.5s mark needing 1s of lead: the mark would land half a
+  // second in, which reads as nonsense ("5 minutes left" on a 5-minute timer).
   // The window runs well past the mark, so silence means the GUARD held — not
   // merely that the crossing hadn't come round yet.
-  const said = await withScheduler(running(2_000, { span: 2_000 }), { marks: [1_500], forMs: 900 });
+  const said = await withScheduler(running(2_000, { span: 2_000 }), { marks: [1_500], minLeadMs: 1_000, forMs: 900 });
   assert.deepEqual(headsUps(said), []);
 });
 

@@ -6,6 +6,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import {
   parseDurationToken, takeDuration, parseAdjustment, formatDuration, remainingMs, cleanLabel,
+  eligibleWarnMarks,
 } from '../../src/db/timer.js';
 import { config } from '../../src/config.js';
 
@@ -80,6 +81,37 @@ test('remainingMs: running counts down, paused is frozen, missing is zero', () =
   assert.equal(remainingMs({ endsAt: now - 5_000 }, now), 0, 'never negative');
   assert.equal(remainingMs({ paused: true, remainingMs: 42_000, endsAt: null }, now), 42_000, 'a paused clock ignores wall time');
   assert.equal(remainingMs(null, now), 0);
+});
+
+// The rule that decides which heads-ups a timer is long enough for. Checked
+// against the REAL 5-minute/1-minute marks, because the bug this replaced was
+// invisible at test scale: a ratio guard needed a 7.5-minute timer for the
+// 5-minute warning, so a `!timer 6` got none and it read as a broken timer.
+test('a 6-minute timer warns at 5 minutes — the case a ratio guard swallowed', () => {
+  assert.deepEqual(eligibleWarnMarks(6 * MIN), [5 * MIN, MIN]);
+});
+
+test('heads-up marks need real runway before them, not a ratio', () => {
+  const cases = [
+    [30 * MIN, [5 * MIN, MIN], 'plenty of room for both'],
+    [6 * MIN, [5 * MIN, MIN], 'warns a minute in — useful, not noise'],
+    [5 * MIN + 30_000, [5 * MIN, MIN], 'exactly the minimum lead — still counts'],
+    [5 * MIN, [MIN], 'a 5m timer must NOT open by shouting "5 minutes left"'],
+    [2 * MIN, [MIN], 'too short for the 5m mark, fine for the 1m one'],
+    [90_000, [MIN], 'still warns at a minute'],
+    [MIN, [], 'a 1m timer just runs out'],
+    [10_000, [], 'nothing to pre-announce'],
+  ];
+  for (const [span, expected, why] of cases) {
+    assert.deepEqual(eligibleWarnMarks(span), expected, `${formatDuration(span)}: ${why}`);
+  }
+});
+
+test('warn marks come back longest-first, whatever order they are configured in', () => {
+  const cfg = { warnAtMs: [MIN, 10 * MIN, 5 * MIN], warnMinLeadMs: 30_000 };
+  assert.deepEqual(eligibleWarnMarks(30 * MIN, cfg), [10 * MIN, 5 * MIN, MIN]);
+  assert.deepEqual(eligibleWarnMarks(0, cfg), [], 'an expired timer announces nothing');
+  assert.deepEqual(eligibleWarnMarks(30 * MIN, { warnAtMs: [] }), [], 'no marks configured = silent');
 });
 
 test('labels are collapsed, trimmed, clipped, and empty means none', () => {
