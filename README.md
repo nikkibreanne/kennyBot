@@ -140,6 +140,10 @@ scripts/synthetic-chat.js no-stream harness that drives the whole loop
 |---|---|---|
 | `!exp on\|off\|auto\|status` | mod | control the EXP gate (`on` bypasses live for testing) |
 | `!mute on\|off\|status` | mod | silence the bot's chat output when it gets noisy; it keeps listening, tracking EXP, and holding the lease — bare `!mute` toggles |
+| `!timer <dur> [label]` | mod | set the stream countdown — `10` (minutes), `90s`, `1h30m`, `5:30`; the words after it are the label |
+| `!timer +5` / `!timer -2m` | mod | add/remove time without restarting the countdown (bare number = minutes) |
+| `!timer pause\|resume\|stop` | mod | freeze / un-freeze / dismiss it |
+| `!timer` | everyone | how long is left. One timer at a time (a new one replaces it); the bot posts heads-ups at 5 min + 1 min, then calls time. Stored as a deadline in `config/timer`, so a restart resumes it |
 | `!drop [itemId]` | mod | force a single loot drop |
 | `!drops on\|off\|every <min>\|status` | mod | auto chat-drop scheduler (rarity-weighted, while live) |
 | `!boss set <name>` / `!boss next` | mod | custom boss / advance to the next scripted season boss |

@@ -28,6 +28,7 @@ import { seedCatalog } from './src/db/catalog.js';
 import { createMessageHandler } from './src/events/chat.js';
 import { attachTwitchEvents } from './src/events/twitchEvents.js';
 import { startDropScheduler } from './src/events/dropScheduler.js';
+import { startTimerScheduler } from './src/events/timerScheduler.js';
 import { processDrops } from './src/db/drops.js';
 
 // Running version, read from the bundled package.json (in the image at /app).
@@ -274,6 +275,10 @@ async function main() {
 
   // Auto chat-drop scheduler (mod-toggled via !drops; fires only while live).
   shutdownHooks.push(startDropScheduler({ send, logger }));
+
+  // Mod timer countdown (`!timer`): heads-up marks + "time's up". Resumes any
+  // timer that was running before a restart from its stored deadline.
+  shutdownHooks.push(startTimerScheduler({ send, logger }));
 
   // ── Live gate: Helix poll (always) + EventSub (when broadcaster auth fits) ──
   const setLiveBound = (live, source) => {
