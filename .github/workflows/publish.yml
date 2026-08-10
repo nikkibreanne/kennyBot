@@ -6,6 +6,14 @@
 #
 # Both paths call the same reusable docker-publish.yml, so the image is built
 # identically however the release was cut.
+#
+# DEFERRED (owner, 2026-08-10): a `workflow_dispatch` DRY RUN — build the image
+# but pass `push: false` — so a Dockerfile or build-pipeline change can be
+# exercised without cutting a release. Today neither path is reachable from a PR
+# (docker-publish.yml is workflow_call-only; this one needs a pushed v* tag), so
+# a change like the setup-buildx major bump is first exercised BY the release it
+# could break. Deliberately not built yet: it adds a manually-triggerable job
+# with `packages: write` in scope, and the current risk is judged acceptable.
 name: publish
 
 on:
