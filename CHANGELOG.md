@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.11.0](https://github.com/nikkibreanne/kennyBot/compare/kennybot-v0.10.1...kennybot-v0.11.0) (2026-08-10)
+
+
+### Features
+
+* !reminder — scheduled chat nudges with DB-stored schedules ([#54](https://github.com/nikkibreanne/kennyBot/issues/54)) ([81ac83b](https://github.com/nikkibreanne/kennyBot/commit/81ac83b52de603d2df8f80c089685a1f7c407719))
+* !timer — a mod-set stream countdown with heads-ups ([#53](https://github.com/nikkibreanne/kennyBot/issues/53)) ([f2c4b8e](https://github.com/nikkibreanne/kennyBot/commit/f2c4b8e7f20344f361a14ccf24a3a3618d6553d7))
+
 ## [0.10.1](https://github.com/nikkibreanne/kennyBot/compare/kennybot-v0.10.0...kennybot-v0.10.1) (2026-08-04)
 
 
