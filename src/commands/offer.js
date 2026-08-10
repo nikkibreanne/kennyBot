@@ -8,6 +8,10 @@ export default {
   names: ['offer', 'gift'],
   mod: false,
   cooldownMs: 3_000,
+  // The recipient answers the bot's own prompt with `!offer accept`, often right
+  // after looking at it with a bare `!offer` (or mistyping it once). Keying the
+  // cooldown per sub-verb keeps those from cancelling each other out.
+  cooldownPerSubcommand: true,
   help: '!offer @user <item|#> [+ credits] — GIVE an item/credits to someone (one-way); they reply !offer accept / decline',
   run: (ctx) => runExchange(ctx, 'offer'),
 };

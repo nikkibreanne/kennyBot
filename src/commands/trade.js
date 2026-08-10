@@ -130,7 +130,18 @@ export async function runExchange({ user, args, reply }, openKind) {
 
   // ── otherwise: open a new exchange (args[0] is the target) ──
   const { itemRef, credits } = parseStake(args.slice(1).join(' '));
-  if (!itemRef && !(credits > 0)) { reply(`@${user.displayName} usage: !${openKind} @user <item # or name> [+ credits]  (see !bag)`); return; }
+  if (!itemRef && !(credits > 0)) {
+    // Nothing staked. If they already have an exchange going, this is far more
+    // likely a fumbled response verb (`!offer acept`) than an attempt to open a
+    // second one — point at the reply they meant rather than the open syntax.
+    const pending = await getTradeFor(user.login);
+    if (pending) {
+      reply(`@${user.displayName} you have a pending ${pending.kind} — reply !${pending.kind} accept · counter · decline (or !${pending.kind} to see it).`);
+      return;
+    }
+    reply(`@${user.displayName} usage: !${openKind} @user <item # or name> [+ credits]  (see !bag)`);
+    return;
+  }
   const res = await openTrade({ fromId: user.id, fromLogin: user.login, fromName: user.displayName, toRaw: args[0], itemRef: itemRef || null, credits, kind: openKind });
   if (!res.ok) { reply(`@${user.displayName} ${reasonText(res)}`); return; }
   const t = res.trade;
@@ -145,6 +156,7 @@ export default {
   names: ['trade'],
   mod: false,
   cooldownMs: 3_000,
+  cooldownPerSubcommand: true, // see offer.js — accept/counter answer a bot prompt
   help: '!trade @user <item|#> [+ credits] — offer a SWAP; the other player must !trade counter <item|#> [+ credits] before !trade accept (or !trade decline)',
   run: (ctx) => runExchange(ctx, 'trade'),
 };

@@ -35,12 +35,35 @@ export function createMessageHandler({ sender, channel, botUserId, logger, onAct
 
   async function dispatchCommand(user, args, name) {
     const def = getCommand(name);
-    if (!def) return;
-    if (def.mod && !user.isMod && !user.isBroadcaster) return; // silently ignore non-mods
+    if (!def) {
+      // Staying quiet is deliberate — the channel runs other bots, and answering
+      // every stray `!` would be noise. But it must not be INVISIBLE: a viewer
+      // typing `!accept` (instead of `!offer accept`) got no reply and left no
+      // trace, which is indistinguishable from the bot being broken. Debug-level,
+      // so it costs nothing until someone goes looking.
+      logger.debug('unknown command ignored', { command: name, userId: user.id, login: user.login });
+      return;
+    }
+    if (def.mod && !user.isMod && !user.isBroadcaster) {
+      logger.debug('mod-only command ignored', { command: name, userId: user.id, login: user.login });
+      return;
+    }
 
-    const key = `${user.id}:${name}`;
+    // Per-user command cooldown. Commands whose sub-verbs ANSWER a prompt the bot
+    // posted (`!offer accept`, `!trade counter`) opt into keying it per sub-verb:
+    // otherwise glancing at the offer — or fat-fingering it — burns the window and
+    // the accept that follows is dropped, which reads in chat as a broken bot.
+    // Per sub-verb still stops the thing the cooldown is for (the SAME command
+    // repeated), and each verb keeps its own window.
+    const sub = def.cooldownPerSubcommand ? `:${String(args[0] || '').toLowerCase()}` : '';
+    const key = `${user.id}:${name}${sub}`;
     const now = Date.now();
-    if (def.cooldownMs && now - (cmdCooldown.get(key) || 0) < def.cooldownMs) return;
+    if (def.cooldownMs && now - (cmdCooldown.get(key) || 0) < def.cooldownMs) {
+      // Never drop a command without a trace: "it did nothing and there was
+      // nothing in the logs" is how this cost a stream's worth of debugging.
+      logger.debug('command dropped by cooldown', { command: name, sub: args[0] || null, userId: user.id });
+      return;
+    }
     cmdCooldown.set(key, now);
 
     // Outbound mute (`!mute`): swallow every reply while muted EXCEPT for

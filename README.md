@@ -470,6 +470,13 @@ inclusive rolls · slots = weapon/armor/trinket · season = **6 weeks** · EXP =
 `auto`. Repo is intended **open source** (security rests on locked RTDB rules +
 runtime-injected secrets, not code secrecy).
 
+**Chat surface:** responses stay **sub-verbs** — `!offer accept`, `!trade
+counter`, `!duel accept`. Bare `!accept` / `!decline` are deliberately NOT
+registered: the channel runs other bots, and claiming names that common risks two
+bots answering one message. (A viewer typing `!accept` therefore gets nothing;
+that is intended, and the dispatcher logs it at debug so it stays diagnosable.)
+No command links the source repo — chat replies point at okrafans.com only.
+
 **Content:** 72 items / 18 bosses (3 seasons) / per-class + boss ability kits live
 in `src/content/`; boss HP scales to the mustered roster (`scaleBossHp`).
 Sub-tier boosts combat power + EXP; victory loot rewards participants + survivors
