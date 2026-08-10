@@ -29,6 +29,8 @@ import { createMessageHandler } from './src/events/chat.js';
 import { attachTwitchEvents } from './src/events/twitchEvents.js';
 import { startDropScheduler } from './src/events/dropScheduler.js';
 import { startTimerScheduler } from './src/events/timerScheduler.js';
+import { startReminderScheduler } from './src/events/reminderScheduler.js';
+import { seedReminders } from './src/db/reminders.js';
 import { processDrops } from './src/db/drops.js';
 
 // Running version, read from the bundled package.json (in the image at /app).
@@ -162,6 +164,16 @@ async function main() {
     logger.warn('item catalog seed failed (non-fatal)', { err: String(err) });
   }
 
+  // ── Seed the default reminders (config/reminders). Creates only what's
+  //    MISSING — an id that already exists keeps whatever the mods set, so
+  //    edited times and text survive every deploy. Non-fatal like the seeds above. ──
+  try {
+    const rem = await seedReminders();
+    logger.info('reminders seeded', rem);
+  } catch (err) {
+    logger.warn('reminder seed failed (non-fatal)', { err: String(err) });
+  }
+
   // ── Twitch auth (persisted refresh token) ──
   const tokenStore = new TokenStore(process.env.TOKEN_STORE_DIR || './.tokens');
   const { authProvider, addRole } = await buildAuth({
@@ -279,6 +291,11 @@ async function main() {
   // Mod timer countdown (`!timer`): heads-up marks + "time's up". Resumes any
   // timer that was running before a restart from its stored deadline.
   shutdownHooks.push(startTimerScheduler({ send, logger }));
+
+  // Scheduled reminders (`!reminder`). Schedules are data in config/reminders,
+  // so this only supplies the clock and the channel — which is also what makes a
+  // reminder channel-specific without any per-channel branch in the code.
+  shutdownHooks.push(startReminderScheduler({ send, channel, logger }));
 
   // ── Live gate: Helix poll (always) + EventSub (when broadcaster auth fits) ──
   const setLiveBound = (live, source) => {

@@ -6,9 +6,12 @@
 import { database, PATHS, SERVER_TIMESTAMP } from './firebase.js';
 import { config as gameConfig } from '../config.js';
 
-/** @type {{ live: boolean, expMode: string, chatMuted: boolean, season: any, raid: any, dropScheduler: any, timer: any }} */
+/** @type {{ live: boolean, liveSince: number|null, expMode: string, chatMuted: boolean, season: any, raid: any, dropScheduler: any, timer: any, reminders: any }} */
 const mirror = {
   live: false,
+  // When the current live session began (null when offline). Stamped by setLive
+  // on the OFF→ON edge only, so a restart mid-stream keeps the original start.
+  liveSince: null,
   expMode: gameConfig.liveGate.defaultExpMode,
   // Mod kill-switch for OUTBOUND chat (`!mute`). When true the bot stays fully
   // connected — listening, granting EXP, processing drops, holding the lease —
@@ -25,6 +28,9 @@ const mirror = {
   // config/timer: the one mod-set countdown, or null. Read once a second by the
   // timer scheduler, so it belongs in the mirror rather than an RTDB read loop.
   timer: null,
+  // config/reminders: id → scheduled-nudge record. Evaluated on every reminder
+  // tick, so it's mirrored rather than re-read.
+  reminders: {},
 };
 
 let started = false;
@@ -55,6 +61,8 @@ export async function startConfigMirror(logger = console) {
   const raidRef = db.ref(PATHS.configRaid());
   const dropRef = db.ref(PATHS.configDropScheduler());
   const timerRef = db.ref(PATHS.configTimer());
+  const liveSinceRef = db.ref(PATHS.configLiveSince());
+  const remindersRef = db.ref(PATHS.reminders());
 
   // Seed drop-scheduler defaults once (never clobber a mod's settings).
   await dropRef.transaction((v) => (v == null ? { enabled: gameConfig.loot.scheduler.enabled, intervalSec: gameConfig.loot.scheduler.intervalSec } : v));
@@ -67,11 +75,13 @@ export async function startConfigMirror(logger = console) {
   raidRef.on('value', (s) => { mirror.raid = s.val(); });
   dropRef.on('value', (s) => { if (s.val()) mirror.dropScheduler = s.val(); });
   timerRef.on('value', (s) => { mirror.timer = s.val() || null; });
+  liveSinceRef.on('value', (s) => { mirror.liveSince = s.val() || null; });
+  remindersRef.on('value', (s) => { mirror.reminders = s.val() || {}; });
 
   // Wait for the initial reads so the mirror is warm before chat starts.
-  const [liveSnap, expSnap, mutedSnap, clipSnap, seasonSnap, raidSnap, dropSnap, timerSnap] = await Promise.all([
+  const [liveSnap, expSnap, mutedSnap, clipSnap, seasonSnap, raidSnap, dropSnap, timerSnap, liveSinceSnap, remindersSnap] = await Promise.all([
     liveRef.get(), expRef.get(), mutedRef.get(), clipRef.get(), seasonRef.get(), raidRef.get(), dropRef.get(),
-    timerRef.get(),
+    timerRef.get(), liveSinceRef.get(), remindersRef.get(),
   ]);
   mirror.live = Boolean(liveSnap.val());
   mirror.expMode = expSnap.val() || gameConfig.liveGate.defaultExpMode;
@@ -81,6 +91,8 @@ export async function startConfigMirror(logger = console) {
   mirror.raid = raidSnap.val();
   if (dropSnap.val()) mirror.dropScheduler = dropSnap.val();
   mirror.timer = timerSnap.val() || null;
+  mirror.liveSince = liveSinceSnap.val() || null;
+  mirror.reminders = remindersSnap.val() || {};
   logger.info?.('config mirror warm', {
     live: mirror.live, expMode: mirror.expMode, chatMuted: mirror.chatMuted, clipMode: mirror.clipMode,
   });
@@ -95,6 +107,15 @@ export function getConfig() {
     clipMode: mirror.clipMode,
     season: mirror.season,
   };
+}
+
+/**
+ * When the current live session started (ms epoch), or null when offline.
+ * Stamped on the OFF→ON edge only — a bot restart mid-stream sees no edge, so
+ * the original start survives and "30 minutes after going live" stays honest.
+ */
+export function getLiveSince() {
+  return mirror.liveSince;
 }
 
 /** True when a mod has muted the bot's outbound chat (`!mute`). Hot-path read. */
@@ -140,6 +161,32 @@ export async function setTimerState(timer) {
   return mirror.timer;
 }
 
+/** All reminder records as `{ id: record }` (see src/db/reminders.js). */
+export function getReminders() {
+  return mirror.reminders || {};
+}
+
+/**
+ * Merge a patch into one reminder (persisted + mirrored synchronously, so a mod
+ * running `!reminder off ghosty` then `!reminder` reads their own write). Passing
+ * a null VALUE for a key removes it, per RTDB update semantics.
+ */
+export async function patchReminder(id, patch) {
+  const merged = { ...(mirror.reminders?.[id] || {}), ...patch, id };
+  for (const [k, v] of Object.entries(patch)) if (v === null) delete merged[k];
+  mirror.reminders = { ...(mirror.reminders || {}), [id]: merged };
+  await database().ref(PATHS.reminder(id)).update({ ...patch, id });
+  return merged;
+}
+
+/** Replace a reminder's bot-managed firing state (what has already gone out). */
+export async function setReminderState(id, state) {
+  const cur = mirror.reminders?.[id];
+  if (cur) mirror.reminders = { ...mirror.reminders, [id]: { ...cur, state } };
+  await database().ref(PATHS.reminderState(id)).set(state || null);
+  return state;
+}
+
 /**
  * Patch the config/raid pointer (active-raid + phase + schedule). The website's
  * muster/live pages key off this (UI contract).
@@ -157,8 +204,17 @@ export async function setRaidPointer(patch) {
 export async function setLive(value, source = 'unknown', logger = console) {
   const next = Boolean(value);
   if (mirror.live === next) return false;
-  await database().ref(PATHS.configLive()).set(next);
-  logger.info?.('live status changed', { live: next, source });
+  // Stamp the session start on the same write as the flag, so "N minutes after
+  // going live" can never read a live channel with no start time. Written only
+  // on an EDGE: a restart while already live leaves the original stamp alone.
+  const startedAt = next ? Date.now() : null;
+  mirror.live = next;
+  mirror.liveSince = startedAt;
+  await database().ref().update({
+    [PATHS.configLive()]: next,
+    [PATHS.configLiveSince()]: startedAt, // null removes it (offline)
+  });
+  logger.info?.('live status changed', { live: next, source, startedAt });
   return true;
 }
 

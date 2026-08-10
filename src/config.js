@@ -163,6 +163,22 @@ export const config = {
     maxLabelLen: 60,
   },
 
+  // ── Reminders (`!reminder`) ──────────────────────────────────────────────
+  // Scheduled chat nudges — the wallpaper check, Ghosty's meals, hydration. The
+  // SCHEDULES are data in RTDB (config/reminders/<id>, seeded from
+  // src/content/reminders.js); these are only the engine-wide bounds.
+  reminders: {
+    tickMs: 20_000, // how often schedules are evaluated — minute-accurate is plenty
+    // A daily slot only fires within this long after its wall-clock time, so a
+    // bot that boots at noon never announces the 08:00 one.
+    dailyGraceMs: 5 * 60_000,
+    // How late an `afterLive` reminder may still be announced. Past this the
+    // session is marked handled and nothing is said (the bot booted mid-stream).
+    afterLiveWindowMs: 2 * 60 * 60_000,
+    defaultTimeZone: 'America/Los_Angeles', // when a daily reminder names none
+    maxTextLen: 200,
+  },
+
   // ── Live gate (spec §5.1) ────────────────────────────────────────────────
   liveGate: {
     pollIntervalMs: 45_000, // Helix poll fallback cadence (30–60s)

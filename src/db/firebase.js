@@ -80,6 +80,10 @@ export async function closeFirebase() {
  */
 export const PATHS = {
   configLive: () => 'config/live',
+  // When the CURRENT live session started (null when offline). Reminders that
+  // count from "going live" need this, and persisting it is what stops a bot
+  // restart mid-stream from re-running them.
+  configLiveSince: () => 'config/liveSince',
   configExpMode: () => 'config/expMode',
   configChatMuted: () => 'config/chatMuted',
   configClipMode: () => 'config/clipMode',
@@ -90,6 +94,13 @@ export const PATHS = {
   // memory) so a restart resumes it from `endsAt` instead of losing it — the
   // same "never a timer a restart could lose" rule the raid phases follow.
   configTimer: () => 'config/timer',
+  // REMINDERS (`!reminder`): scheduled chat nudges. Schedules are DATA here, not
+  // code — seeded from src/content/reminders.js and editable from chat. Each
+  // record's `state` (what has already fired) lives under it so firing stays
+  // idempotent across restarts.
+  reminders: () => 'config/reminders',
+  reminder: (id) => `config/reminders/${id}`,
+  reminderState: (id) => `config/reminders/${id}/state`,
   configLock: () => 'config/lock',
   // OKRA FACTS (/info/): approved facts are client-read-only; the submission
   // queue + counter are admin-only.
