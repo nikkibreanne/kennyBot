@@ -436,6 +436,14 @@ rate limit — a media action costs OBS nothing. A connection is opened **per
 trigger**; ten fired at once completed in 197ms with none dropped, which is well
 past what a soundboard produces.
 
+**Re-firing does not stack, and that is why there is no queue.** A Media Source has
+a single playback instance, so `restart` on a source already playing resets it to
+frame one — measured against a real OBS, the cursor dropped from 470ms to 104ms on
+the second trigger. Ten rapid triggers of one slot are one audible play, not ten.
+Different slots *do* overlap, since they are different sources. A queue would only
+matter if alerts should wait their turn rather than interrupt, which for a mod
+soundboard is the wrong behaviour anyway.
+
 **Not yet wired to Twitch events.** Firing on cheers, subs or channel-point
 redemptions needs EventSub topics and broadcaster scopes this bot does not hold
 today (it subscribes to `stream.online`/`offline` only, and prod runs on a Helix
