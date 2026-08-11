@@ -31,6 +31,10 @@ const mirror = {
   // config/reminders: id → scheduled-nudge record. Evaluated on every reminder
   // tick, so it's mirrored rather than re-read.
   reminders: {},
+  // config/media: slot number → OBS media mapping (`!media`). Mirrored so firing
+  // a slot is a chat-latency operation rather than a chat-latency operation plus
+  // an RTDB read — the point of the feature is that it lands on the beat.
+  media: {},
 };
 
 let started = false;
@@ -63,6 +67,7 @@ export async function startConfigMirror(logger = console) {
   const timerRef = db.ref(PATHS.configTimer());
   const liveSinceRef = db.ref(PATHS.configLiveSince());
   const remindersRef = db.ref(PATHS.reminders());
+  const mediaRef = db.ref(PATHS.mediaSlots());
 
   // Seed drop-scheduler defaults once (never clobber a mod's settings).
   await dropRef.transaction((v) => (v == null ? { enabled: gameConfig.loot.scheduler.enabled, intervalSec: gameConfig.loot.scheduler.intervalSec } : v));
@@ -77,11 +82,12 @@ export async function startConfigMirror(logger = console) {
   timerRef.on('value', (s) => { mirror.timer = s.val() || null; });
   liveSinceRef.on('value', (s) => { mirror.liveSince = s.val() || null; });
   remindersRef.on('value', (s) => { mirror.reminders = s.val() || {}; });
+  mediaRef.on('value', (s) => { mirror.media = s.val() || {}; });
 
   // Wait for the initial reads so the mirror is warm before chat starts.
-  const [liveSnap, expSnap, mutedSnap, clipSnap, seasonSnap, raidSnap, dropSnap, timerSnap, liveSinceSnap, remindersSnap] = await Promise.all([
+  const [liveSnap, expSnap, mutedSnap, clipSnap, seasonSnap, raidSnap, dropSnap, timerSnap, liveSinceSnap, remindersSnap, mediaSnap] = await Promise.all([
     liveRef.get(), expRef.get(), mutedRef.get(), clipRef.get(), seasonRef.get(), raidRef.get(), dropRef.get(),
-    timerRef.get(), liveSinceRef.get(), remindersRef.get(),
+    timerRef.get(), liveSinceRef.get(), remindersRef.get(), mediaRef.get(),
   ]);
   mirror.live = Boolean(liveSnap.val());
   mirror.expMode = expSnap.val() || gameConfig.liveGate.defaultExpMode;
@@ -93,6 +99,7 @@ export async function startConfigMirror(logger = console) {
   mirror.timer = timerSnap.val() || null;
   mirror.liveSince = liveSinceSnap.val() || null;
   mirror.reminders = remindersSnap.val() || {};
+  mirror.media = mediaSnap.val() || {};
   logger.info?.('config mirror warm', {
     live: mirror.live, expMode: mirror.expMode, chatMuted: mirror.chatMuted, clipMode: mirror.clipMode,
   });
@@ -185,6 +192,34 @@ export async function setReminderState(id, state) {
   if (cur) mirror.reminders = { ...mirror.reminders, [id]: { ...cur, state } };
   await database().ref(PATHS.reminderState(id)).set(state || null);
   return state;
+}
+
+/** All OBS media slots as `{ "1": {input, scene, action, label}, … }` (`!media`). */
+export function getMediaSlots() {
+  return mirror.media || {};
+}
+
+/**
+ * Merge a patch into one media slot. Mirror first, exactly like patchReminder:
+ * a mod who types `!media set 1 Airhorn` and then `!media 1` in the next breath
+ * must hit the slot they just wrote, not the one RTDB has caught up to.
+ */
+export async function setMediaSlot(n, patch) {
+  const key = String(n);
+  const merged = { ...(mirror.media?.[key] || {}), ...patch };
+  for (const [k, v] of Object.entries(patch)) if (v === null) delete merged[k];
+  mirror.media = { ...(mirror.media || {}), [key]: merged };
+  await database().ref(PATHS.mediaSlot(key)).update(patch);
+  return merged;
+}
+
+/** Remove a media slot entirely. */
+export async function clearMediaSlot(n) {
+  const key = String(n);
+  const next = { ...(mirror.media || {}) };
+  delete next[key];
+  mirror.media = next;
+  await database().ref(PATHS.mediaSlot(key)).remove();
 }
 
 /**

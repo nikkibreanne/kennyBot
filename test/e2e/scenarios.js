@@ -17,6 +17,8 @@ import { seedReminders, listReminders } from '../../src/db/reminders.js';
 import { getRaidPointer, getConfig, setLive, setClipMode } from '../../src/db/configStore.js';
 import { initClipsWith } from '../../src/twitch/clips.js';
 import { initCaptureWith } from '../../src/integrations/capture.js';
+import { initMediaWith } from '../../src/integrations/obsMedia.js';
+import { clearMediaSlot, listSlots } from '../../src/db/media.js';
 import { defaultBoss } from '../../src/content/bosses.js';
 import { until } from './harness.js';
 
@@ -420,6 +422,53 @@ export const SCENARIOS = [
         assert.equal((await database().ref('config/timer').get()).exists(), false, 'cleared from RTDB');
       } finally {
         await bot.send(mod, '!timer stop'); // never leak a timer into the next scenario
+      }
+    },
+  },
+  {
+    command: 'media', title: 'a mod maps an OBS source to a number and fires it',
+    run: async ({ bot, u }) => {
+      const mod = u('e2e_media', { login: 'nikki', name: 'Nikki', mod: true });
+      const fired = [];
+      // Stands in for the whole obs-websocket round trip — what matters here is
+      // that the SLOT the command resolved is the one handed to OBS.
+      initMediaWith(async ({ slot }) => { fired.push(slot); return { played: true, shown: Boolean(slot.scene) }; });
+      try {
+        assert.match(await bot.send(mod, '!media'), /no media slots mapped/i);
+        assert.match(await bot.send(mod, '!media 1'), /slot 1 is not mapped/i);
+
+        // Source names are the rest of the line — real OBS sources have spaces.
+        assert.match(await bot.send(mod, '!media set 1 Airhorn SFX'), /"Airhorn SFX"/);
+        assert.equal((await database().ref('config/media/1').get()).val().input, 'Airhorn SFX', 'persisted');
+
+        // Firing is silent in chat by contract; the slot reaching OBS is the proof.
+        assert.equal(await bot.send(mod, '!media 1'), '', 'a successful play says nothing');
+        assert.equal(fired.length, 1);
+        assert.equal(fired[0].input, 'Airhorn SFX');
+        assert.equal(fired[0].action ?? 'restart', 'restart', 'the alert-shaped default');
+
+        // Mapping a scene and an action edits the same slot rather than replacing it.
+        assert.match(await bot.send(mod, '!media scene 1 Alerts'), /in "Alerts"/);
+        assert.match(await bot.send(mod, '!media action 1 stop'), /\(stop\)/);
+        await bot.send(mod, '!media 1');
+        assert.equal(fired[1].input, 'Airhorn SFX', 'input survived both edits');
+        assert.equal(fired[1].scene, 'Alerts');
+        assert.equal(fired[1].action, 'stop');
+
+        // A typo'd action must not write a slot that throws at play time.
+        assert.match(await bot.send(mod, '!media action 1 restrat'), /action must be one of/);
+        assert.equal(listSlots()[0].action, 'stop', 'the bad edit changed nothing');
+
+        assert.match(await bot.send(mod, '!media scene 1 none'), /"Airhorn SFX"/);
+        assert.equal(listSlots()[0].scene ?? null, null, 'scene cleared, slot kept');
+
+        assert.match(await bot.send(mod, '!media'), /Airhorn SFX/);
+        assert.match(await bot.send(mod, '!media clear 1'), /cleared/i);
+        assert.equal(listSlots().length, 0);
+      } finally {
+        // Scenarios share one emulator DB — leave no slots behind.
+        await clearMediaSlot(1);
+        initMediaWith(null);
       }
     },
   },

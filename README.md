@@ -15,6 +15,7 @@ Firebase and OBS, and never listens on a port — and ships as a container.
 | Feature | Commands | Notes |
 |---|---|---|
 | **Clips** | `!clip` · `!clipmode` · `!start` | 16:9 + natively-framed 9:16 captured on the streamer's PC over obs-websocket / Aitum |
+| **On-stream media** | `!media` | play a mapped OBS media source from chat — the same connection, pointed at a source instead of the buffer |
 | **Stream timer** | `!timer` | one countdown, heads-up marks, survives a restart |
 | **Reminders** | `!reminder` | schedules are RTDB records, not code — daily / after-live / interval |
 | **To-do board** | `!todo` | chat-controlled, rendered on [/todo/](https://okrafans.com/todo/) |
@@ -52,6 +53,8 @@ Implemented and verified — stream side:
 - **`!clip` capture**: horizontal 16:9 + natively-framed vertical 9:16 saved on the
   streamer's PC over obs-websocket / Aitum, with a runtime-switchable clip mode —
   see [Clip capture](#clip-capture)
+- **`!media`**: play a mapped OBS media source from chat (sounds, alert clips) over
+  that same obs-websocket connection — see [Playing media on stream](#playing-media-on-stream--media)
 - **`!timer`**: one mod-set countdown with heads-up marks, stored as a deadline so
   a restart resumes it
 - **`!reminder`**: scheduled nudges whose schedules are RTDB records, editable from
@@ -82,9 +85,9 @@ Underneath both:
 - **automated releases** from Conventional Commits (release-please), with `main`
   protected for everyone including admins
 
-Verified by `npm test` (139 offline unit tests), `npm run test:emulator` (69 — RTDB
+Verified by `npm test` (159 offline unit tests), `npm run test:emulator` (75 — RTDB
 rules + client-write rejection, and the stateful command paths), `npm run test:e2e`
-(31 — every registered command driven through the real dispatcher), and
+(32 — every registered command driven through the real dispatcher), and
 `npm run synthetic` (full muster→battle→victory run with UI-contract assertions).
 
 **Not yet done:** a full-session local recording (see
@@ -101,6 +104,7 @@ Twitch (chat WSS, Helix, EventSub WSS)  ──►  kennyBot (Node, twurple)  ─
                                                    │
                                                    ▼  obs-websocket, over the tailnet
                                      streamer's OBS + Aitum  ──►  16:9 + 9:16 files on their PC
+                                                                  media sources played on stream
 ```
 
 The bot is outbound-only in both directions: it *dials* Twitch, Firebase and OBS,
@@ -115,17 +119,19 @@ src/
   content/                your own data: classes.js (class→role), items.js (catalog +
                           starter gear), facts.js, reminders.js (default schedules)
   rules/                  PURE, RNG/clock-injected, unit-tested: leveling, rating, loot,
-                          combat, reminders (what's due now)
+                          combat, reminders (what's due now), media (slot parsing/validation)
   db/                     firebase, configStore (live mirror), players, raid, drops, wallet,
-                          market, timer, reminders, todo, facts, lock, tokenStore
+                          market, timer, reminders, media, todo, facts, lock, tokenStore
   twitch/                 auth (RefreshingAuthProvider), liveGate (Helix poll), eventsub (WS),
                           sender (Helix/IRC send + badge), clips (Helix Create Clip)
-  integrations/           obsWebsocket (v5 client + Aitum vendor requests), capture (facade + rate limit)
+  integrations/           obsWebsocket (v5 client + Aitum vendor requests), capture (facade +
+                          rate limit), obsMedia (media actions on the same socket)
   events/                 chat (gate→EXP→raid tick + dispatch), twitchEvents (sub/cheer/raid),
                           dropScheduler · timerScheduler · reminderScheduler
   commands/               one module per command + registry; mod/ subdir for mod commands
 test/                     rules/*.test.js (offline) · firebase-rules.test.js (emulator) · e2e/ (dispatcher)
 scripts/synthetic-chat.js no-stream harness that drives the whole loop
+scripts/obs-media.mjs     list/fire OBS media sources without the bot running
 ```
 
 ## Chat commands
@@ -139,6 +145,19 @@ scripts/synthetic-chat.js no-stream harness that drives the whole loop
 | `!clip` | everyone | capture the last ~60s — 16:9 + 9:16 local files by default; a Twitch clip only if the mode says so |
 | `!clipmode <targets>` | mod | pick which of `!clip`'s three outputs run — `horizontal` · `vertical` · `twitch`, combined freely (see below) |
 | `!start` / `!slate` | mod | set a stream sync point for the clip archiver |
+
+**On-stream media** — the same OBS connection, pointed at a media source instead
+of the replay buffer.
+
+| Command | Who | Effect |
+|---|---|---|
+| `!media <n>` | mod | play the OBS media source mapped to slot `n`. Silent in chat on success — the sound *is* the reply; every failure answers |
+| `!media` | mod | list what's mapped |
+| `!media inputs` | mod | ask OBS which Media Sources exist, spelled exactly as it spells them |
+| `!media set <n> <source>` | mod | map a slot. The source name is the rest of the line, so spaces are fine |
+| `!media scene <n> <scene\|none>` | mod | reveal the source in that scene before playing (for a visual alert); `none` stops revealing it |
+| `!media action <n> <action>` | mod | `restart` (default) · `play` · `pause` · `stop` · `next` · `previous` |
+| `!media clear <n>` | mod | unmap |
 
 **Around the stream**
 
@@ -364,6 +383,50 @@ second place that can disagree with it.
 `!clipmode status` reports the mode *and* whether each half can actually run, and a
 switch to a mode nothing is configured for warns immediately rather than leaving a
 viewer to discover it.
+
+### Playing media on stream — `!media`
+
+The same obs-websocket connection that saves replay buffers can also **play a media
+source**, which is all an on-stream alert actually is. `!media 3` restarts the OBS
+source mapped to slot 3; if that slot names a scene, the source is revealed there
+first, so a visual alert works the same way a sound does.
+
+```
+!media inputs                  what OBS actually has, spelled its way
+!media set 3 Airhorn SFX       slot 3 → that source
+!media scene 3 Alerts          reveal it in "Alerts" before playing (visual alerts)
+!media action 3 stop           restart (default) · play · pause · stop · next · previous
+!media 3                       fire it
+```
+
+**A successful play says nothing in chat.** The sound is the feedback, and an alert
+that also posts a line is clutter. Every *failure* replies — so silence means OBS
+accepted the request, and if you then heard nothing the problem is on the OBS side
+(source muted, hidden, or its file missing).
+
+There is deliberately **no overlay page and no message bus**. That architecture is
+what a hosted alert service has to use, because it cannot reach your OBS — this bot
+can, and a web page plus a transport to reach it would be strictly more moving parts
+than the one request that already works. OBS keeps ownership of compositing, audio
+routing and *Hide source when playback ends*, which is also why nothing here holds a
+"hide it later" timer.
+
+Slots live in RTDB (`config/media/<n>`) for the same reason the clip mode does:
+these names change whenever a source is renamed in OBS, and re-deploying a container
+to rename a sound is not a thing anyone does mid-stream. They ship **empty** — a
+default slot would name a source that exists on no particular machine, and a slot
+pointing at nothing fails live, in front of chat. Map them from `!media inputs`, or
+from `node scripts/obs-media.mjs` before the bot is even deployed.
+
+Mod-only, and no cooldown: a soundboard's value is landing on the beat, sometimes
+twice. Unlike `!clip`'s local capture — hundreds of MB per trigger, hence its own
+rate limit — a media action costs OBS nothing.
+
+**Not yet wired to Twitch events.** Firing on cheers, subs or channel-point
+redemptions needs EventSub topics and broadcaster scopes this bot does not hold
+today (it subscribes to `stream.online`/`offline` only, and prod runs on a Helix
+poll because the broadcaster token isn't the channel owner's). The mechanism comes
+first; the trigger is separate work.
 
 The one point of contact is `!start` (`src/db/clipSync.js`), which writes a per-stream
 sync anchor to RTDB — *data the archiver reads*, not a file handoff, and it works
