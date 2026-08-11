@@ -1,9 +1,14 @@
-# Continuous integration — the merge gate for `main`.
+# Continuous integration — the merge gate for `main` and `dev`.
 #
 # Runs the full test suite (unit + Firebase-rules emulator + end-to-end command
-# dispatch) on every pull request into main and every push to main. Branch
-# protection on `main` requires this workflow's `test` check to pass before a PR
-# can merge, so a change that breaks any command can't land.
+# dispatch) on every pull request into those branches and every push to them.
+# Branch protection requires this workflow's `test` check to pass before a PR can
+# merge, so a change that breaks any command can't land.
+#
+# `dev` MUST be listed here. A protected branch whose required check never
+# triggers is a branch nothing can ever merge into — the PR sits at "no checks
+# reported" forever. That is not hypothetical: a PR stacked on a feature branch
+# hit exactly this and had to be rebased onto main to get any CI at all.
 #
 # `publish.yml` reuses this exact job via `workflow_call`, so a release tag can't
 # build an image that skipped the suite — one source of truth for "the tests".
@@ -11,9 +16,9 @@ name: ci
 
 on:
   pull_request:
-    branches: [main]
+    branches: [main, dev]
   push:
-    branches: [main]
+    branches: [main, dev]
   workflow_call: {} # let publish.yml run this same job before building the image
 
 permissions:

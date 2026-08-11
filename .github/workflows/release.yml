@@ -21,6 +21,9 @@ name: release
 
 on:
   push:
+    # main ONLY — deliberately not `dev`. An integration branch that cut a release
+    # on every push would tag and publish half-finished work; dev reaches the world
+    # by merging into main, which is what triggers this.
     branches: [main]
 
 permissions: {} # nothing by default; each job asks for exactly what it needs

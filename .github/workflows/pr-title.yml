@@ -18,7 +18,11 @@ name: pr-title
 on:
   pull_request:
     types: [opened, edited, reopened, synchronize]
-    branches: [main]
+    # `dev` too: it is protected with this same required check, and a required
+    # check that never runs blocks every PR into that branch permanently. It also
+    # keeps the titles conventional all the way down, so the eventual dev → main
+    # PR is assembled from commits release-please can already read.
+    branches: [main, dev]
 
 permissions:
   contents: read
