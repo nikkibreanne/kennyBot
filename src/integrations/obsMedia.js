@@ -11,16 +11,18 @@
 // kennyBot does, and adding a page plus a transport to reach it would be strictly
 // more moving parts than the one request below.
 //
-// A SLOT is the mapping (config/media/<n>): a number a mod types → an OBS input
-// name, an optional scene to reveal it in, and which media action to fire. Numbers
-// because a slot has to be typeable in one second while something is happening.
+// A SLOT is the mapping (config/media/<n>): a number a mod types → one or more OBS
+// source names, an optional scene to reveal them in, and which media action to
+// fire. Numbers because a slot has to be typeable in one second while something is
+// happening; a LIST because OBS keeps a GIF and its sound as separate sources, so
+// one alert is normally two of them.
 //
 // Same contract as capture.js, for the same reason: connect per trigger,
 // deadline-bounded, and every failure RESOLVES with `{ ok:false, reason }` rather
 // than throwing. The streamer's PC may be off — that must never break chat.
 
 import { withObs, obsConnectionFromEnv, websocketAvailable } from './obsWebsocket.js';
-import { DEFAULT_ACTION } from '../rules/media.js';
+import { DEFAULT_ACTION, slotInputs } from '../rules/media.js';
 
 /**
  * Protocol encoding only — a mod's word for an action → obs-websocket's enum.
@@ -87,38 +89,50 @@ export function mediaReady() {
  * fake `request` — the same shape as replayBufferSequence, and for the same
  * reason: every bug worth catching here is an ordering bug.
  *
- * Order is load-bearing. The scene item is enabled BEFORE the media action, so
- * the restart plays into a source that is already on screen. Reversed, the first
- * frames play to nobody.
+ * A slot fires ONE OR MORE sources, because OBS keeps a GIF and its sound as
+ * separate Media Sources and an alert is both of them.
+ *
+ * Order is load-bearing, twice over:
+ *   1. every scene item is revealed BEFORE any media action, so a restart never
+ *      plays into a source that is still hidden;
+ *   2. the triggers themselves go out TOGETHER rather than one-await-at-a-time —
+ *      serialising them puts a full round trip between the picture and the sound,
+ *      which over a tailnet is audible as a flam.
  *
  * @param {(type: string, data?: object) => Promise<any>} request
- * @param {{ input: string, scene?: string|null, action?: string }} slot
- * @returns {Promise<{ played: boolean, shown: boolean }>}
+ * @param {{ inputs?: string[], input?: string, scene?: string|null, action?: string }} slot
+ * @returns {Promise<{ played: number, shown: number }>}
  */
 export async function mediaSequence(request, slot) {
   const name = slot?.action || DEFAULT_ACTION;
   const mediaAction = OBS_MEDIA_ACTION[name];
   if (!mediaAction) throw new Error(`unknown media action "${name}"`);
-  if (!slot?.input) throw new Error('slot has no OBS input name');
+  const inputs = slotInputs(slot);
+  if (!inputs.length) throw new Error('slot has no OBS input name');
 
-  let shown = false;
+  let shown = 0;
   if (slot.scene) {
     // SetSceneItemEnabled takes a NUMERIC sceneItemId, not a source name, so the
     // id has to be looked up first — there is no name-based form of this request.
-    const { sceneItemId } = await request('GetSceneItemId', {
-      sceneName: slot.scene,
-      sourceName: slot.input,
-    });
-    await request('SetSceneItemEnabled', {
-      sceneName: slot.scene,
-      sceneItemId,
-      sceneItemEnabled: true,
-    });
-    shown = true;
+    // Sequential so a failure names the source that is missing from the scene.
+    for (const input of inputs) {
+      const { sceneItemId } = await request('GetSceneItemId', {
+        sceneName: slot.scene,
+        sourceName: input,
+      });
+      await request('SetSceneItemEnabled', {
+        sceneName: slot.scene,
+        sceneItemId,
+        sceneItemEnabled: true,
+      });
+      shown += 1;
+    }
   }
 
-  await request('TriggerMediaInputAction', { inputName: slot.input, mediaAction });
-  return { played: true, shown };
+  await Promise.all(
+    inputs.map((input) => request('TriggerMediaInputAction', { inputName: input, mediaAction })),
+  );
+  return { played: inputs.length, shown };
 }
 
 /**
@@ -128,26 +142,27 @@ export async function mediaSequence(request, slot) {
  * property — *Hide source when playback ends* — already does that, frame-accurately
  * and without the bot holding a timer that a restart would lose. Set it there.
  *
- * @param {{ input: string, scene?: string|null, action?: string }} slot
- * @returns {Promise<{ ok: boolean, played?: boolean, shown?: boolean, reason?: string }>}
+ * @param {{ inputs?: string[], input?: string, scene?: string|null, action?: string }} slot
+ * @returns {Promise<{ ok: boolean, played?: number, shown?: number, reason?: string }>}
  */
 export async function playMedia(slot, logger = console) {
   if (!conn) return { ok: false, reason: 'not configured' };
-  if (!slot?.input) return { ok: false, reason: 'unmapped' };
+  const inputs = slotInputs(slot);
+  if (!inputs.length) return { ok: false, reason: 'unmapped' };
   try {
     const res = fakeTrigger
       ? await fakeTrigger({ slot })
       : await withObs(conn, (request) => mediaSequence(request, slot));
     logger.info?.('media triggered', {
-      input: slot.input,
+      inputs,
       action: slot.action || DEFAULT_ACTION,
       scene: slot.scene || null,
     });
-    return { ok: true, played: true, shown: Boolean(res?.shown) };
+    return { ok: true, played: res?.played ?? inputs.length, shown: res?.shown ?? 0 };
   } catch (err) {
-    // Expected whenever the streamer's PC is off, OBS is closed, or the source
-    // was renamed in OBS but not in the slot map. Log it and tell the mod.
-    logger.warn?.('media trigger failed', { input: slot.input, err: String(err?.message || err) });
+    // Expected whenever the streamer's PC is off, OBS is closed, or a source was
+    // renamed in OBS but not in the slot map. Log it and tell the mod.
+    logger.warn?.('media trigger failed', { inputs, err: String(err?.message || err) });
     return { ok: false, reason: String(err?.message || err) };
   }
 }

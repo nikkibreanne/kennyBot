@@ -85,7 +85,7 @@ Underneath both:
 - **automated releases** from Conventional Commits (release-please), with `main`
   protected for everyone including admins
 
-Verified by `npm test` (159 offline unit tests), `npm run test:emulator` (75 — RTDB
+Verified by `npm test` (166 offline unit tests), `npm run test:emulator` (75 — RTDB
 rules + client-write rejection, and the stateful command paths), `npm run test:e2e`
 (32 — every registered command driven through the real dispatcher), and
 `npm run synthetic` (full muster→battle→victory run with UI-contract assertions).
@@ -154,7 +154,8 @@ of the replay buffer.
 | `!media <n>` | mod | play the OBS media source mapped to slot `n`. Silent in chat on success — the sound *is* the reply; every failure answers |
 | `!media` | mod | list what's mapped |
 | `!media inputs` | mod | ask OBS which Media Sources exist, spelled exactly as it spells them |
-| `!media set <n> <source>` | mod | map a slot. The source name is the rest of the line, so spaces are fine |
+| `!media set <n> <a> \| <b>` | mod | map a slot to one or more sources. Names are the rest of the line (spaces fine); `\|` separates them, because a GIF and its sound are two sources in OBS and one alert in chat |
+| `!media add <n> <source>` | mod | append a source to an existing slot |
 | `!media scene <n> <scene\|none>` | mod | reveal the source in that scene before playing (for a visual alert); `none` stops revealing it |
 | `!media action <n> <action>` | mod | `restart` (default) · `play` · `pause` · `stop` · `next` · `previous` |
 | `!media clear <n>` | mod | unmap |
@@ -392,24 +393,35 @@ source mapped to slot 3; if that slot names a scene, the source is revealed ther
 first, so a visual alert works the same way a sound does.
 
 ```
-!media inputs                  what OBS actually has, spelled its way
-!media set 3 Airhorn SFX       slot 3 → that source
-!media scene 3 Alerts          reveal it in "Alerts" before playing (visual alerts)
-!media action 3 stop           restart (default) · play · pause · stop · next · previous
-!media 3                       fire it
+!media inputs                        what OBS actually has, spelled its way
+!media set 3 alert-gif | alert-mp3   slot 3 → both, fired together
+!media add 3 extra-sound             append to an existing slot
+!media scene 3 Alerts                reveal them in "Alerts" first (only if hidden)
+!media action 3 stop                 restart (default) · play · pause · stop · next · previous
+!media 3                             fire it
 ```
+
+**One slot, several sources.** OBS keeps a GIF and its sound as separate Media
+Sources, so an alert is normally two of them. A slot fires up to five, and the
+triggers go out in a single batch rather than one await at a time — putting a
+round trip between the picture and the sound is audible. Every scene reveal
+happens before any trigger, for the same reason.
 
 **A successful play says nothing in chat.** The sound is the feedback, and an alert
 that also posts a line is clutter. Every *failure* replies — so silence means OBS
-accepted the request, and if you then heard nothing the problem is on the OBS side
-(source muted, hidden, or its file missing).
+accepted the request. Verified against a real OBS: a name that doesn't exist, a
+scene that doesn't exist, and a slot where only *one* of two names is wrong all
+throw and reach chat with the offending name in the message. The one failure OBS
+cannot report is a **muted or zero-volume source** — that answers success and is
+heard by nobody, so it's the first thing to check when a slot goes quiet.
 
 There is deliberately **no overlay page and no message bus**. That architecture is
 what a hosted alert service has to use, because it cannot reach your OBS — this bot
 can, and a web page plus a transport to reach it would be strictly more moving parts
 than the one request that already works. OBS keeps ownership of compositing, audio
-routing and *Hide source when playback ends*, which is also why nothing here holds a
-"hide it later" timer.
+routing and *Show nothing when playback ends* (`clear_on_media_end`, on by default),
+which is also why nothing here holds a "hide it later" timer — and why a source can
+simply be left visible instead of needing a scene at all.
 
 Slots live in RTDB (`config/media/<n>`) for the same reason the clip mode does:
 these names change whenever a source is renamed in OBS, and re-deploying a container
@@ -420,7 +432,9 @@ from `node scripts/obs-media.mjs` before the bot is even deployed.
 
 Mod-only, and no cooldown: a soundboard's value is landing on the beat, sometimes
 twice. Unlike `!clip`'s local capture — hundreds of MB per trigger, hence its own
-rate limit — a media action costs OBS nothing.
+rate limit — a media action costs OBS nothing. A connection is opened **per
+trigger**; ten fired at once completed in 197ms with none dropped, which is well
+past what a soundboard produces.
 
 **Not yet wired to Twitch events.** Firing on cheers, subs or channel-point
 redemptions needs EventSub topics and broadcaster scopes this bot does not hold

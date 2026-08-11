@@ -242,7 +242,7 @@ live, in front of chat.
 
 | Field | Required | What it is |
 |---|---|---|
-| `input` | yes | the OBS **source name**, character for character as OBS spells it |
+| `inputs` | yes | one or more OBS **source names**, character for character as OBS spells them, fired together. OBS keeps a GIF and its sound as separate sources, so an alert is normally two entries. Max 5 |
 | `scene` | no | a scene to reveal that source in *before* playing — this is what makes a visual alert work; omit it for sounds that are always in the active scene |
 | `action` | no | `restart` (default) · `play` · `pause` · `stop` · `next` · `previous` |
 | `label` | no | a human name, so `!media` reads as more than numbers |
@@ -254,15 +254,22 @@ does nothing at all.
 
 **Getting the names right is the whole job.** They must match OBS exactly, so use
 `!media inputs` (or `node scripts/obs-media.mjs`, which needs only the two `OBS_*`
-env vars and not a running bot) rather than typing them from memory.
+env vars and not a running bot) rather than typing them from memory. Renaming a
+source in OBS silently breaks any slot pointing at it — the next fire replies with
+the missing name, which is the intended failure.
 
 Two behaviours worth knowing:
 
 - **A successful play is silent in chat.** The sound is the feedback. Every failure
   replies — so silence means OBS accepted the request, and if you heard nothing the
   problem is on the OBS side.
-- **Hiding the source again is OBS's job**, via the Media Source property *Hide
-  source when playback ends*. kennyBot deliberately holds no "hide it later" timer.
+- **Hiding the source again is OBS's job**, via the Media Source property *Show
+  nothing when playback ends* (setting key `clear_on_media_end`, **on by default**).
+  kennyBot deliberately holds no "hide it later" timer. Because that default already
+  blanks a finished source, you can leave the scene item permanently visible and skip
+  the `scene` field entirely — which is the recommended setup.
+- **A muted or zero-volume source still reports success.** OBS gives no way to tell,
+  so that is the first thing to check when a slot fires and nobody hears anything.
 
 Connection comes from the same `OBS_WEBSOCKET_URL` / `OBS_WEBSOCKET_PASSWORD` the
 clip capture uses — one OBS, one place to configure it.

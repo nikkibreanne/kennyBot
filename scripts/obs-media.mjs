@@ -8,6 +8,7 @@
 //   node scripts/obs-media.mjs --all                    list every input, with kinds
 //   node scripts/obs-media.mjs --scenes                 list scenes
 //   node scripts/obs-media.mjs --play "Airhorn SFX"     fire one, right now
+//   node scripts/obs-media.mjs --play "GIF | Sound"      fire a whole slot together
 //   node scripts/obs-media.mjs --play "GIF" --scene "Alerts" --action restart
 //
 // Reads OBS_WEBSOCKET_URL / OBS_WEBSOCKET_PASSWORD from .env, the same two vars
@@ -16,7 +17,7 @@
 import 'dotenv/config';
 import { withObs, obsConnectionFromEnv } from '../src/integrations/obsWebsocket.js';
 import { mediaSequence } from '../src/integrations/obsMedia.js';
-import { MEDIA_ACTIONS, DEFAULT_ACTION } from '../src/rules/media.js';
+import { MEDIA_ACTIONS, DEFAULT_ACTION, parseInputList } from '../src/rules/media.js';
 
 const conn = obsConnectionFromEnv();
 if (!conn) {
@@ -43,9 +44,16 @@ if (play && !MEDIA_ACTIONS.includes(action)) {
 try {
   await withObs(conn, async (request) => {
     if (play) {
-      const res = await mediaSequence(request, { input: play, scene, action });
-      console.log(`▶ ${action} "${play}"${scene ? ` (revealed in "${scene}")` : ''}`);
-      console.log(res.shown ? '  scene item enabled first' : '  no scene handling — source must already be visible');
+      // Same `|` separator as `!media set`, so what you test here is what you map.
+      const inputs = parseInputList(play);
+      if (!inputs) {
+        console.error('--play needs one or more non-empty source names separated by |');
+        process.exitCode = 1;
+        return;
+      }
+      const res = await mediaSequence(request, { inputs, scene, action });
+      console.log(`▶ ${action} ${inputs.map((i) => `"${i}"`).join(' + ')}${scene ? ` (revealed in "${scene}")` : ''}`);
+      console.log(res.shown ? `  ${res.shown} scene item(s) enabled first` : '  no scene handling — sources must already be visible');
       // OBS accepts a media action against a source whose FILE is missing without
       // complaint, so this says what was sent, not that anything was heard.
       console.log('  OBS accepted the request. If you heard nothing, check the source in OBS.');

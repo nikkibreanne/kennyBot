@@ -19,6 +19,7 @@ import { initClipsWith } from '../../src/twitch/clips.js';
 import { initCaptureWith } from '../../src/integrations/capture.js';
 import { initMediaWith } from '../../src/integrations/obsMedia.js';
 import { clearMediaSlot, listSlots } from '../../src/db/media.js';
+import { slotInputs } from '../../src/rules/media.js';
 import { defaultBoss } from '../../src/content/bosses.js';
 import { until } from './harness.js';
 
@@ -439,35 +440,49 @@ export const SCENARIOS = [
 
         // Source names are the rest of the line — real OBS sources have spaces.
         assert.match(await bot.send(mod, '!media set 1 Airhorn SFX'), /"Airhorn SFX"/);
-        assert.equal((await database().ref('config/media/1').get()).val().input, 'Airhorn SFX', 'persisted');
+        assert.deepEqual((await database().ref('config/media/1').get()).val().inputs, ['Airhorn SFX'], 'persisted');
 
         // Firing is silent in chat by contract; the slot reaching OBS is the proof.
         assert.equal(await bot.send(mod, '!media 1'), '', 'a successful play says nothing');
         assert.equal(fired.length, 1);
-        assert.equal(fired[0].input, 'Airhorn SFX');
+        assert.deepEqual(slotInputs(fired[0]), ['Airhorn SFX']);
         assert.equal(fired[0].action ?? 'restart', 'restart', 'the alert-shaped default');
+
+        // A GIF and its sound are two sources in OBS and ONE alert in chat.
+        assert.match(await bot.send(mod, '!media set 2 Alert GIF | Alert SFX'), /"Alert GIF" \+ "Alert SFX"/);
+        await bot.send(mod, '!media 2');
+        assert.deepEqual(slotInputs(fired[1]), ['Alert GIF', 'Alert SFX'], 'both fired from one number');
+
+        // …and `add` grows a slot without retyping what is already there.
+        assert.match(await bot.send(mod, '!media add 2 Third Thing'), /\+ "Third Thing"/);
+        assert.deepEqual(listSlots().find((x) => x.n === 2).inputs, ['Alert GIF', 'Alert SFX', 'Third Thing']);
+
+        // Half an alert is worse than none: one empty part rejects the whole line.
+        assert.match(await bot.send(mod, '!media set 3 Good | '), /separate them with/);
+        assert.equal(listSlots().some((x) => x.n === 3), false, 'nothing was created');
 
         // Mapping a scene and an action edits the same slot rather than replacing it.
         assert.match(await bot.send(mod, '!media scene 1 Alerts'), /in "Alerts"/);
         assert.match(await bot.send(mod, '!media action 1 stop'), /\(stop\)/);
         await bot.send(mod, '!media 1');
-        assert.equal(fired[1].input, 'Airhorn SFX', 'input survived both edits');
-        assert.equal(fired[1].scene, 'Alerts');
-        assert.equal(fired[1].action, 'stop');
+        // fired[2] — only three plays have happened; the edits in between don't fire.
+        assert.deepEqual(slotInputs(fired[2]), ['Airhorn SFX'], 'input survived both edits');
+        assert.equal(fired[2].scene, 'Alerts');
+        assert.equal(fired[2].action, 'stop');
 
         // A typo'd action must not write a slot that throws at play time.
         assert.match(await bot.send(mod, '!media action 1 restrat'), /action must be one of/);
-        assert.equal(listSlots()[0].action, 'stop', 'the bad edit changed nothing');
+        assert.equal(listSlots().find((x) => x.n === 1).action, 'stop', 'the bad edit changed nothing');
 
         assert.match(await bot.send(mod, '!media scene 1 none'), /"Airhorn SFX"/);
-        assert.equal(listSlots()[0].scene ?? null, null, 'scene cleared, slot kept');
+        assert.equal(listSlots().find((x) => x.n === 1).scene ?? null, null, 'scene cleared, slot kept');
 
         assert.match(await bot.send(mod, '!media'), /Airhorn SFX/);
         assert.match(await bot.send(mod, '!media clear 1'), /cleared/i);
-        assert.equal(listSlots().length, 0);
+        assert.equal(listSlots().some((x) => x.n === 1), false);
       } finally {
         // Scenarios share one emulator DB — leave no slots behind.
-        await clearMediaSlot(1);
+        for (const n of [1, 2, 3]) await clearMediaSlot(n);
         initMediaWith(null);
       }
     },

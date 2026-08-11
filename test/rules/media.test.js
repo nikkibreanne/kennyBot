@@ -12,7 +12,8 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import {
   parseSlot, cleanName, validateMapping, sortSlots, describeSlot, isAction,
-  MEDIA_ACTIONS, DEFAULT_ACTION, MAX_SLOT, MAX_NAME_LEN,
+  slotInputs, parseInputList,
+  MEDIA_ACTIONS, DEFAULT_ACTION, MAX_SLOT, MAX_NAME_LEN, MAX_PARTS,
 } from '../../src/rules/media.js';
 import { mediaSequence, OBS_MEDIA_ACTION } from '../../src/integrations/obsMedia.js';
 
@@ -71,8 +72,8 @@ test('cleanName refuses empty and over-long names', () => {
 // ── mapping validation ────────────────────────────────────────────────────────
 
 test('validateMapping builds the patch to persist', () => {
-  const res = validateMapping({ input: ' Airhorn ', scene: 'Alerts', action: 'stop' });
-  assert.deepEqual(res, { ok: true, patch: { input: 'Airhorn', scene: 'Alerts', action: 'stop' } });
+  const res = validateMapping({ inputs: ' Airhorn ', scene: 'Alerts', action: 'stop' });
+  assert.deepEqual(res, { ok: true, patch: { inputs: ['Airhorn'], scene: 'Alerts', action: 'stop' } });
 });
 
 test('validateMapping distinguishes "clear the scene" from "leave it alone"', () => {
@@ -84,7 +85,7 @@ test('validateMapping distinguishes "clear the scene" from "leave it alone"', ()
 
 test('validateMapping refuses a typo rather than writing a dead slot', () => {
   assert.deepEqual(validateMapping({ action: 'restrat' }), { ok: false, reason: 'bad-action' });
-  assert.deepEqual(validateMapping({ input: '   ' }), { ok: false, reason: 'bad-input' });
+  assert.deepEqual(validateMapping({ inputs: '   ' }), { ok: false, reason: 'bad-input' });
   assert.deepEqual(validateMapping({ scene: '' }), { ok: false, reason: 'bad-scene' });
 });
 
@@ -106,22 +107,60 @@ test('every named action has a wire encoding', () => {
 // ── listing ───────────────────────────────────────────────────────────────────
 
 test('sortSlots orders numerically, not by RTDB string key', () => {
-  const slots = { 10: { input: 'J' }, 2: { input: 'B' }, 1: { input: 'A' } };
+  const slots = { 10: { inputs: ['J'] }, 2: { inputs: ['B'] }, 1: { inputs: ['A'] } };
   assert.deepEqual(sortSlots(slots).map((s) => s.n), [1, 2, 10]);
 });
 
 test('sortSlots drops entries that could never play', () => {
-  const slots = { 1: { input: 'A' }, 2: { label: 'no input' }, 3: null };
+  const slots = { 1: { inputs: ['A'] }, 2: { label: 'no input' }, 3: null, 4: { inputs: [] } };
   assert.deepEqual(sortSlots(slots).map((s) => s.n), [1]);
 });
 
 test('describeSlot prints the non-default action and hides the default', () => {
-  assert.equal(describeSlot({ n: 3, input: 'Airhorn' }), '3 → "Airhorn"');
-  assert.equal(describeSlot({ n: 3, input: 'Airhorn', action: DEFAULT_ACTION }), '3 → "Airhorn"');
-  assert.equal(describeSlot({ n: 3, input: 'Airhorn', action: 'stop' }), '3 → "Airhorn" (stop)');
+  assert.equal(describeSlot({ n: 3, inputs: ['Airhorn'] }), '3 → "Airhorn"');
+  assert.equal(describeSlot({ n: 3, inputs: ['Airhorn'], action: DEFAULT_ACTION }), '3 → "Airhorn"');
+  assert.equal(describeSlot({ n: 3, inputs: ['Airhorn'], action: 'stop' }), '3 → "Airhorn" (stop)');
   assert.equal(
-    describeSlot({ n: 1, label: 'airhorn', input: 'Airhorn SFX', scene: 'Alerts' }),
+    describeSlot({ n: 1, label: 'airhorn', inputs: ['Airhorn SFX'], scene: 'Alerts' }),
     '1 airhorn → "Airhorn SFX" in "Alerts"',
+  );
+});
+
+// ── multi-source slots ────────────────────────────────────────────────────────
+
+test('a slot holds several sources, because OBS splits a GIF from its sound', () => {
+  const res = validateMapping({ inputs: 'glasses-raise-gif | bruh-mp3' });
+  assert.deepEqual(res.patch.inputs, ['glasses-raise-gif', 'bruh-mp3']);
+});
+
+test('parseInputList rejects the whole line if any part is empty', () => {
+  // Half an alert is worse than a refusal: the missing half is silent, and
+  // silence is exactly what a working alert looks like when its sound is muted.
+  assert.equal(parseInputList('A | | B'), null);
+  assert.equal(parseInputList('A |'), null);
+  assert.equal(parseInputList(''), null);
+  assert.deepEqual(parseInputList('  A  |  B  '), ['A', 'B']);
+});
+
+test('a slot is bounded — it is one alert, not a scene switcher', () => {
+  const many = Array.from({ length: MAX_PARTS + 1 }, (_, i) => `s${i}`).join(' | ');
+  assert.deepEqual(validateMapping({ inputs: many }), { ok: false, reason: 'too-many-parts' });
+});
+
+test('slotInputs normalises every shape the record can come back as', () => {
+  assert.deepEqual(slotInputs({ inputs: ['A', 'B'] }), ['A', 'B']);
+  // RTDB stores arrays as numeric-keyed objects — same slot, different shape.
+  assert.deepEqual(slotInputs({ inputs: { 0: 'A', 1: 'B' } }), ['A', 'B']);
+  // A single-source slot.
+  assert.deepEqual(slotInputs({ input: 'A' }), ['A']);
+  assert.deepEqual(slotInputs({}), []);
+  assert.deepEqual(slotInputs(null), []);
+});
+
+test('describeSlot joins the parts so chat sees one alert, not two slots', () => {
+  assert.equal(
+    describeSlot({ n: 2, label: 'bruh', inputs: ['glasses-raise-gif', 'bruh-mp3'] }),
+    '2 bruh → "glasses-raise-gif" + "bruh-mp3"',
   );
 });
 
@@ -129,9 +168,9 @@ test('describeSlot prints the non-default action and hides the default', () => {
 
 test('a slot with no scene is one request', async () => {
   const obs = fakeObs();
-  const res = await mediaSequence(obs.request, { input: 'Airhorn' });
+  const res = await mediaSequence(obs.request, { inputs: ['Airhorn'] });
 
-  assert.deepEqual(res, { played: true, shown: false });
+  assert.deepEqual(res, { played: 1, shown: 0 });
   assert.deepEqual(obs.calls, [{
     type: 'TriggerMediaInputAction',
     data: { inputName: 'Airhorn', mediaAction: OBS_MEDIA_ACTION.restart },
@@ -140,9 +179,9 @@ test('a slot with no scene is one request', async () => {
 
 test('a slot with a scene reveals the source BEFORE playing it', async () => {
   const obs = fakeObs({ sceneItemId: 42 });
-  const res = await mediaSequence(obs.request, { input: 'Airhorn', scene: 'Alerts' });
+  const res = await mediaSequence(obs.request, { inputs: ['Airhorn'], scene: 'Alerts' });
 
-  assert.deepEqual(res, { played: true, shown: true });
+  assert.deepEqual(res, { played: 1, shown: 1 });
   // Order is the assertion. Reversed, the first frames play to a hidden source.
   assert.deepEqual(obs.calls.map((c) => c.type), [
     'GetSceneItemId', 'SetSceneItemEnabled', 'TriggerMediaInputAction',
@@ -151,25 +190,54 @@ test('a slot with a scene reveals the source BEFORE playing it', async () => {
   assert.deepEqual(obs.calls[1].data, { sceneName: 'Alerts', sceneItemId: 42, sceneItemEnabled: true });
 });
 
+test('a two-source slot triggers both, and reveals both first', async () => {
+  const obs = fakeObs({ sceneItemId: 5 });
+  const res = await mediaSequence(obs.request, {
+    inputs: ['glasses-raise-gif', 'bruh-mp3'], scene: 'Scene',
+  });
+
+  assert.deepEqual(res, { played: 2, shown: 2 });
+  // EVERY reveal precedes EVERY trigger — otherwise the sound leads the picture
+  // by however long the second reveal takes.
+  assert.deepEqual(obs.calls.map((c) => c.type), [
+    'GetSceneItemId', 'SetSceneItemEnabled',
+    'GetSceneItemId', 'SetSceneItemEnabled',
+    'TriggerMediaInputAction', 'TriggerMediaInputAction',
+  ]);
+  assert.deepEqual(
+    obs.calls.filter((c) => c.type === 'TriggerMediaInputAction').map((c) => c.data.inputName),
+    ['glasses-raise-gif', 'bruh-mp3'],
+  );
+});
+
+test('a two-source slot with no scene is just the two triggers', async () => {
+  // The setup we actually recommend: sources left visible, clear_on_media_end
+  // doing the hiding, so nothing needs revealing at all.
+  const obs = fakeObs();
+  const res = await mediaSequence(obs.request, { inputs: ['gif', 'mp3'] });
+  assert.deepEqual(res, { played: 2, shown: 0 });
+  assert.deepEqual(obs.calls.map((c) => c.type), ['TriggerMediaInputAction', 'TriggerMediaInputAction']);
+});
+
 test('the scene item id comes from OBS, never from the slot', async () => {
   // SetSceneItemEnabled takes a numeric id with no name-based form, so the id
   // MUST be whatever GetSceneItemId just answered — a remembered one goes stale
   // the moment a source is reordered in the scene.
   const obs = fakeObs({ sceneItemId: 99 });
-  await mediaSequence(obs.request, { input: 'GIF', scene: 'Alerts' });
+  await mediaSequence(obs.request, { inputs: ['GIF'], scene: 'Alerts' });
   assert.equal(obs.calls[1].data.sceneItemId, 99);
 });
 
 test('the slot chooses the action', async () => {
   const obs = fakeObs();
-  await mediaSequence(obs.request, { input: 'Music Bed', action: 'stop' });
+  await mediaSequence(obs.request, { inputs: ['Music Bed'], action: 'stop' });
   assert.equal(obs.calls[0].data.mediaAction, OBS_MEDIA_ACTION.stop);
 });
 
 test('an unknown action throws instead of reaching OBS', async () => {
   const obs = fakeObs();
   await assert.rejects(
-    () => mediaSequence(obs.request, { input: 'Airhorn', action: 'explode' }),
+    () => mediaSequence(obs.request, { inputs: ['Airhorn'], action: 'explode' }),
     /unknown media action "explode"/,
   );
   assert.equal(obs.calls.length, 0, 'nothing was sent');
@@ -187,7 +255,7 @@ test('a missing source surfaces the OBS failure rather than playing blind', asyn
   // does nothing and reports success.
   const obs = fakeObs({ fail: 'GetSceneItemId' });
   await assert.rejects(
-    () => mediaSequence(obs.request, { input: 'Gone', scene: 'Alerts' }),
+    () => mediaSequence(obs.request, { inputs: ['Gone'], scene: 'Alerts' }),
     /OBS rejected GetSceneItemId/,
   );
   assert.deepEqual(obs.calls.map((c) => c.type), ['GetSceneItemId']);

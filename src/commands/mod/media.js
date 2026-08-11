@@ -3,8 +3,9 @@
 //   !media 3                     play slot 3
 //   !media                       list what's mapped
 //   !media inputs                ask OBS which media sources exist
-//   !media set 3 Airhorn         map slot 3 to the OBS input named "Airhorn"
-//   !media scene 3 Alerts        reveal it in the "Alerts" scene before playing
+//   !media set 3 GIF | Sound     map slot 3 — one alert, however many OBS sources
+//   !media add 3 Extra Sound     append a source to an existing slot
+//   !media scene 3 Alerts        reveal them in the "Alerts" scene before playing
 //   !media scene 3 none          stop revealing it (it's always on screen)
 //   !media action 3 stop         change what "trigger" means for this slot
 //   !media clear 3               unmap
@@ -26,17 +27,18 @@
 // and an alert that also posts a line is just clutter. EVERY failure replies. So
 // silence means OBS accepted the request; if you then hear nothing, the problem
 // is on the OBS side (source muted, hidden, or its media file missing), not here.
-import { listSlots, getSlot, mapSlot, clearMediaSlot } from '../../db/media.js';
-import { describeSlot, parseSlot, MEDIA_ACTIONS, DEFAULT_ACTION, MAX_SLOT } from '../../rules/media.js';
+import { listSlots, getSlot, mapSlot, addInput, clearMediaSlot } from '../../db/media.js';
+import { describeSlot, parseSlot, slotInputs, MEDIA_ACTIONS, DEFAULT_ACTION, MAX_SLOT, MAX_PARTS, PART_SEPARATOR } from '../../rules/media.js';
 import { playMedia, listInputs, mediaReady } from '../../integrations/obsMedia.js';
 
 const ACTIONS = MEDIA_ACTIONS;
-const USAGE = `Usage: !media <1-${MAX_SLOT}> · set <n> <OBS source> · scene <n> <scene|none> · action <n> ${ACTIONS.join('|')} · clear <n> · inputs`;
+const USAGE = `Usage: !media <1-${MAX_SLOT}> · set <n> <source> ${PART_SEPARATOR} <source> · add <n> <source> · scene <n> <scene|none> · action <n> ${ACTIONS.join('/')} · clear <n> · inputs`;
 
 /** Why a write was refused, in words a mod can act on. */
 function refusal(reason) {
   switch (reason) {
-    case 'bad-input': return 'that OBS source name is empty or too long';
+    case 'bad-input': return `each source name must be non-empty and under 100 chars — separate them with ${PART_SEPARATOR}`;
+    case 'too-many-parts': return `a slot fires at most ${MAX_PARTS} sources`;
     case 'bad-scene': return 'that scene name is empty or too long';
     case 'bad-action': return `action must be one of: ${ACTIONS.join(', ')}`;
     case 'bad-label': return 'that label is empty or too long';
@@ -54,7 +56,7 @@ export default {
   // capture (hundreds of MB per trigger, hence its own rate limit) a media action
   // costs OBS nothing. Spam is a conversation to have with a mod, not a lockout.
   cooldownMs: 0,
-  help: `!media <n> plays a mapped OBS source · set/scene/action/clear/inputs to map them — mod-only`,
+  help: `!media <n> plays the OBS sources mapped to that number · set/add/scene/action/clear/inputs to map them — mod-only`,
   async run({ args, reply, logger }) {
     const [first, ...rest] = args;
     const verb = String(first || '').toLowerCase();
@@ -92,20 +94,37 @@ export default {
     }
 
     // ── set <n> <name…> ─────────────────────────────────────────────────────
-    // The source name is the REST OF THE LINE, not one token: real OBS sources
-    // are called things like "Airhorn SFX".
+    // The source names are the REST OF THE LINE, not one token: real OBS sources
+    // are called things like "Airhorn SFX". `|` separates them, because a GIF and
+    // its sound are two sources in OBS and one alert to everyone watching.
     if (verb === 'set') {
       const n = parseSlot(rest[0]);
       if (!n) {
         reply(`slot must be a number 1-${MAX_SLOT} · ${USAGE}`);
         return;
       }
-      const res = await mapSlot(n, { input: rest.slice(1).join(' ') });
+      const res = await mapSlot(n, { inputs: rest.slice(1).join(' ') });
       if (!res.ok) {
         reply(refusal(res.reason));
         return;
       }
       reply(`🎬 slot ${describeSlot(res.slot)} — try it with !media ${n}`);
+      return;
+    }
+
+    // ── add <n> <name…> ─────────────────────────────────────────────────────
+    if (verb === 'add') {
+      const n = parseSlot(rest[0]);
+      if (!n) {
+        reply(`slot must be a number 1-${MAX_SLOT} · ${USAGE}`);
+        return;
+      }
+      const res = await addInput(n, rest.slice(1).join(' '));
+      if (!res.ok) {
+        reply(refusal(res.reason));
+        return;
+      }
+      reply(`🎬 slot ${describeSlot(res.slot)}`);
       return;
     }
 
@@ -178,9 +197,9 @@ export default {
     if (!res.ok) {
       // Name the slot AND the reason: "it didn't work" costs a stream's worth of
       // guessing, and the usual cause (a source renamed in OBS) is in the reason.
-      reply(`🎬 slot ${n} ("${slot.input}") failed: ${res.reason}`);
+      reply(`🎬 slot ${n} (${slotInputs(slot).map((i) => `"${i}"`).join(' + ')}) failed: ${res.reason}`);
       return;
     }
-    logger.info?.('media slot fired', { slot: n, input: slot.input, action: slot.action || DEFAULT_ACTION });
+    logger.info?.('media slot fired', { slot: n, inputs: slotInputs(slot), action: slot.action || DEFAULT_ACTION });
   },
 };
