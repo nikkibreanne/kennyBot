@@ -18,6 +18,7 @@ import { getRaidPointer, getConfig, setLive, setClipMode } from '../../src/db/co
 import { initClipsWith } from '../../src/twitch/clips.js';
 import { initCaptureWith } from '../../src/integrations/capture.js';
 import { initMediaWith } from '../../src/integrations/obsMedia.js';
+import { initObsControlWith } from '../../src/integrations/obsControl.js';
 import { clearMediaSlot, listSlots } from '../../src/db/media.js';
 import { slotInputs } from '../../src/rules/media.js';
 import { defaultBoss } from '../../src/content/bosses.js';
@@ -484,6 +485,61 @@ export const SCENARIOS = [
         // Scenarios share one emulator DB — leave no slots behind.
         for (const n of [1, 2, 3]) await clearMediaSlot(n);
         initMediaWith(null);
+      }
+    },
+  },
+  {
+    command: 'obs', title: 'a mod drives scenes, sources, filters and audio from chat',
+    run: async ({ bot, u }) => {
+      const mod = u('e2e_obs', { login: 'nikki', name: 'Nikki', mod: true });
+      const calls = [];
+      // The seam is the obs-websocket `request` itself, so what's asserted is the
+      // protocol call OBS would actually receive — not a mock of our own shape.
+      initObsControlWith(async (type, data) => {
+        calls.push({ type, data });
+        switch (type) {
+          case 'GetSceneList':
+            return { currentProgramSceneName: 'Live', scenes: [{ sceneName: 'BRB' }, { sceneName: 'Live' }] };
+          case 'GetSceneItemList':
+            return { sceneItems: [{ sourceName: 'overlay', sceneItemId: 2, sceneItemEnabled: false }] };
+          case 'GetSceneItemId': return { sceneItemId: 2 };
+          case 'GetSourceFilterList':
+            return { filters: [{ filterName: 'Chroma Key', filterKind: 'chroma_key_filter_v2', filterEnabled: true }] };
+          case 'GetInputList': return { inputs: [{ inputName: 'Mic' }] };
+          case 'GetInputMute': return { inputMuted: false };
+          case 'GetInputVolume': return { inputVolumeDb: -6 };
+          case 'GetStats':
+            return { cpuUsage: 9, activeFps: 60, renderSkippedFrames: 0, renderTotalFrames: 100,
+                     outputSkippedFrames: 0, outputTotalFrames: 100, availableDiskSpace: 10240 };
+          case 'GetStreamStatus': return { outputActive: false };
+          default: return {};
+        }
+      });
+      try {
+        assert.match(await bot.send(mod, '!obs scenes'), /Live/);
+        assert.match(await bot.send(mod, '!obs scene BRB'), /switched to "BRB"/);
+        assert.equal(calls.at(-1).data.sceneName, 'BRB', 'the scene name reached OBS unchanged');
+
+        assert.match(await bot.send(mod, '!obs sources'), /overlay/);
+        assert.match(await bot.send(mod, '!obs show overlay'), /now visible/);
+        assert.equal(calls.at(-1).type, 'SetSceneItemEnabled');
+        assert.equal(calls.at(-1).data.sceneItemEnabled, true);
+
+        assert.match(await bot.send(mod, '!obs filters cam'), /Chroma Key/);
+        // Source and filter are both OBS names and both may contain spaces, so
+        // `|` is the only unambiguous split — same separator as !media set.
+        assert.match(await bot.send(mod, '!obs filter off cam | Chroma Key'), /is now off/);
+        assert.deepEqual(calls.at(-1).data, { sourceName: 'cam', filterName: 'Chroma Key', filterEnabled: false });
+        assert.match(await bot.send(mod, '!obs filter off cam'), /Usage: !obs filter/, 'needs both names');
+
+        assert.match(await bot.send(mod, '!obs audio'), /Mic/);
+        assert.match(await bot.send(mod, '!obs mute Mic'), /muted/);
+        assert.equal(calls.at(-1).data.inputMuted, true);
+
+        assert.match(await bot.send(mod, '!obs stats'), /60fps/);
+        assert.match(await bot.send(mod, '!obs nonsense'), /Usage: !obs/);
+      } finally {
+        initObsControlWith(null);
       }
     },
   },
