@@ -31,8 +31,9 @@ import raidnight from './mod/raidnight.js';
 import season from './mod/season.js';
 import timer from './mod/timer.js';
 import reminder from './mod/reminder.js';
+import media from './mod/media.js';
 
-const defs = [create, char, bag, equip, unequip, grab, raid, top, fact, kennycommands, points, daily, bet, duel, trade, offer, clip, start, exp, clipmode, mute, drop, drops, boss, raidnight, season, market, todo, timer, reminder];
+const defs = [create, char, bag, equip, unequip, grab, raid, top, fact, kennycommands, points, daily, bet, duel, trade, offer, clip, start, exp, clipmode, mute, drop, drops, boss, raidnight, season, market, todo, timer, reminder, media];
 
 /** @type {Map<string, typeof defs[number]>} */
 const byName = new Map();

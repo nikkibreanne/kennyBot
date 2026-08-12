@@ -18,6 +18,7 @@ import { buildAuth } from './src/twitch/auth.js';
 import { createSender } from './src/twitch/sender.js';
 import { initClips } from './src/twitch/clips.js';
 import { initCapture, captureReady } from './src/integrations/capture.js';
+import { initMedia } from './src/integrations/obsMedia.js';
 // Read once at boot purely to log what's in force; the live value is RTDB-backed.
 import { activeClipMode } from './src/commands/clip.js';
 import { startLivePoll } from './src/twitch/liveGate.js';
@@ -212,6 +213,12 @@ async function main() {
   // Local full-quality capture on the streamer's PC (obs-websocket over the
   // tailnet), reached whenever !clip's mode includes the local half.
   initCapture({}, logger);
+
+  // Media actions on that SAME OBS — `!media <n>` plays a mapped source. Separate
+  // init because it is a separate feature with its own failure mode, but it
+  // deliberately resolves the same connection: two ideas of where OBS lives is
+  // one more than can ever be right.
+  initMedia({}, logger);
 
   // What !clip actually does. Default 'local': trigger the streamer's OBS/Aitum
   // capture and post NO Twitch clip — a Twitch clip is capped at the stream

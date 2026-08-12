@@ -101,6 +101,14 @@ export const PATHS = {
   reminders: () => 'config/reminders',
   reminder: (id) => `config/reminders/${id}`,
   reminderState: (id) => `config/reminders/${id}/state`,
+  // MEDIA SLOTS (`!media`): slot number → { input, scene?, action?, label? },
+  // the map from a number a mod types to a media source in OBS. Config, not a
+  // message channel — nothing is ever *sent* through here. It lives in RTDB for
+  // the same reason clipMode does: the names change whenever the streamer
+  // renames a source in OBS, and re-deploying a container to rename a sound is
+  // not a thing anyone does mid-stream.
+  mediaSlots: () => 'config/media',
+  mediaSlot: (n) => `config/media/${n}`,
   configLock: () => 'config/lock',
   // OKRA FACTS (/info/): approved facts are client-read-only; the submission
   // queue + counter are admin-only.
