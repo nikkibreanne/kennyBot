@@ -20,6 +20,8 @@ import { initClips } from './src/twitch/clips.js';
 import { initCapture, captureReady } from './src/integrations/capture.js';
 import { initMedia } from './src/integrations/obsMedia.js';
 import { initObsControl } from './src/integrations/obsControl.js';
+import { initSpotify } from './src/integrations/spotify.js';
+import { startSpotifyOverlay } from './src/events/spotifyScheduler.js';
 // Read once at boot purely to log what's in force; the live value is RTDB-backed.
 import { activeClipMode } from './src/commands/clip.js';
 import { startLivePoll } from './src/twitch/liveGate.js';
@@ -223,6 +225,10 @@ async function main() {
 
   // Scenes / source visibility / filters / audio on that same OBS (`!obs`).
   initObsControl({}, logger);
+  // Spotify "now playing" (`!song`). Account-scoped, so it reads whatever the
+  // streamer's Spotify is playing on ANY device — the bot does not need to be on
+  // the same machine, and nothing is installed there.
+  await initSpotify({}, logger);
 
   // What !clip actually does. Default 'local': trigger the streamer's OBS/Aitum
   // capture and post NO Twitch clip — a Twitch clip is capped at the stream
@@ -307,6 +313,10 @@ async function main() {
   // so this only supplies the clock and the channel — which is also what makes a
   // reminder channel-specific without any per-channel branch in the code.
   shutdownHooks.push(startReminderScheduler({ send, channel, logger }));
+
+  // Now-playing overlay: writes the current track into an OBS text source named
+  // by SPOTIFY_OVERLAY_SOURCE. No source name → no polling at all.
+  shutdownHooks.push(startSpotifyOverlay({ logger }));
 
   // ── Live gate: Helix poll (always) + EventSub (when broadcaster auth fits) ──
   const setLiveBound = (live, source) => {

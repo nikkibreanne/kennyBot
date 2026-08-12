@@ -19,6 +19,7 @@ import { initClipsWith } from '../../src/twitch/clips.js';
 import { initCaptureWith } from '../../src/integrations/capture.js';
 import { initMediaWith } from '../../src/integrations/obsMedia.js';
 import { initObsControlWith } from '../../src/integrations/obsControl.js';
+import { initSpotifyWith } from '../../src/integrations/spotify.js';
 import { clearMediaSlot, listSlots } from '../../src/db/media.js';
 import { slotInputs } from '../../src/rules/media.js';
 import { defaultBoss } from '../../src/content/bosses.js';
@@ -540,6 +541,68 @@ export const SCENARIOS = [
         assert.match(await bot.send(mod, '!obs nonsense'), /Usage: !obs/);
       } finally {
         initObsControlWith(null);
+      }
+    },
+  },
+  {
+    command: 'song', title: 'a viewer asks what is playing on Spotify',
+    run: async ({ bot, u }) => {
+      const viewer = u('e2e_song', { login: 'carl', name: 'Carl' });
+      const other = u('e2e_song2', { login: 'dee', name: 'Dee' });   // !song is per-user cooldowned
+      let calls = 0;
+      // The seam is fetch itself, so the real token refresh + request path runs.
+      const spotify = (body, status = 200) => async (url) => {
+        if (String(url).includes('/api/token')) {
+          return { ok: true, status: 200, json: async () => ({ access_token: 'tok', expires_in: 3600 }) };
+        }
+        calls += 1;
+        return {
+          ok: status < 400, status,
+          headers: { get: () => null },
+          text: async () => (body == null ? '' : JSON.stringify(body)),
+        };
+      };
+
+      try {
+        initSpotifyWith(spotify({
+          is_playing: true, progress_ms: 83000, currently_playing_type: 'track',
+          item: {
+            name: 'Bohemian Rhapsody', duration_ms: 354000,
+            artists: [{ name: 'Queen' }],
+            external_urls: { spotify: 'https://open.spotify.com/track/abc' },
+          },
+        }));
+        const reply = await bot.send(viewer, '!song');
+        assert.match(reply, /Queen — Bohemian Rhapsody/);
+        assert.match(reply, /1:23\/5:54/);
+        assert.equal(calls, 1);
+
+        // A second viewer inside the cache window must not cost a second request:
+        // !song is exactly the command chat piles onto.
+        assert.match(await bot.send(other, '!song'), /Bohemian Rhapsody/);
+        assert.equal(calls, 1, 'served from cache');
+
+        // 204 is Spotify's "nothing playing" and has an EMPTY body — parsing it
+        // would throw and the viewer would get silence.
+        initSpotifyWith(spotify(null, 204));
+        assert.match(await bot.send(viewer, '!song'), /nothing is playing/);
+
+        // An episode carries no `artists`; reading it naively throws mid-command.
+        initSpotifyWith(spotify({
+          is_playing: true, currently_playing_type: 'episode',
+          item: { name: 'Episode 12', duration_ms: 3600000, show: { name: 'Some Podcast' } },
+        }));
+        assert.match(await bot.send(viewer, '!song'), /Some Podcast: Episode 12/);
+
+        // A failure answers with Spotify's own status rather than going quiet.
+        initSpotifyWith(spotify({}, 503));
+        assert.match(await bot.send(viewer, '!song'), /couldn't reach Spotify.*503/);
+
+        // Not connected at all is its own sentence, not an error.
+        initSpotifyWith(null);
+        assert.match(await bot.send(viewer, '!song'), /isn't connected/);
+      } finally {
+        initSpotifyWith(null);
       }
     },
   },
