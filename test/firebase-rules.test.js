@@ -57,6 +57,28 @@ runOrSkip('client WRITE to leaderboard/bosses/raids/config is rejected', async (
   }
 });
 
+// The subathon record holds the rate card and a per-contributor ledger. Both are
+// private: the rates would let anyone reconstruct channel revenue from public
+// sub counts, and the ledger names who gave what. RTDB read grants CASCADE and
+// cannot be revoked deeper, so `config/subathon` must never be added to the
+// readable-children list above it. This test is what stops that happening by
+// accident.
+runOrSkip('client READ of the subathon rates and ledger is rejected', async () => {
+  await database().ref('config/subathon').set({
+    active: true,
+    rates: { values: { t1: 1 }, bands: { a: 1 }, schedule: [{ fromHours: 0, band: 'a' }] },
+    ledger: { x: { seconds: 1, who: 'someone' } },
+  });
+  try {
+    for (const path of ['config/subathon', 'config/subathon/rates', 'config/subathon/ledger']) {
+      const res = await fetch(restUrl(path));
+      assert.equal(res.status, 401, `client read of ${path} must be denied`);
+    }
+  } finally {
+    await database().ref('config/subathon').remove().catch(() => {});
+  }
+});
+
 runOrSkip('client can READ public game state', async () => {
   await database().ref('config/live').set(true);
   const res = await fetch(restUrl('config/live'));

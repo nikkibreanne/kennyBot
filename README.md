@@ -82,7 +82,7 @@ Underneath both:
 - **automated releases** from Conventional Commits (release-please), with `main`
   protected for everyone including admins
 
-Verified by `npm test` (139 offline unit tests), `npm run test:emulator` (69 — RTDB
+Verified by `npm test` (174 offline unit tests), `npm run test:emulator` (76 — RTDB
 rules + client-write rejection, and the stateful command paths), `npm run test:e2e`
 (31 — every registered command driven through the real dispatcher), and
 `npm run synthetic` (full muster→battle→victory run with UI-contract assertions).
@@ -368,6 +368,37 @@ viewer to discover it.
 The one point of contact is `!start` (`src/db/clipSync.js`), which writes a per-stream
 sync anchor to RTDB — *data the archiver reads*, not a file handoff, and it works
 whether or not local capture is configured.
+
+## Subathon ledger (opt-in, operator-only)
+
+For the occasional subathon, the bot can keep a **shadow ledger**: it watches the
+same sub / gift / cheer events chat already carries, prices each one against a
+tiered rate card, and records it. It is not the timer viewers see — that is a
+separate widget — and it exposes **no chat commands**. Its only purpose is to
+tell the operator how far the two have drifted, since the widget grants at one
+fixed rate while the card changes with stream uptime.
+
+**Off by default and inert until switched on.** There is no env var and no
+redeploy: the feature wakes up when `scripts/subathon.mjs start` writes a record
+to RTDB and sleeps again on `end`. With no record present every handler returns
+immediately — no subscription, no timer, no traffic — which is the state on an
+ordinary stream. There's a check for exactly that at the top of
+`scripts/subathon-sim.mjs`.
+
+| Piece | What it is |
+| --- | --- |
+| `src/rules/subathon.js` | Pure engine — pricing, band selection, gift dedupe, the clock. Offline-testable. |
+| `src/db/subathon.js` | Append-only ledger; the deadline is derived from it, never stored. |
+| `src/events/subathonEvents.js` | Chat wiring. Gift bundles are deduped by hand (EventSub's `isGift` needs a broadcaster token this bot doesn't hold). |
+| `scripts/subathon.mjs` | Operator CLI, run locally against RTDB. |
+| `scripts/subathon-sim.mjs` | Drives the real handlers with fabricated events — a large gift bundle can't be self-gifted or cheaply tested for real. |
+
+**No rate card ships in this repository, by design** — the values are the
+streamer's business, so the engine defines only the shape and refuses to credit
+anything until a card is supplied at runtime from outside the repo. Test fixtures
+use invented numbers, and the ledger lives under `config/subathon`, which is not
+client-readable (see `database.rules.json`; read grants cascade in RTDB, so that
+key must never be added to a readable parent).
 
 ## Environment contract
 
