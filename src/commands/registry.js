@@ -18,6 +18,7 @@ import duel from './duel.js';
 import trade from './trade.js';
 import offer from './offer.js';
 import clip from './clip.js';
+import song from './song.js';
 import start from './start.js';
 import market from './mod/market.js';
 import todo from './mod/todo.js';
@@ -34,7 +35,7 @@ import reminder from './mod/reminder.js';
 import media from './mod/media.js';
 import obs from './mod/obs.js';
 
-const defs = [create, char, bag, equip, unequip, grab, raid, top, fact, kennycommands, points, daily, bet, duel, trade, offer, clip, start, exp, clipmode, mute, drop, drops, boss, raidnight, season, market, todo, timer, reminder, media, obs];
+const defs = [create, char, bag, equip, unequip, grab, raid, top, fact, kennycommands, points, daily, bet, duel, trade, offer, clip, song, start, exp, clipmode, mute, drop, drops, boss, raidnight, season, market, todo, timer, reminder, media, obs];
 
 /** @type {Map<string, typeof defs[number]>} */
 const byName = new Map();

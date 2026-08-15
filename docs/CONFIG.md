@@ -336,6 +336,21 @@ restart can't make the bot repeat a "1 minute left" it already posted.
 | `tickMs` | `1000` (1 s) | Countdown resolution. Each tick reads memory only — RTDB is touched just when the timer actually fires. | Higher = a "time's up" that can land that much late. Little reason to change. |
 | `maxLabelLen` | `60` | Longest timer label; longer ones are clipped with `…`. | Keeps a pasted paragraph out of every heads-up line. |
 
+## `spotify` — now playing (`!song` + the overlay)
+
+| Key | Default | What it controls |
+|---|---|---|
+| `cacheMs` | `5_000` | How long one Spotify answer is reused. `!song` is a pile-on command and the answer can't meaningfully change in a couple of seconds — twenty viewers asking at once must be one request, not twenty. |
+| `overlayPollMs` | `10_000` | How often the overlay re-checks. The write is skipped unless the line changed, so this is how quickly a track change appears on stream, not a write rate. |
+| `overlayPrefix` | `'Now Playing: '` | Prepended to the overlay only — never to the chat reply, and never to an empty line. |
+
+Environment: `SPOTIFY_CLIENT_ID`, `SPOTIFY_CLIENT_SECRET`, optionally
+`SPOTIFY_REFRESH_TOKEN` (otherwise the token store is used), and
+`SPOTIFY_OVERLAY_SOURCE` — the OBS text source to write. Unset means no overlay and
+no polling at all.
+
+---
+
 ---
 
 ## `lock` — single-instance lease

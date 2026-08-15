@@ -15,6 +15,7 @@ Firebase and OBS, and never listens on a port — and ships as a container.
 | Feature | Commands | Notes |
 |---|---|---|
 | **Clips** | `!clip` · `!clipmode` · `!start` | 16:9 + natively-framed 9:16 captured on the streamer's PC over obs-websocket / Aitum |
+| **Now playing** | `!song` | reads Spotify (account-scoped, so the bot needn't be on that machine) + an OBS text overlay |
 | **On-stream media** | `!media` | play a mapped OBS media source from chat — the same connection, pointed at a source instead of the buffer |
 | **OBS control** | `!obs` | scenes, source visibility, filters, audio mute and stream stats, from chat |
 | **Stream timer** | `!timer` | one countdown, heads-up marks, survives a restart |
@@ -86,7 +87,7 @@ Underneath both:
 - **automated releases** from Conventional Commits (release-please), with `main`
   protected for everyone including admins
 
-Verified by `npm test` (182 offline unit tests), `npm run test:emulator` (75 — RTDB
+Verified by `npm test` (196 offline unit tests), `npm run test:emulator` (75 — RTDB
 rules + client-write rejection, and the stateful command paths), `npm run test:e2e`
 (33 — every registered command driven through the real dispatcher), and
 `npm run synthetic` (full muster→battle→victory run with UI-contract assertions).
@@ -120,16 +121,19 @@ src/
   content/                your own data: classes.js (class→role), items.js (catalog +
                           starter gear), facts.js, reminders.js (default schedules)
   rules/                  PURE, RNG/clock-injected, unit-tested: leveling, rating, loot,
-                          combat, reminders (what's due now), media (slot parsing/validation)
+                          combat, reminders (what's due now), media (slot parsing/validation),
+                          spotify (now-playing formatting)
   db/                     firebase, configStore (live mirror), players, raid, drops, wallet,
                           market, timer, reminders, media, todo, facts, lock, tokenStore
   twitch/                 auth (RefreshingAuthProvider), liveGate (Helix poll), eventsub (WS),
                           sender (Helix/IRC send + badge), clips (Helix Create Clip)
   integrations/           obsWebsocket (v5 client + Aitum vendor requests), capture (facade +
                           rate limit), obsMedia (media actions), obsControl (scenes,
-                          sources, filters, audio) — all on the same socket
+                          sources, filters, audio), spotify (now playing, token
+                          refresh) — the OBS three all on the same socket
   events/                 chat (gate→EXP→raid tick + dispatch), twitchEvents (sub/cheer/raid),
-                          dropScheduler · timerScheduler · reminderScheduler
+                          dropScheduler · timerScheduler · reminderScheduler ·
+                          spotifyScheduler (writes the now-playing overlay)
   commands/               one module per command + registry; mod/ subdir for mod commands
 test/                     rules/*.test.js (offline) · firebase-rules.test.js (emulator) · e2e/ (dispatcher)
 scripts/synthetic-chat.js no-stream harness that drives the whole loop
@@ -168,6 +172,12 @@ of the replay buffer.
 | `!obs filters <source>` · `!obs filter on\|off <source> \| <filter>` | mod | list a source's filters · switch one |
 | `!obs audio` · `!obs mute\|unmute <input>` | mod | audio inputs with mute state and level · mute one. **Not** `!mute`, which silences the bot |
 | `!obs stats` | mod | dropped frames as a rate, CPU, free disk — for when chat says it's buffering |
+
+**Now playing**
+
+| Command | Who | Effect |
+|---|---|---|
+| `!song` / `!nowplaying` / `!np` | everyone | what's playing on the streamer's Spotify — track, artists, position, and a link |
 
 **Around the stream**
 
@@ -491,6 +501,46 @@ would write.
 `!obs stats` reports skipped frames as a **percentage**, because a raw count means
 nothing without the total: "312 dropped" reads as alarming and is fine out of two
 million.
+
+### Now playing — `!song` and the OBS overlay
+
+`!song` answers what the streamer's Spotify is playing. The Web API is
+**account-scoped, not device-scoped**, so this reads that account's playback on any
+device — the bot does not need to run on the machine Spotify is on, and nothing is
+installed there. You can only ever read your *own* account; there is no endpoint
+for "what is user X playing".
+
+**Setup** (once):
+
+1. Register an app at [developer.spotify.com](https://developer.spotify.com/dashboard);
+   put the client id + secret in `.env` as `SPOTIFY_CLIENT_ID` / `SPOTIFY_CLIENT_SECRET`.
+2. Add the redirect URI **`http://127.0.0.1:8888/callback`** to the app and save it.
+   Spotify explicitly rejects `localhost` — it must be the loopback IP literal.
+3. `node scripts/get-spotify-token.mjs` — approve in the browser. The refresh token
+   is written to the token store, and printed for `SPOTIFY_REFRESH_TOKEN`.
+
+Only `user-read-currently-playing` is requested. Podcast episodes may additionally
+need `user-read-playback-state`; set `SPOTIFY_SCOPES` and re-run the script.
+
+**The overlay.** Set `SPOTIFY_OVERLAY_SOURCE` to the name of an OBS text source and
+kennyBot keeps it current. `node scripts/obs-overlay-setup.mjs` creates one and adds
+it to every scene — deliberately **one source shown in several scenes**, not a copy
+per scene, so a single write updates them all and they cannot drift.
+
+It **writes only when the line changes**: a text source rewritten every poll
+re-renders in OBS for nothing. And it **clears** when playback stops or pauses,
+rather than freezing the last track — a stale song title is worse than none,
+because viewers believe it.
+
+`config.spotify` holds the poll interval, the cache window, and the overlay prefix
+(`Now Playing: `). The prefix is applied only to a non-empty line, so a pause
+leaves an empty source rather than a bare label.
+
+Spotify's payload has more shapes than "a song is playing", and each one reaches
+chat: nothing playing (a **204 with an empty body** — parsing it would throw),
+paused (still populated, `is_playing:false`), an **episode** (no `artists` field at
+all), an ad, and a local file with no URL. All five are covered in
+`test/rules/spotify.test.js` and were exercised against a real account.
 
 The one point of contact is `!start` (`src/db/clipSync.js`), which writes a per-stream
 sync anchor to RTDB — *data the archiver reads*, not a file handoff, and it works

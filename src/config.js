@@ -205,6 +205,22 @@ export const config = {
     defaultMode: 'horizontal,vertical',
   },
 
+  // ── Spotify "now playing" (`!song` + the OBS overlay) ────────────────────
+  spotify: {
+    // How long one Spotify answer is reused. `!song` is a pile-on command, and
+    // the answer cannot meaningfully change in a couple of seconds — twenty
+    // viewers asking at once must be ONE request, not twenty.
+    cacheMs: 5_000,
+    // How often the overlay re-checks. The write itself is skipped unless the
+    // line changed, so this is the latency of a track change appearing on
+    // stream, not a write rate.
+    overlayPollMs: 10_000,
+    // Prepended to the on-stream overlay, never to the chat reply. Applied only
+    // when something is actually playing — an empty line stays empty so the
+    // source collapses instead of showing a lone label.
+    overlayPrefix: 'Now Playing: ',
+  },
+
   // ── Single-instance lease (IMPLEMENTATION §E/§J) ─────────────────────────
   lock: {
     heartbeatMs: 15_000,
