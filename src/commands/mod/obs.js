@@ -25,12 +25,15 @@
 // own command and its own guard rails then.
 import {
   listScenes, setScene, listSources, setSourceVisible,
-  listFilters, setFilter, listAudio, setMute, getStats, obsControlReady,
+  listFilters, setFilters, listAudio, setMute, getStats, obsControlReady,
 } from '../../integrations/obsControl.js';
+
+/** How many filters one `!obs filter` may flip. A mod typo should not fan out. */
+const MAX_FILTERS = 5;
 
 const USAGE =
   'Usage: !obs scenes · scene <name> · sources [scene] · show|hide|toggle <source> · ' +
-  'filters <source> · filter on|off <source> | <filter> · audio · mute|unmute <input> · stats';
+  'filters <source> · filter on|off <source> | <filter> [| <filter>…] · audio · mute|unmute <input> · stats';
 
 /** Chat-sized list: OBS can hold far more scenes than a message can carry. */
 function joinCapped(items, max = 12) {
@@ -135,18 +138,36 @@ export default {
     }
 
     if (verb === 'filter') {
-      // `source | filter` — both are OBS names and both can contain spaces, so a
-      // separator is the only unambiguous split. Same `|` as `!media set`.
+      // `source | filter [| filter…]` — every name here is an OBS name and may
+      // contain spaces, so a separator is the only unambiguous split. Same `|` as
+      // `!media set`. The FIRST part is the source; everything after it is a
+      // filter, which is what makes "flip these two together" expressible.
       const state = String(rest[0] || '').toLowerCase();
-      const [sourceName, filterName] = rest.slice(1).join(' ').split('|').map((s) => s.trim());
-      if ((state !== 'on' && state !== 'off') || !sourceName || !filterName) {
-        reply(`Usage: !obs filter on|off <source> | <filter>`);
+      const parts = rest.slice(1).join(' ').split('|').map((s) => s.trim()).filter(Boolean);
+      const [sourceName, ...filterNames] = parts;
+      if ((state !== 'on' && state !== 'off') || !sourceName || !filterNames.length) {
+        reply(`Usage: !obs filter on|off <source> | <filter> [| <filter>…]`);
         return;
       }
-      const res = await setFilter(sourceName, filterName, state === 'on');
-      reply(res.ok
-        ? `🎛️ "${filterName}" on "${sourceName}" is now ${state}`
-        : `couldn't set it: ${res.reason}`);
+      if (filterNames.length > MAX_FILTERS) {
+        reply(`that's ${filterNames.length} filters — ${MAX_FILTERS} at a time is the limit`);
+        return;
+      }
+      const res = await setFilters(sourceName, filterNames, state === 'on');
+      if (!res.ok) {
+        reply(`couldn't set it: ${res.reason}`);
+        return;
+      }
+      // Partial success is the case worth being loud about: silently reporting
+      // success for the ones that worked is how a mod walks away believing a
+      // filter is on when it never was.
+      const done = res.data.results.filter((r) => r.ok).map((r) => `"${r.filterName}"`);
+      const failed = res.data.results.filter((r) => !r.ok);
+      const okPart = done.length ? `🎛️ ${done.join(' + ')} on "${sourceName}" now ${state}` : '';
+      const badPart = failed.length
+        ? `${done.length ? ' · ' : ''}couldn't set ${failed.map((r) => `"${r.filterName}"`).join(' + ')}: ${failed[0].reason}`
+        : '';
+      reply(`${okPart}${badPart}`);
       return;
     }
 

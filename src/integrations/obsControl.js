@@ -150,12 +150,39 @@ export function listFilters(sourceName) {
   });
 }
 
-/** Turn one filter on or off. */
-export function setFilter(sourceName, filterName, enabled) {
+/**
+ * Turn one or more filters on a source on or off, over a SINGLE connection.
+ *
+ * Two things this deliberately does not do. It does not open a connection per
+ * filter — `run()` wraps one, and flipping three filters should not mean three
+ * handshakes. And it does not abort the batch on the first bad name: a typo in
+ * the second of three filters would otherwise leave the first applied, the third
+ * untouched, and the mod guessing which. Each filter reports its own outcome and
+ * the caller says exactly what happened.
+ *
+ * @param {string[]} filterNames
+ * @returns {Promise<{ok:true,data:{sourceName:string,enabled:boolean,results:Array<{filterName:string,ok:boolean,reason?:string}>}}|{ok:false,reason:string}>}
+ */
+export function setFilters(sourceName, filterNames, enabled) {
   return run(async (request) => {
-    await request('SetSourceFilterEnabled', { sourceName, filterName, filterEnabled: enabled });
-    return { sourceName, filterName, enabled };
+    const results = [];
+    for (const filterName of filterNames) {
+      try {
+        await request('SetSourceFilterEnabled', { sourceName, filterName, filterEnabled: enabled });
+        results.push({ filterName, ok: true });
+      } catch (err) {
+        // OBS's own message names the thing it couldn't find, which beats
+        // anything we would write here.
+        results.push({ filterName, ok: false, reason: String(err?.message || err) });
+      }
+    }
+    return { sourceName, enabled, results };
   });
+}
+
+/** Turn one filter on or off. Thin wrapper — the batch form is the real one. */
+export function setFilter(sourceName, filterName, enabled) {
+  return setFilters(sourceName, [filterName], enabled);
 }
 
 // ── audio ────────────────────────────────────────────────────────────────────
