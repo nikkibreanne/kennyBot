@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.12.0](https://github.com/nikkibreanne/kennyBot/compare/kennybot-v0.11.2...kennybot-v0.12.0) (2026-08-15)
+
+
+### Features
+
+* subathon shadow ledger with an operator CLI ([#70](https://github.com/nikkibreanne/kennyBot/issues/70)) ([eeaaa8b](https://github.com/nikkibreanne/kennyBot/commit/eeaaa8b3c025c0111d9be4e11726c11f39e4114c))
+
 ## [0.11.2](https://github.com/nikkibreanne/kennyBot/compare/kennybot-v0.11.1...kennybot-v0.11.2) (2026-08-10)
 
 
