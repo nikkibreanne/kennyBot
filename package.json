@@ -16,7 +16,8 @@
     "test:e2e": "firebase emulators:exec --only database --project okrafans \"node --test test/e2e/commands.e2e.test.js\"",
     "synthetic": "firebase emulators:exec --only database --project okrafans \"node scripts/synthetic-chat.js\"",
     "dev:console": "firebase emulators:exec --only database --project okrafans \"node scripts/dev-console.js\"",
-    "dev:all": "bash scripts/dev-all.sh"
+    "dev:all": "bash scripts/dev-all.sh",
+    "seed:media": "node scripts/seed-media.mjs"
   },
   "repository": {
     "type": "git",

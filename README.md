@@ -265,6 +265,26 @@ came due during a long offline stretch is quietly re-armed instead of dumping a
 backlog. The defaults are seeded from `src/content/reminders.js` on first boot
 and **never** clobbered afterwards, so edited times survive every deploy.
 
+### Re-seeding `!media` slots locally
+
+The dev emulator DB is ephemeral — `dev:live` and `dev:all` each start an empty
+one — so the slot map has to go back in every session:
+
+```bash
+FIREBASE_DATABASE_EMULATOR_HOST=127.0.0.1:9000 npm run seed:media
+npm run seed:media -- --list      # what's mapped right now
+npm run seed:media -- --prod      # deliberately, against production
+```
+
+The map itself is **not in this repo** — it's the streamer's own OBS source
+names, and they have to match character for character. It lives in a gitignored
+file (`MEDIA_SLOTS_FILE`, default `.workspace/media-slots.json`); run the script
+without one and it prints the shape it wants. Get exact names from
+`node scripts/obs-media.mjs`.
+
+Writes go through the same `mapSlot()` as `!media set`, so a mapping this
+accepts is one the chat command would have accepted too.
+
 ## Local development
 
 Requires **Node ≥ 20** and **Java** (for the Firebase emulator).
