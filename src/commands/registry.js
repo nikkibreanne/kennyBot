@@ -32,8 +32,9 @@ import season from './mod/season.js';
 import timer from './mod/timer.js';
 import reminder from './mod/reminder.js';
 import media from './mod/media.js';
+import obs from './mod/obs.js';
 
-const defs = [create, char, bag, equip, unequip, grab, raid, top, fact, kennycommands, points, daily, bet, duel, trade, offer, clip, start, exp, clipmode, mute, drop, drops, boss, raidnight, season, market, todo, timer, reminder, media];
+const defs = [create, char, bag, equip, unequip, grab, raid, top, fact, kennycommands, points, daily, bet, duel, trade, offer, clip, start, exp, clipmode, mute, drop, drops, boss, raidnight, season, market, todo, timer, reminder, media, obs];
 
 /** @type {Map<string, typeof defs[number]>} */
 const byName = new Map();

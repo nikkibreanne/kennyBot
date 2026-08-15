@@ -16,6 +16,7 @@ Firebase and OBS, and never listens on a port — and ships as a container.
 |---|---|---|
 | **Clips** | `!clip` · `!clipmode` · `!start` | 16:9 + natively-framed 9:16 captured on the streamer's PC over obs-websocket / Aitum |
 | **On-stream media** | `!media` | play a mapped OBS media source from chat — the same connection, pointed at a source instead of the buffer |
+| **OBS control** | `!obs` | scenes, source visibility, filters, audio mute and stream stats, from chat |
 | **Stream timer** | `!timer` | one countdown, heads-up marks, survives a restart |
 | **Reminders** | `!reminder` | schedules are RTDB records, not code — daily / after-live / interval |
 | **To-do board** | `!todo` | chat-controlled, rendered on [/todo/](https://okrafans.com/todo/) |
@@ -85,9 +86,9 @@ Underneath both:
 - **automated releases** from Conventional Commits (release-please), with `main`
   protected for everyone including admins
 
-Verified by `npm test` (166 offline unit tests), `npm run test:emulator` (75 — RTDB
+Verified by `npm test` (182 offline unit tests), `npm run test:emulator` (75 — RTDB
 rules + client-write rejection, and the stateful command paths), `npm run test:e2e`
-(32 — every registered command driven through the real dispatcher), and
+(33 — every registered command driven through the real dispatcher), and
 `npm run synthetic` (full muster→battle→victory run with UI-contract assertions).
 
 **Not yet done:** a full-session local recording (see
@@ -125,7 +126,8 @@ src/
   twitch/                 auth (RefreshingAuthProvider), liveGate (Helix poll), eventsub (WS),
                           sender (Helix/IRC send + badge), clips (Helix Create Clip)
   integrations/           obsWebsocket (v5 client + Aitum vendor requests), capture (facade +
-                          rate limit), obsMedia (media actions on the same socket)
+                          rate limit), obsMedia (media actions), obsControl (scenes,
+                          sources, filters, audio) — all on the same socket
   events/                 chat (gate→EXP→raid tick + dispatch), twitchEvents (sub/cheer/raid),
                           dropScheduler · timerScheduler · reminderScheduler
   commands/               one module per command + registry; mod/ subdir for mod commands
@@ -159,6 +161,13 @@ of the replay buffer.
 | `!media scene <n> <scene\|none>` | mod | reveal the source in that scene before playing (for a visual alert); `none` stops revealing it |
 | `!media action <n> <action>` | mod | `restart` (default) · `play` · `pause` · `stop` · `next` · `previous` |
 | `!media clear <n>` | mod | unmap |
+| `!obs` | mod | what's live: current scene, fps, skipped frames |
+| `!obs scenes` · `!obs scene <name>` | mod | list scenes · cut to one |
+| `!obs sources [scene]` | mod | what's in a scene, and what's visible |
+| `!obs show\|hide\|toggle <source>` | mod | flip a source's visibility in the live scene |
+| `!obs filters <source>` · `!obs filter on\|off <source> \| <filter>` | mod | list a source's filters · switch one |
+| `!obs audio` · `!obs mute\|unmute <input>` | mod | audio inputs with mute state and level · mute one. **Not** `!mute`, which silences the bot |
+| `!obs stats` | mod | dropped frames as a rate, CPU, free disk — for when chat says it's buffering |
 
 **Around the stream**
 
@@ -449,6 +458,39 @@ redemptions needs EventSub topics and broadcaster scopes this bot does not hold
 today (it subscribes to `stream.online`/`offline` only, and prod runs on a Helix
 poll because the broadcaster token isn't the channel owner's). The mechanism comes
 first; the trigger is separate work.
+
+### Driving OBS from chat — `!obs`
+
+The rest of the obs-websocket surface, on that same connection: scenes, source
+visibility, filters, audio, and the stream-health numbers.
+
+```
+!obs                          current scene, fps, skipped frames
+!obs scenes                   list · !obs scene Starting Soon   cut to one
+!obs sources                  what's in the live scene, and what's visible
+!obs show|hide|toggle <src>   flip a source
+!obs filters <source>         list · !obs filter off cam | Chroma Key
+!obs audio                    inputs with mute state and level
+!obs mute|unmute <input>      OBS audio — NOT !mute, which silences the bot
+!obs stats                    dropped frames as a RATE, CPU, free disk
+```
+
+One command with sub-verbs rather than eight top-level names: `!obs` alone is the
+discoverable index, and it keeps eight words out of a chat namespace shared with
+other bots. `!obs mute` sits here precisely *because* `!mute` already exists and
+means something entirely different — two mutes at top level is a mistake waiting
+for a stressful moment.
+
+Deliberately thin: each verb is one or two obs-websocket requests with no policy
+on top, and `!obs scene` accepts any scene name rather than an allowlist. This
+exists to learn what OBS exposes; a verb that proves worth keeping can earn its
+own command and its own guard rails then. Errors are OBS's own text, passed
+through — when a name is wrong, OBS says which one, and that beats anything we
+would write.
+
+`!obs stats` reports skipped frames as a **percentage**, because a raw count means
+nothing without the total: "312 dropped" reads as alarming and is fine out of two
+million.
 
 The one point of contact is `!start` (`src/db/clipSync.js`), which writes a per-stream
 sync anchor to RTDB — *data the archiver reads*, not a file handoff, and it works

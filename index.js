@@ -19,6 +19,7 @@ import { createSender } from './src/twitch/sender.js';
 import { initClips } from './src/twitch/clips.js';
 import { initCapture, captureReady } from './src/integrations/capture.js';
 import { initMedia } from './src/integrations/obsMedia.js';
+import { initObsControl } from './src/integrations/obsControl.js';
 // Read once at boot purely to log what's in force; the live value is RTDB-backed.
 import { activeClipMode } from './src/commands/clip.js';
 import { startLivePoll } from './src/twitch/liveGate.js';
@@ -219,6 +220,9 @@ async function main() {
   // deliberately resolves the same connection: two ideas of where OBS lives is
   // one more than can ever be right.
   initMedia({}, logger);
+
+  // Scenes / source visibility / filters / audio on that same OBS (`!obs`).
+  initObsControl({}, logger);
 
   // What !clip actually does. Default 'local': trigger the streamer's OBS/Aitum
   // capture and post NO Twitch clip — a Twitch clip is capped at the stream
