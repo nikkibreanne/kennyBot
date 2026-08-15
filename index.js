@@ -31,6 +31,7 @@ import { seedCuratedFacts } from './src/db/facts.js';
 import { seedCatalog } from './src/db/catalog.js';
 import { createMessageHandler } from './src/events/chat.js';
 import { attachTwitchEvents } from './src/events/twitchEvents.js';
+import { attachSubathonEvents } from './src/events/subathonEvents.js';
 import { startDropScheduler } from './src/events/dropScheduler.js';
 import { startTimerScheduler } from './src/events/timerScheduler.js';
 import { startReminderScheduler } from './src/events/reminderScheduler.js';
@@ -299,6 +300,9 @@ async function main() {
     logger.warn('chat disconnected', { manual, reason: String(reason || '') });
   });
   shutdownHooks.push(attachTwitchEvents({ chat, sender, logger }));
+  // Subathon ledger: prices subs/gifts/bits against the current band and appends
+  // them. A no-op (not even a read) unless a subathon is actually running.
+  shutdownHooks.push(attachSubathonEvents({ chat, logger }));
   await chat.connect();
   shutdownHooks.push(() => chat.quit());
 

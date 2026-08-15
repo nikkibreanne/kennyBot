@@ -35,6 +35,12 @@ const mirror = {
   // a slot is a chat-latency operation rather than a chat-latency operation plus
   // an RTDB read — the point of the feature is that it lands on the beat.
   media: {},
+  // config/subathon: the clock + its append-only ledger. Mirrored because every
+  // sub and every cheer has to be priced against the CURRENT band, and going to
+  // RTDB for the schedule on each event would put a network round-trip in front
+  // of something that arrives in bursts (a large gift bundle is one event per
+  // recipient).
+  subathon: null,
 };
 
 let started = false;
@@ -68,6 +74,7 @@ export async function startConfigMirror(logger = console) {
   const liveSinceRef = db.ref(PATHS.configLiveSince());
   const remindersRef = db.ref(PATHS.reminders());
   const mediaRef = db.ref(PATHS.mediaSlots());
+  const subathonRef = db.ref(PATHS.subathon());
 
   // Seed drop-scheduler defaults once (never clobber a mod's settings).
   await dropRef.transaction((v) => (v == null ? { enabled: gameConfig.loot.scheduler.enabled, intervalSec: gameConfig.loot.scheduler.intervalSec } : v));
@@ -83,11 +90,22 @@ export async function startConfigMirror(logger = console) {
   liveSinceRef.on('value', (s) => { mirror.liveSince = s.val() || null; });
   remindersRef.on('value', (s) => { mirror.reminders = s.val() || {}; });
   mediaRef.on('value', (s) => { mirror.media = s.val() || {}; });
+  // Log the on/off edge. The subathon is switched on by a CLI writing a record,
+  // with no restart and no env var — so without this there is nothing in the log
+  // to confirm the bot actually saw it, which is the one thing an operator wants
+  // to check before the event starts. Deliberately no rates or totals.
+  subathonRef.on('value', (s) => {
+    const next = s.val() || null;
+    const was = Boolean(mirror.subathon?.active);
+    const now = Boolean(next?.active);
+    mirror.subathon = next;
+    if (now !== was) logger.info?.(now ? 'subathon ACTIVE' : 'subathon inactive', { startedAt: next?.startedAt ?? null });
+  });
 
   // Wait for the initial reads so the mirror is warm before chat starts.
-  const [liveSnap, expSnap, mutedSnap, clipSnap, seasonSnap, raidSnap, dropSnap, timerSnap, liveSinceSnap, remindersSnap, mediaSnap] = await Promise.all([
+  const [liveSnap, expSnap, mutedSnap, clipSnap, seasonSnap, raidSnap, dropSnap, timerSnap, liveSinceSnap, remindersSnap, mediaSnap, subathonSnap] = await Promise.all([
     liveRef.get(), expRef.get(), mutedRef.get(), clipRef.get(), seasonRef.get(), raidRef.get(), dropRef.get(),
-    timerRef.get(), liveSinceRef.get(), remindersRef.get(), mediaRef.get(),
+    timerRef.get(), liveSinceRef.get(), remindersRef.get(), mediaRef.get(), subathonRef.get(),
   ]);
   mirror.live = Boolean(liveSnap.val());
   mirror.expMode = expSnap.val() || gameConfig.liveGate.defaultExpMode;
@@ -100,6 +118,7 @@ export async function startConfigMirror(logger = console) {
   mirror.liveSince = liveSinceSnap.val() || null;
   mirror.reminders = remindersSnap.val() || {};
   mirror.media = mediaSnap.val() || {};
+  mirror.subathon = subathonSnap.val() || null;
   logger.info?.('config mirror warm', {
     live: mirror.live, expMode: mirror.expMode, chatMuted: mirror.chatMuted, clipMode: mirror.clipMode,
   });
@@ -192,6 +211,14 @@ export async function setReminderState(id, state) {
   if (cur) mirror.reminders = { ...mirror.reminders, [id]: { ...cur, state } };
   await database().ref(PATHS.reminderState(id)).set(state || null);
   return state;
+}
+
+/**
+ * The subathon record (clock + rate card + ledger), or null when none is running.
+ * Read on every sub and every cheer, so it comes from the mirror.
+ */
+export function getSubathonState() {
+  return mirror.subathon;
 }
 
 /** All OBS media slots as `{ "1": {input, scene, action, label}, … }` (`!media`). */
