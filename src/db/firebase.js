@@ -101,6 +101,14 @@ export const PATHS = {
   reminders: () => 'config/reminders',
   reminder: (id) => `config/reminders/${id}`,
   reminderState: (id) => `config/reminders/${id}/state`,
+  // SUBATHON: the clock (an absolute deadline, so a restart mid-event resumes
+  // instead of losing hours) plus an APPEND-ONLY ledger of every credit. The
+  // ledger is not bookkeeping decoration — it is how a long event gets
+  // reconciled afterwards, and how a mistyped adjustment at 4am gets reversed
+  // without guessing what the clock "should" say.
+  subathon: () => 'config/subathon',
+  subathonLedger: () => 'config/subathon/ledger',
+  subathonLedgerEntry: (id) => `config/subathon/ledger/${id}`,
   configLock: () => 'config/lock',
   // OKRA FACTS (/info/): approved facts are client-read-only; the submission
   // queue + counter are admin-only.
