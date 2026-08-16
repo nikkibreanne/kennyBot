@@ -11,7 +11,7 @@ import assert from 'node:assert/strict';
 import {
   initObsControlWith, obsControlReady,
   listScenes, setScene, listSources, setSourceVisible,
-  listFilters, setFilter, listAudio, setMute, getStats,
+  listFilters, setFilter, setFilters, listAudio, setMute, getStats,
 } from '../../src/integrations/obsControl.js';
 
 /** Records every request and answers with a small fake OBS. */
@@ -149,6 +149,33 @@ test('setting a filter names both the source and the filter', async () => {
   assert.deepEqual(obs.calls[0].data, {
     sourceName: 'cam', filterName: 'Chroma Key', filterEnabled: false,
   });
+});
+
+test('several filters flip in one batch, in the order given', async () => {
+  // They share a single run() — and therefore a single connection — which the
+  // request-level seam cannot observe; what it CAN show is that all three were
+  // issued, in order, with the same target state.
+  const res = await setFilters('cam', ['Chroma Key', 'Blur', 'Sharpen'], true);
+  assert.equal(res.ok, true);
+  assert.deepEqual(obs.calls.map((c) => c.data.filterName), ['Chroma Key', 'Blur', 'Sharpen']);
+  assert.ok(obs.calls.every((c) => c.data.filterEnabled === true));
+  assert.deepEqual(res.data.results.map((r) => r.ok), [true, true, true]);
+});
+
+test('a bad filter name does not abort the ones after it', async () => {
+  // The bug this guards: aborting mid-batch leaves the first applied, the last
+  // untouched, and the mod with no idea which is which.
+  const o = fakeObs({
+    SetSourceFilterEnabled: (d) => {
+      if (d.filterName === 'Nope') throw new Error(`No filter was found by the name of \`Nope\``);
+      return {};
+    },
+  });
+  initObsControlWith(o.request);
+  const res = await setFilters('cam', ['Chroma Key', 'Nope', 'Blur'], true);
+  assert.equal(res.ok, true, 'the batch itself succeeded');
+  assert.deepEqual(res.data.results.map((r) => r.ok), [true, false, true]);
+  assert.match(res.data.results[1].reason, /Nope/, "OBS's own message is passed through");
 });
 
 // ── audio ─────────────────────────────────────────────────────────────────────

@@ -529,9 +529,17 @@ export const SCENARIOS = [
         assert.match(await bot.send(mod, '!obs filters cam'), /Chroma Key/);
         // Source and filter are both OBS names and both may contain spaces, so
         // `|` is the only unambiguous split — same separator as !media set.
-        assert.match(await bot.send(mod, '!obs filter off cam | Chroma Key'), /is now off/);
+        assert.match(await bot.send(mod, '!obs filter off cam | Chroma Key'), /now off/);
         assert.deepEqual(calls.at(-1).data, { sourceName: 'cam', filterName: 'Chroma Key', filterEnabled: false });
         assert.match(await bot.send(mod, '!obs filter off cam'), /Usage: !obs filter/, 'needs both names');
+
+        // MULTIPLE filters in one go. The first part is the source; every part
+        // after it is a filter. Previously the extras were silently dropped —
+        // the command reported success having flipped only the first.
+        const multi = await bot.send(mod, '!obs filter on cam | Chroma Key | Blur');
+        assert.match(multi, /"Chroma Key" \+ "Blur"/, 'both are named back');
+        assert.deepEqual(calls.slice(-2).map((c) => c.data.filterName), ['Chroma Key', 'Blur']);
+        assert.ok(calls.slice(-2).every((c) => c.data.filterEnabled === true));
 
         assert.match(await bot.send(mod, '!obs audio'), /Mic/);
         assert.match(await bot.send(mod, '!obs mute Mic'), /muted/);
