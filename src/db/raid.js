@@ -285,15 +285,39 @@ export async function runBattle(seasonId, weekId, { now = Date.now(), seed } = {
   return combat;
 }
 
-/** Per-uid damage to the boss, summed from the combat log (for the leaderboard). */
-function damageByUid(log) {
-  const dmg = {};
+/**
+ * Per-uid contribution, summed from the combat log. Three numbers, because one
+ * board can't rank three jobs: a healer never damages the boss and a tank's
+ * whole contribution is absorbing hits, so a single damage column ranked them
+ * against DPS for work they don't do.
+ *   damage  — dealt to the boss (the DPS job)
+ *   healing — restored to the party (the healer job)
+ *   taken   — single-target enemy damage absorbed (the tank job; AoE is excluded
+ *             because it hits everyone equally and so ranks nobody)
+ * @param {Record<string, object>} log
+ * @returns {{damage: Record<string,number>, healing: Record<string,number>, taken: Record<string,number>}}
+ */
+export function statsByUid(log) {
+  const damage = {};
+  const healing = {};
+  const taken = {};
   for (const e of Object.values(log || {})) {
-    if (e.type === 'action' && e.kind === 'damage' && e.target === 'boss') {
-      dmg[e.actor] = (dmg[e.actor] || 0) + (e.amount || 0);
+    if (e.type !== 'action') continue;
+    const amount = e.amount || 0;
+    // Damage AT the boss and healing can only come from the party, so neither
+    // needs a `side` check — and not requiring one keeps older stored combat
+    // logs (which predate the field) readable.
+    if (e.kind === 'damage' && e.target === 'boss') {
+      damage[e.actor] = (damage[e.actor] || 0) + amount;
+    } else if (e.kind === 'heal') {
+      healing[e.actor] = (healing[e.actor] || 0) + amount;
+    } else if (e.side === 'enemy' && e.kind === 'damage' && e.target && e.target !== 'party') {
+      // `side` IS required here: the party also deals single-target damage to
+      // critter adds, and that must not count as damage the hero absorbed.
+      taken[e.target] = (taken[e.target] || 0) + amount;
     }
   }
-  return dmg;
+  return { damage, healing, taken };
 }
 
 /**
@@ -332,13 +356,20 @@ export async function finishBattle(seasonId, weekId, { now = Date.now() } = {}) 
   if (!combat) return null;
   const signups = signupSnap.val() || {};
   const downed = combat.result?.downed;
-  const dmg = damageByUid(combat.log);
+  const contrib = statsByUid(combat.log);
 
   // Leaderboard + participation (atomic increments). A clear also grants +1
   // renown (veteran reputation that persists across seasons, §5.6).
   const updates = {};
   for (const uid of Object.keys(signups)) {
-    updates[`${PATHS.leaderboardEntry(seasonId, uid)}/damage`] = increment(dmg[uid] || 0);
+    const entry = PATHS.leaderboardEntry(seasonId, uid);
+    updates[`${entry}/damage`] = increment(contrib.damage[uid] || 0);
+    updates[`${entry}/healing`] = increment(contrib.healing[uid] || 0);
+    updates[`${entry}/taken`] = increment(contrib.taken[uid] || 0);
+    // The hero's role is stamped (not incremented) so the board can rank each
+    // job on its own metric instead of ranking healers by boss damage.
+    updates[`${entry}/role`] = signups[uid]?.role || null;
+    updates[`${entry}/raids`] = increment(1);
     updates[`${PATHS.player(uid)}/stats/raidsParticipated`] = increment(1);
     if (downed) updates[`${PATHS.player(uid)}/renown`] = increment(1);
   }
@@ -489,6 +520,31 @@ export function computeNextRaidNight(now = Date.now()) {
   let epoch = zonedWallTimeToEpoch(p.year, p.month, p.day + add, hour, minute, timeZone);
   if (epoch <= now) epoch = zonedWallTimeToEpoch(p.year, p.month, p.day + add + 7, hour, minute, timeZone);
   return epoch;
+}
+
+/**
+ * Who has a hero but isn't on this season's roster.
+ *
+ * Enlistment is SEASON-LONG (§5.3), so this is not "who forgot to sign up this
+ * week" — it's people who never opted into the season at all, which is the group
+ * a nudge can actually convert. Returns null when there's no raid to join.
+ * @returns {Promise<{enlisted:number, unenlisted:number, recommended:number|null, bossName:string|null}|null>}
+ */
+export async function enlistmentGap() {
+  const p = getRaidPointer();
+  if (!p?.seasonId || !p?.weekId) return null;
+  const db = database();
+  const [signupSnap, playerSnap, bossSnap] = await Promise.all([
+    db.ref(PATHS.signups(p.seasonId, p.weekId)).get(),
+    db.ref('players').get(),
+    db.ref(PATHS.boss(p.seasonId, p.weekId)).get(),
+  ]);
+  const signups = signupSnap.val() || {};
+  const players = playerSnap.val() || {};
+  const enlisted = Object.keys(signups).length;
+  const unenlisted = Object.entries(players).filter(([uid, pl]) => pl?.role && !signups[uid]).length;
+  const boss = bossSnap.val();
+  return { enlisted, unenlisted, recommended: boss?.recommended ?? null, bossName: boss?.name ?? null };
 }
 
 /** How many weeks a season already has scheduled in the DB (0 if it's new). */

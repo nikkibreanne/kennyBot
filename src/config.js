@@ -51,6 +51,13 @@ export const config = {
     // doesn't). renownBonus = min(renown, renownCap) * renownPerPoint.
     renownPerPoint: 2,
     renownCap: 40, // max +80 rating — meaningful for vets, never dominant
+    // MATCHED SET (rules/rating.js#setBonus): a percentage of gear rating once
+    // all three slots are filled with gear this hero can actually use, tiered by
+    // the WEAKEST piece worn. Gives the 25-item-per-slot pyramid a goal beyond
+    // "biggest number", and makes an empty trinket cost more than the trinket.
+    // Small on purpose — verified against the combat sim to move S1 finale win
+    // rate by only a few points at full legendary, which no real roster has.
+    setBonusPct: { common: 0.02, uncommon: 0.04, rare: 0.07, epic: 0.10, legendary: 0.15 },
   },
 
   // ── Engagement multipliers (spec §7) ─────────────────────────────────────
@@ -106,6 +113,15 @@ export const config = {
     // resolves in turn, one windowMs apart. At most maxQueue drops can be lined
     // up at once (the open one + those waiting); drops past that are ignored.
     maxQueue: 10, // ~10 min of back-to-back drops at a 60s window
+    // SALVAGE (!salvage): turn gear you can't use into credits. Exists because
+    // role-locked loot has a floor problem — a trade needs someone who WANTS the
+    // item, and 52 dead pieces were sitting in prod bags with no buyer. Values
+    // are deliberately below what the piece is worth to the right hero, so
+    // trading it to a raider always beats melting it.
+    salvage: { common: 8, uncommon: 20, rare: 50, epic: 120, legendary: 300 },
+    // Melting an epic or better by fat-fingering a bag number is unrecoverable,
+    // so those need `!salvage <#> confirm`.
+    salvageConfirmFrom: 'epic',
     // Auto chat-drop scheduler while live; mod-tunable at runtime via the
     // config/drops/scheduler RTDB path (see !drops command).
     scheduler: { enabled: false, intervalSec: 15 * 60, jitter: 0.3 }, // ~15 min ±30%
@@ -262,6 +278,24 @@ export const config = {
     minBet: 1, // smallest wager
     daily: { amount: 200, cooldownMs: 20 * 60 * 60 * 1000 }, // ~once/day claim
     maxOpenMarkets: 8, // how many OKRAMARKET predictions can run concurrently
+  },
+
+  // ── Respec (!respec): change class, and therefore role ────────────────────
+  // Class was permanent, so a season short on healers had no way to fix itself —
+  // the role-readiness thresholds were a diagnosis with no treatment. Costs
+  // credits (≈2.5 daily claims) so it's a real decision, and re-rolls starter
+  // gear for the new role since the old role's gear no longer works.
+  respec: { cost: 500 },
+
+  // ── Season enlistment nudge ───────────────────────────────────────────────
+  // `!muster` enlists for a WHOLE season (§5.3), so this is not a weekly
+  // reminder — it's aimed at people who have a hero and never opted in at all.
+  // Rare on purpose: the streamer asked for infrequent, and viewers are usually
+  // not around when the automated battle actually runs.
+  musterNudge: {
+    enabled: true,
+    minGapMs: 3 * 60 * 60 * 1000, // at most once every ~3h of live time
+    minUnenlisted: 2, // don't nag on behalf of one person
   },
 
   // ── Site link surfaced by !muster / !char ──────────────────────────────────

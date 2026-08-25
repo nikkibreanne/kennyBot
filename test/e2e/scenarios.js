@@ -41,9 +41,10 @@ async function market(question = 'Will we clear the boss tonight?') {
 }
 async function drop(itemId = DROP_ITEM) { return setDrop(itemId); }
 async function facts() { return seedCuratedFacts(); }
-async function leaderboard(u, damage) {
+async function leaderboard(u, damage, role = 'dps') {
   await player(u);
-  await database().ref(`leaderboard/e2e/${u.id}`).set({ damage });
+  // Boards are per-role now — an entry without a role can't appear on one.
+  await database().ref(`leaderboard/e2e/${u.id}`).set({ damage, healing: 0, taken: 0, role });
 }
 /** Stand up a signup-phase raid week and wait for the config mirror to see it. */
 async function raidWeek({ bossName = 'The Test Warden', enlistUsers = [] } = {}) {
@@ -214,17 +215,48 @@ export const SCENARIOS = [
       await fx.raidWeek();
       await fx.player(alice);
       const reply = await bot.send(alice, '!muster');
-      assert.match(reply, /mustered/i);
+      assert.match(reply, /enlisted/i);
+      assert.match(reply, /season/i, 'must say the enlistment lasts the whole season');
     },
   },
   {
-    command: 'top', title: 'shows the season damage leaderboard',
+    command: 'top', title: 'shows the per-role season leaderboard',
     run: async ({ bot, u, fx }) => {
       const hero = u('e2e_top', { login: 'topper', name: 'Topper' });
-      await fx.leaderboard(hero, 500);
+      await fx.leaderboard(hero, 500, 'dps');
       const reply = await bot.send(u('e2e_top_viewer', { login: 'viewer' }), '!top');
-      assert.match(reply, /Season damage/);
+      assert.match(reply, /dps/i, 'a bare !top shows the dps board');
       assert.match(reply, /Topper/);
+      // A healer must not be ranked against DPS on damage.
+      const healer = u('e2e_top_h', { login: 'mender', name: 'Mender1' });
+      await fx.leaderboard(healer, 9999, 'healer');
+      const dpsBoard = await bot.send(u('e2e_top_viewer', { login: 'viewer' }), '!top dps');
+      assert.equal(/Mender1/.test(dpsBoard), false, 'healers stay off the damage board');
+    },
+  },
+  {
+    command: 'salvage', title: 'melts gear your role cannot use into credits',
+    run: async ({ bot, u, fx }) => {
+      const hero = u('e2e_salvage', { login: 'melter', name: 'Melter' });
+      await fx.player(hero, 'Berserker'); // dps
+      await fx.wallet(hero);
+      await fx.loot(hero, TANK_RARE); // dps hero, tank item — dead weight
+      const preview = await bot.send(hero, '!salvage offrole');
+      assert.match(preview, /1 off-role item/);
+      const done = await bot.send(hero, '!salvage offrole confirm');
+      assert.match(done, /melted 1/i);
+    },
+  },
+  {
+    command: 'respec', title: 'changes class and role for credits',
+    run: async ({ bot, u, fx }) => {
+      const hero = u('e2e_respec', { login: 'switcher', name: 'Switcher' });
+      await fx.player(hero, 'Berserker');
+      await fx.wallet(hero);
+      await database().ref(`wallets/${hero.id}/balance`).set(5000);
+      const reply = await bot.send(hero, '!respec Mender');
+      assert.match(reply, /respecced/i);
+      assert.match(reply, /healer/i);
     },
   },
   {

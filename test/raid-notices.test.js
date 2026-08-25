@@ -45,7 +45,7 @@ async function seedClearedRaid() {
   await db.ref(PATHS.combat(S, W)).set({
     seed: 1, status: 'live', bossMaxHp: 100,
     result: { downed: true, bossHpRemaining: 0, mvp: HEROES[0], survivors: [HEROES[0]] },
-    log: { 0: { type: 'action', kind: 'damage', target: 'boss', actor: HEROES[0], amount: 500 } },
+    log: { 0: { type: 'action', side: 'party', kind: 'damage', target: 'boss', actor: HEROES[0], amount: 500 } },
   });
   await setRaidPointer({ seasonId: S, weekId: W, phase: 'live', doneAt: 1 });
 }

@@ -11,7 +11,7 @@ import { ChatClient } from '@twurple/chat';
 import { logger } from './src/logger.js';
 import { config } from './src/config.js';
 import { initFirebase, closeFirebase } from './src/db/firebase.js';
-import { startConfigMirror, setLive, isChatMuted } from './src/db/configStore.js';
+import { startConfigMirror, setLive, isChatMuted, getRaidPointer, getConfig } from './src/db/configStore.js';
 import { acquireLock, startHeartbeat, releaseLock, defaultInstanceId } from './src/db/lock.js';
 import { TokenStore } from './src/db/tokenStore.js';
 import { buildAuth } from './src/twitch/auth.js';
@@ -22,7 +22,7 @@ import { initCapture, captureReady } from './src/integrations/capture.js';
 import { activeClipMode } from './src/commands/clip.js';
 import { startLivePoll } from './src/twitch/liveGate.js';
 import { startEventSub } from './src/twitch/eventsub.js';
-import { advanceRaidPhases, refreshMusteredRoster } from './src/db/raid.js';
+import { advanceRaidPhases, refreshMusteredRoster, enlistmentGap } from './src/db/raid.js';
 import { seedCuratedFacts } from './src/db/facts.js';
 import { seedCatalog } from './src/db/catalog.js';
 import { createMessageHandler } from './src/events/chat.js';
@@ -393,6 +393,39 @@ async function main() {
   }, 30_000);
   phaseTimer.unref?.();
   shutdownHooks.push(() => clearInterval(phaseTimer));
+
+  // ── Season enlistment nudge ───────────────────────────────────────────────
+  //    `!muster` enlists for a WHOLE season, so this is NOT a weekly reminder —
+  //    it targets people who have a hero and never opted in at all, which is the
+  //    only group a nudge can convert. Deliberately rare (config.musterNudge):
+  //    only while live, only with a raid open, and only when enough people are
+  //    actually missing. Viewers are usually not around when the automated
+  //    battle runs, so the ask has to land during the stream or not at all.
+  let lastNudgeAt = Date.now(); // don't fire the instant the bot boots
+  const nudgeTimer = setInterval(async () => {
+    try {
+      const cfg = config.musterNudge;
+      if (!cfg.enabled || isChatMuted() || !getConfig().live) return;
+      if (Date.now() - lastNudgeAt < cfg.minGapMs) return;
+      const phase = getRaidPointer()?.phase;
+      if (phase !== 'signup') return; // nothing to join once the roster locks
+      const gap = await enlistmentGap();
+      if (!gap || gap.unenlisted < cfg.minUnenlisted) return;
+      lastNudgeAt = Date.now();
+      const want = gap.recommended && gap.enlisted < gap.recommended
+        ? ` ${gap.bossName} wants ~${gap.recommended} heroes and we have ${gap.enlisted}.`
+        : '';
+      send.say(
+        `🌱 ${gap.unenlisted} hero${gap.unenlisted === 1 ? '' : 'es'} still aren't enlisted this season.${want} ` +
+        `One !muster puts you on the roster for EVERY week — you don't need to be around when the battle runs.`,
+      );
+      logger.info('muster nudge sent', gap);
+    } catch (err) {
+      logger.error('muster nudge failed', { err: String(err) });
+    }
+  }, 10 * 60 * 1000);
+  nudgeTimer.unref?.();
+  shutdownHooks.push(() => clearInterval(nudgeTimer));
 
   // ── Muster roster refresh: during signup, keep each hero's card current with
   //    their live level/gear (frozen again at lock). No-op outside signup. ──

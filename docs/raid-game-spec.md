@@ -55,7 +55,8 @@ The **chat is the live, interactive growth layer**.
    toward a climbing chance to **level up**; **loot drops** appear in chat to
    claim and equip. Subs/bits/channel points accelerate growth.
 2. **Weekly community raid (muster → automated raid-night battle).** One shared
-   boss per week. Players grow/gear during a **muster** phase and sign up; on
+   boss per week. Players grow/gear during a **muster** phase and enlist once for
+   the whole season (§5.3 — the roster carries week to week); on
    **raid night** the roster fights the boss in an automated, turn-based battle
    shown live on the website. Composition still matters (need enough
    tanks/healers/DPS). See **§5.8** for the combat model.
@@ -164,6 +165,29 @@ function onChatMessage(user, config) {
   count. This replaced three stacking rolls (participation + survivor + MVP),
   which paid a surviving MVP three items a week, filled bags with duplicates,
   and could not be explained in a sentence.
+- **Salvage** (`!salvage`) melts gear into credits, priced by rarity and
+  deliberately below what the piece is worth to a hero who can use it, so
+  trading always beats melting. It exists because the role lock alone leaves a
+  floor problem: a trade needs someone who actively WANTS the item, and prod
+  bags held 52 pieces with no buyer. `!salvage offrole` clears them in one go;
+  epic and better need an explicit `confirm`.
+- **Respec** (`!respec <class>`) changes class, and therefore role, for credits.
+  Class was permanent, which made the role-readiness thresholds a diagnosis with
+  no treatment — a season short on healers could not fix itself. Level, EXP and
+  renown survive; equipped gear returns to the bag and a starter set for the new
+  role is rolled, because the old role's gear no longer works.
+- **Matched Set** (`rating.setBonusPct`): filling all three slots with gear the
+  hero can actually use grants a percentage of gear rating, tiered by the
+  WEAKEST piece worn. Keying on the weakest keeps it monotonic — upgrading any
+  single item can never lower the bonus, which "all three must match" would do
+  the moment you found a legendary — and it gives the 25-per-slot pyramid a goal
+  beyond "biggest number in each slot".
+- **Leaderboards are PER ROLE.** One damage column ranked a healer against a DPS
+  for work healers never do. `finishBattle` now records `damage` (dealt to the
+  boss), `healing` (restored) and `taken` (single-target enemy damage absorbed —
+  AoE is excluded because it hits everyone equally and so ranks nobody), plus
+  the hero's `role`. `!top [tank|healer|dps]` and the website board rank each
+  role on its own metric.
 - **Gear is role-locked at equip time.** `!equip` refuses another role's item
   rather than letting a player wear something worth nothing, and names the
   classes it *is* for so the piece gets traded on; `!bag` marks unusable items.
@@ -192,6 +216,13 @@ function onChatMessage(user, config) {
 
 ### 5.3 The weekly community raid (many-vs-1)
 
+- **Enlistment is SEASON-LONG, not weekly.** `!muster` once and your hero is on
+  the roster for every remaining week of that season: `setupRaidWeek` carries the
+  previous week's signups forward (re-snapshotted from each player's live record,
+  so levels and gear earned in between count) — see `src/db/raid.js`. Week 1 of a
+  new season starts EMPTY, because a rollover resets gear and everyone opts in
+  again. This is deliberate: a weekly opt-in bled participation, and people are
+  rarely around at the moment the automated battle actually runs.
 - **One shared raid boss per week**, with:
   - a large **HP pool**
   - **role thresholds**: minimum collective tank rating (or the community
@@ -280,7 +311,8 @@ challenge for *different* rewards. Build only after the core loop ships.
 
 **Two-phase weekly cadence:**
 1. **Muster / prep (most of the week).** Chat to grow your hero (EXP/levels),
-   claim and equip loot, and **sign up** for the raid (`!muster`). The website
+   claim and equip loot, and — if you haven't already this season — **enlist**
+   with `!muster` (once per season, not per week; §5.3). The website
    shows a **countdown to raid night**, the **roster** (who's in, their gear),
    and **team readiness** (aggregate power/defense/healing vs. boss thresholds).
 2. **Raid night (scheduled time).** Roster locks; the engine runs the battle;
@@ -502,7 +534,7 @@ for OAuth secrets; channel is configurable.
 | `!char` / `!me` | everyone | view character (class, level, role rating) |
 | `!bag` / `!inventory` | everyone | view unequipped loot |
 | `!equip <item>` | everyone | equip an item into its slot |
-| `!muster` | everyone | current boss + your contribution + link to site |
+| `!muster` | everyone | enlist for the SEASON (subs) / current boss + phase + link to site |
 | `!exp on\|off\|auto\|status` | mod | control the EXP gate (§5.1) |
 | `!drop <item>` | mod | force a loot drop (testing/events) |
 | `!boss set <name>` | mod | set the weekly boss |

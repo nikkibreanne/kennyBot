@@ -379,3 +379,26 @@ streams — exactly the season-long grind it's meant to be.
 - **Do not** raise `levelUp.base` unless you *want* to re-introduce the chance of
   a level popping the moment the bar fills (i.e. lucky early levels). `0` is what
   keeps leveling free of luck.
+
+## `respec` — changing class
+
+| Key | Default | What it does |
+|---|---|---|
+| `cost` | `500` | Credits `!respec` charges (≈2.5 daily claims). Level/EXP/renown survive; gear returns to the bag and a starter set for the new role is rolled. |
+
+## `musterNudge` — season enlistment reminder
+
+Enlistment is season-long (spec §5.3), so this is **not** a weekly reminder — it
+targets people who have a hero and never opted into the season at all.
+
+| Key | Default | What it does |
+|---|---|---|
+| `enabled` | `true` | Master switch. |
+| `minGapMs` | `3h` | Minimum spacing. Only fires while LIVE and in the `signup` phase. |
+| `minUnenlisted` | `2` | Don't nag on behalf of one person. |
+
+## `notices` — "tell them next time they chat"
+
+| Key | Default | What it does |
+|---|---|---|
+| `minGapMs` | `4000` | Spacing between raid-reward @-mentions, so a post-raid rush can't burst chat. Anyone skipped is told on their next message. |

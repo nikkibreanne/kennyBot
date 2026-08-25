@@ -16,13 +16,25 @@ import { database, PATHS } from './firebase.js';
  * @param {number} [n=5]
  * @returns {Array<{ uid: string, value: number }>}
  */
-export function rankEntries(entries, field = 'damage', n = 5) {
+export function rankEntries(entries, field = 'damage', n = 5, { role = null } = {}) {
   return Object.entries(entries || {})
-    .map(([uid, entry]) => ({ uid, value: Number(entry?.[field] ?? 0) }))
+    .filter(([, entry]) => !role || entry?.role === role)
+    .map(([uid, entry]) => ({ uid, value: Number(entry?.[field] ?? 0), role: entry?.role ?? null }))
     .filter((row) => Number.isFinite(row.value) && row.value > 0)
     .sort((a, b) => b.value - a.value)
     .slice(0, Math.max(0, n));
 }
+
+/**
+ * The metric each role is actually judged on. Ranking a healer by boss damage
+ * compares them on work they never do, so every role gets the board that
+ * measures its own job.
+ */
+export const ROLE_METRIC = Object.freeze({
+  dps: { field: 'damage', label: 'damage' },
+  healer: { field: 'healing', label: 'healing' },
+  tank: { field: 'taken', label: 'damage soaked' },
+});
 
 /**
  * Read the current season leaderboard once and resolve the top `n` heroes by
@@ -34,14 +46,14 @@ export function rankEntries(entries, field = 'damage', n = 5) {
  * @param {number} [n=5]
  * @returns {Promise<Array<{ uid: string, value: number, displayName: string }>>}
  */
-export async function getTop(seasonId, field = 'damage', n = 5) {
+export async function getTop(seasonId, field = 'damage', n = 5, { role = null } = {}) {
   if (!seasonId) return [];
   const snap = await database().ref(`leaderboard/${seasonId}`).get();
-  const ranked = rankEntries(snap.val(), field, n);
+  const ranked = rankEntries(snap.val(), field, n, { role });
   return Promise.all(
-    ranked.map(async ({ uid, value }) => {
+    ranked.map(async ({ uid, value, role: r }) => {
       const nameSnap = await database().ref(`${PATHS.player(uid)}/displayName`).get();
-      return { uid, value, displayName: nameSnap.val() || uid };
+      return { uid, value, role: r, displayName: nameSnap.val() || uid };
     }),
   );
 }
