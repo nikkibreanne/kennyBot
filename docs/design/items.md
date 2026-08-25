@@ -11,10 +11,52 @@ current engine only understands flat per-role `bonuses`).
 | Pool | Count | Notes |
 |---|---|---|
 | Starter gear (common) | **24** | 4 weapons + 4 armors per role (tank/healer/dps), season-agnostic |
-| Season 1 — *The Ashen Sprout* | 16 | ember/mire/thorn flavor, ramp ×1.0 |
-| Season 2 — *The Drowned Bloom* | 16 | tide/brine/storm/glass, ramp ×1.25 |
-| Season 3 — *The Hallowed Harvest* | 16 | astral/gilded/void/okra-finale, ramp ×1.5 |
-| **Total** | **72** | |
+| Season 1 — *The Proving Bed* | 225 | 16 hand-tuned + 209 pyramid; first frost & foul weeds, ramp ×1.0 |
+| Season 2 — *The Sweltering Patch* | 225 | 16 hand-tuned + 209 pyramid; high-summer blight, ramp ×1.25 |
+| Season 3 — *The Last Harvest* | 225 | 16 hand-tuned + 209 pyramid; rot & untimely frost, ramp ×1.5 |
+| **Total** | **699** | |
+
+### 1a. The pyramid (why 225 a season)
+
+The original 16-per-season tables left most role×slot pairs empty: **every season
+had exactly one tank weapon and one dps armor**, so a tank's entire six-week
+weapon progression was "starter gear, then the one drop", and most role×slot
+pairs had no legendary at all. Each season now fills a full rarity pyramid:
+
+| | common | uncommon | rare | epic | legendary |
+|---|---|---|---|---|---|
+| per role × slot | 9 | 7 | 5 | 3 | **1** |
+
+= 25 per role×slot × 3 roles × 3 slots = **225 a season**. The shape mirrors the
+drop weights: the tiers you roll often carry the variety, the top tier is a
+single trophy per role per slot.
+
+The pyramid is authored as a **name table** (`SEASON_GEAR` in `items.js`), not as
+600+ object literals — names are the content, while ids and bonuses follow by
+rule, so the balance ladder lives in one place. Within a tier, values fan out
+±4% per step so nine commons are nine slightly different items rather than nine
+reskins. Generated bands land on the hand-tuned ones exactly (S1 common 8–12,
+legendary 96–104).
+
+**Ids are derived from names** (`itm_s<season>_<slug>`) and are the stable
+contract — bags, equipped slots and the site's Compendium key off them.
+Renaming an item changes its id and orphans anything holding it. The original
+48 season ids are hand-authored, untouched, and win on any clash, because prod
+players are holding them right now.
+
+### 1b. Known drift: Season 2's legacy names
+
+`SEASON_THEMES` (bosses.js) and the S2 boss roster are **high summer** —
+Sunscorch, the Ten-Lined Horde, the Snaptrap Coven, the Hornworm Broodmother,
+the Cornstalk Colossus. The 16 legacy S2 items are **aquatic** (brine, tide,
+glacial, seafoam, coral, riptide, leviathan, "the Drowned Court"), authored
+against an older season plan called *The Drowned Bloom* that no longer exists
+anywhere else in the codebase. The 209 new S2 items follow the bosses.
+
+That leaves 16 aquatic items in a summer season — visible in the Compendium and
+in chat. Fixing it means **renaming those 16 (keeping their ids)**, which is
+safe but leaves id/name mismatches like `itm_s2_brineforged_maul` → a summer
+name. Deliberately left as an owner decision rather than done silently.
 
 Exports: `ITEMS` (id→item), `STARTER_WEAPONS`/`STARTER_ARMOR` (role→[ids]),
 `SEASON_LOOT` (3 arrays), plus parity helpers `getItem`, `itemObject`,
