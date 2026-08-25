@@ -33,6 +33,7 @@ import { startTimerScheduler } from './src/events/timerScheduler.js';
 import { startReminderScheduler } from './src/events/reminderScheduler.js';
 import { seedReminders } from './src/db/reminders.js';
 import { processDrops } from './src/db/drops.js';
+import { startNoticeMirror } from './src/db/notices.js';
 
 // Running version, read from the bundled package.json (in the image at /app).
 // Surfaced in the startup log + heartbeat so "which release is this box on?"
@@ -271,6 +272,15 @@ async function main() {
   // ── Resolve-on-boot: advance raid phases by stored timestamps, never a timer
   //    a restart could lose (§H.5 / §L.1). Loop to catch up after downtime
   //    (e.g. signup→locked→live→done all overdue).
+  // Undelivered raid-reward lines, said when their owner next speaks. The gear
+  // itself was handed over at payout — this only restores what's left to SAY.
+  try {
+    const n = await startNoticeMirror(logger);
+    if (n) logger.info('undelivered raid-reward announcements restored', { count: n });
+  } catch (err) {
+    logger.error('notice mirror failed to start', { err: String(err) });
+  }
+
   // Deliberately SILENT: a battle that resolved during downtime is old news, and
   // announcing it on boot would replay stale results into chat.
   for (let i = 0; i < 5; i++) {

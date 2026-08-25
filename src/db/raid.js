@@ -13,6 +13,7 @@ import { scaleBossHp } from '../content/bosses.js';
 import { getItem, DEFAULT_LOOT_TABLE } from '../content/items.js';
 import { pickDrop } from '../rules/loot.js';
 import { addLoot } from './players.js';
+import { setNotice } from './notices.js';
 import { config } from '../config.js';
 
 // ── snapshots ───────────────────────────────────────────────────────────────
@@ -352,6 +353,7 @@ export async function finishBattle(seasonId, weekId, { now = Date.now() } = {}) 
   // could not be described without a paragraph. Same generosity at the top end,
   // expressed as quality instead of quantity.
   const awards = [];
+  const bossName = (await db.ref(`${PATHS.boss(seasonId, weekId)}/name`).get()).val() || 'the boss';
   if (downed) {
     // The table the raid was SET UP with, not whatever season is current now.
     const raidSnap = await db.ref(`${PATHS.raid(seasonId, weekId)}/lootTable`).get();
@@ -374,6 +376,20 @@ export async function finishBattle(seasonId, weekId, { now = Date.now() } = {}) 
       await addLoot(uid, id);
       const item = getItem(id);
       awards.push({ uid, name: signups[uid]?.displayName || null, itemId: id, item, mvp: uid === mvp });
+      // Park a notice: the payout happens with nobody required to be present, so
+      // the announcement at resolve time reaches only whoever is in chat right
+      // then. This reaches the person who actually earned it (src/db/notices.js).
+      await setNotice(uid, {
+        kind: 'raidReward',
+        itemId: id,
+        itemName: item?.name || id,
+        rarity: item?.rarity || null,
+        bossName,
+        seasonId,
+        weekId,
+        mvp: uid === mvp,
+        survived: survivors.has(uid),
+      });
     }
   }
 
@@ -386,7 +402,7 @@ export async function finishBattle(seasonId, weekId, { now = Date.now() } = {}) 
     downed,
     mvp: combat.result?.mvp ?? null,
     mvpName: signups[combat.result?.mvp]?.displayName ?? null,
-    bossName: (await db.ref(`${PATHS.boss(seasonId, weekId)}/name`).get()).val() || 'the boss',
+    bossName,
     roster: Object.keys(signups).length,
     survivors: (combat.result?.survivors || []).length,
     awards,

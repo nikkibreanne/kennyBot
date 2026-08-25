@@ -152,6 +152,10 @@ export const PATHS = {
   tradeIndex: (login) => `trades/index/${login}`,
   botToken: () => 'config/secrets/botToken',
   items: () => 'items',
+  // Pending "tell them next time they chat" notices, keyed by uid. Small and
+  // short-lived: written on a raid payout, deleted on delivery.
+  notices: () => 'notices',
+  notice: (userId) => `notices/${userId}`,
   dropActive: () => 'drops/active',
   dropsRoot: () => 'drops',
   dropQueue: () => 'drops/queue',

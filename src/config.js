@@ -111,6 +111,13 @@ export const config = {
     scheduler: { enabled: false, intervalSec: 15 * 60, jitter: 0.3 }, // ~15 min ±30%
   },
 
+  // Pending "tell them next time they chat" notices (src/db/notices.js).
+  notices: {
+    // Minimum gap between notice lines so a post-raid rush can't burst a dozen
+    // messages at once. Anyone skipped gets theirs on their next message.
+    minGapMs: 4_000,
+  },
+
   // ── Weekly raid: muster → raid night → automated battle (spec §5.8) ───────
   raid: {
     seasonWeeks: 6, // a season = 6 weekly bosses + a prestige finale (§5.6)

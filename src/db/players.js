@@ -9,6 +9,7 @@ import { rollStarterEquipped, itemObject, getItem, SLOTS } from '../content/item
 import { applyChatExp } from '../rules/leveling.js';
 import { engagementMultiplier, roleRating, contribution } from '../rules/rating.js';
 import { config } from '../config.js';
+import { clearAllNotices } from './notices.js';
 
 /** Read a player record (or null). */
 export async function getPlayer(userId) {
@@ -266,6 +267,10 @@ export function prestigeFor(raidsAttended, cfg = config) {
  *   granted = total renown handed out; best = the largest single award.
  */
 export async function rolloverAllPlayers({ seasonId = null, cfg = config } = {}) {
+  // Last season's undelivered "you got X" lines are stale the moment gear
+  // resets — saying one after a rollover would point at an item the wipe just
+  // removed from the bag.
+  await clearAllNotices();
   const attendance = await seasonAttendance(seasonId);
   const snap = await database().ref('players').get();
   const players = snap.val() || {};

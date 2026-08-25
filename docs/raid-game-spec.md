@@ -173,6 +173,14 @@ function onChatMessage(user, config) {
   the standout drops). Nothing announced them before, so a cleared boss paid
   gear silently into bags — the single biggest reason raid rewards read as an
   opaque mechanism.
+- On top of that, each rewarded hero gets a **personal `@`-mention the next time
+  they chat** (`notices/<uid>`, src/db/notices.js). This is NOT a claim queue —
+  `addLoot` already put the item in their bag — only the *sentence* is queued,
+  because a one-shot announcement at resolve time reaches whoever happens to be
+  in chat that minute and nobody else. Delivered publicly (other viewers seeing
+  a hero come back with loot is free advertising), exactly once (transactional
+  delete), globally spaced so a post-raid rush can't burst chat, and dropped on
+  season rollover since the gear it names has been reset.
 - **Bits set a rarity floor, not just a trigger** (`loot.cheer`). Below
   `minBits` nothing drops; above it the highest band the cheer clears sets a
   floor, and the ladder re-rolls on the remaining relative weights — so a big
