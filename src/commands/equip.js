@@ -4,6 +4,7 @@
 // (IMPLEMENTATION §G).
 import { getPlayer, equipItem } from '../db/players.js';
 import { resolveOwnedItem } from '../content/items.js';
+import { classesForRoleLabel } from '../content/classes.js';
 
 export default {
   names: ['equip'],
@@ -29,6 +30,16 @@ export default {
 
     const res = await equipItem(user.id, itemId);
     if (!res.ok) {
+      // Off-role gear is the common case and deserves a real answer: say who it
+      // IS for, so the piece gets traded to someone it helps instead of sitting
+      // dead in a bag (or worse, worn for nothing).
+      if (res.reason === 'wrong-role') {
+        reply(
+          `@${user.displayName} ${res.item.name} is ${res.item.role} gear — your hero is ${res.wearerRole}, so it would do nothing. ` +
+          `It's for a ${classesForRoleLabel(res.item.role)}. Pass it on: !give @user <#> or !trade @user <#>.`,
+        );
+        return;
+      }
       const why = res.reason === 'not-owned' ? "you don't own that" : res.reason;
       reply(`@${user.displayName} couldn't equip: ${why}.`);
       return;

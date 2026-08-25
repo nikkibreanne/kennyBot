@@ -379,3 +379,41 @@ streams — exactly the season-long grind it's meant to be.
 - **Do not** raise `levelUp.base` unless you *want* to re-introduce the chance of
   a level popping the moment the bar fills (i.e. lucky early levels). `0` is what
   keeps leveling free of luck.
+
+## `respec` — changing class
+
+| Key | Default | What it does |
+|---|---|---|
+| `cost` | `500` | Credits `!respec` charges (≈2.5 daily claims). Level/EXP/renown survive; gear returns to the bag and a starter set for the new role is rolled. |
+
+## `enlistReminder` — the "you never joined the season" nudge
+
+**Not** a recurring broadcast, and never fired the moment someone speaks. A
+background pass invites one hero at a time; enlistment lasts a whole season, so
+there is nothing to repeat.
+
+| Key | Default | What it does |
+|---|---|---|
+| `enabled` | `true` | Master switch. |
+| `graceMs` | `7d` | How long after `!create` before a hero can be reminded at all. |
+| `minGapMs` | `45m` | Minimum spacing between any two reminders, so they never clump. |
+| `presentWithinMs` | `20m` | Only `@` someone whose last chat tick is this recent. |
+| `checkMs` | `10m` | How often the background pass looks. Live + `signup` phase only. |
+
+## `schedulePrompt` — "no raid week is open"
+
+Weeks are opened by hand so the muster window lands while the stream is live.
+The trade-off is that forgetting is invisible, so the bot says what needs
+scheduling: once when a battle resolves, plus a slow live-only backstop.
+
+| Key | Default | What it does |
+|---|---|---|
+| `enabled` | `true` | Master switch. |
+| `minGapMs` | `2h` | Backstop spacing. The post-battle prompt is not rate-limited — it fires once, when the week closes. |
+| `checkMs` | `15m` | How often the backstop looks. |
+
+## `notices` — "tell them next time they chat"
+
+| Key | Default | What it does |
+|---|---|---|
+| `minGapMs` | `4000` | Spacing between raid-reward @-mentions, so a post-raid rush can't burst chat. Anyone skipped is told on their next message. |

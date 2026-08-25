@@ -11,7 +11,7 @@ import { ChatClient } from '@twurple/chat';
 import { logger } from './src/logger.js';
 import { config } from './src/config.js';
 import { initFirebase, closeFirebase } from './src/db/firebase.js';
-import { startConfigMirror, setLive, isChatMuted } from './src/db/configStore.js';
+import { startConfigMirror, setLive, isChatMuted, getConfig, getRaidPointer } from './src/db/configStore.js';
 import { acquireLock, startHeartbeat, releaseLock, defaultInstanceId } from './src/db/lock.js';
 import { TokenStore } from './src/db/tokenStore.js';
 import { buildAuth } from './src/twitch/auth.js';
@@ -22,7 +22,7 @@ import { initCapture, captureReady } from './src/integrations/capture.js';
 import { activeClipMode } from './src/commands/clip.js';
 import { startLivePoll } from './src/twitch/liveGate.js';
 import { startEventSub } from './src/twitch/eventsub.js';
-import { advanceRaidPhases, refreshMusteredRoster } from './src/db/raid.js';
+import { advanceRaidPhases, refreshMusteredRoster, raidScheduleStatus } from './src/db/raid.js';
 import { seedCuratedFacts } from './src/db/facts.js';
 import { seedCatalog } from './src/db/catalog.js';
 import { createMessageHandler } from './src/events/chat.js';
@@ -33,6 +33,8 @@ import { startTimerScheduler } from './src/events/timerScheduler.js';
 import { startReminderScheduler } from './src/events/reminderScheduler.js';
 import { seedReminders } from './src/db/reminders.js';
 import { processDrops } from './src/db/drops.js';
+import { startNoticeMirror } from './src/db/notices.js';
+import { findLapsedHero, markInvited } from './src/db/enlistReminder.js';
 
 // Running version, read from the bundled package.json (in the image at /app).
 // Surfaced in the startup log + heartbeat so "which release is this box on?"
@@ -83,6 +85,78 @@ async function touchHeartbeat() {
     await writeFile(HEARTBEAT_FILE, JSON.stringify({ ts: Date.now(), ...health }));
   } catch {
     /* best effort */
+  }
+}
+
+/**
+ * Say what just happened to the raid. Nothing announced these transitions, so a
+ * cleared boss paid gear silently into bags — the single biggest reason the raid
+ * rewards read as an opaque mechanism. Chat now hears the lock, the result, and
+ * who got what.
+ * @param {{transition: string, seasonId: string, weekId: string, result?: object}} t
+ */
+function announceRaidPhase(t, send, logger) {
+  try {
+    if (t.transition === 'locked') {
+      send.say('🔒 The roster is LOCKED — no more !muster. The battle begins shortly; watch it at ' + `${config.siteUrl}/arena/`);
+      return;
+    }
+    if (t.transition === 'live') {
+      send.say(`⚔️ RAID NIGHT! The battle is playing out now — watch it at ${config.siteUrl}/arena/`);
+      return;
+    }
+    if (t.transition !== 'done' || !t.result) return;
+
+    const r = t.result;
+    if (!r.downed) {
+      send.say(`💀 ${r.bossName} survived — the patch was wiped (${r.roster} heroes). No loot this week. Replay: ${config.siteUrl}/arena/`);
+      promptNextWeek(send, logger);
+      return;
+    }
+    const mvp = r.mvpName ? ` MVP: @${r.mvpName}.` : '';
+    send.say(
+      `🏆 ${r.bossName} is DOWN! ${r.survivors}/${r.roster} heroes walked away.${mvp} ` +
+      `Everyone who raided got a piece of gear — check !bag, then !equip it.`,
+    );
+    // The week just closed and nothing schedules the next one — say so here,
+    // while it's the obvious next step, rather than letting the game stall.
+    promptNextWeek(send, logger);
+    // Name the standout drops rather than all of them: one line, not a wall.
+    const best = (r.awards || [])
+      .filter((a) => a.item && ['epic', 'legendary'].includes(a.item.rarity))
+      .slice(0, 3)
+      .map((a) => `@${a.name || 'a hero'} → ${a.item.rarity} ${a.item.name}`);
+    if (best.length) send.say(`✨ ${best.join(' · ')}`);
+  } catch (err) {
+    logger.error('raid announce failed', { err: String(err) });
+  }
+}
+
+/**
+ * Say what needs scheduling next, if anything. Weeks are opened by hand
+ * (`!boss next`) so the muster window lands while the stream is live — the
+ * trade-off is that forgetting is invisible, and a whole week quietly passes
+ * with no raid. Called after a battle resolves and, as a backstop, on a slow
+ * live-only timer.
+ */
+async function promptNextWeek(send, logger) {
+  try {
+    const st = await raidScheduleStatus();
+    if (st.open) return false;
+    if (st.seasonComplete) {
+      send.say(
+        st.nextTier
+          ? `🏁 ${st.seasonName || st.seasonId} is complete. Mods: !season rollover t${st.nextTier} <name> to start the next tier.`
+          : `🏁 ${st.seasonName || st.seasonId} is complete — every boss has been faced. Mods: !season start <id> <name> for a new tier.`,
+      );
+      return true;
+    }
+    if (!st.nextWeek) return false;
+    send.say(`⏭️ Nothing is scheduled yet — next up is week ${st.nextWeek}, ${st.nextBoss}. Mods: !boss next to open the muster.`);
+    return true;
+  } catch (err) {
+    logger.error('schedule prompt failed', { err: String(err) });
+    return false;
   }
 }
 
@@ -231,6 +305,17 @@ async function main() {
   // ── Resolve-on-boot: advance raid phases by stored timestamps, never a timer
   //    a restart could lose (§H.5 / §L.1). Loop to catch up after downtime
   //    (e.g. signup→locked→live→done all overdue).
+  // Undelivered raid-reward lines, said when their owner next speaks. The gear
+  // itself was handed over at payout — this only restores what's left to SAY.
+  try {
+    const n = await startNoticeMirror(logger);
+    if (n) logger.info('undelivered raid-reward announcements restored', { count: n });
+  } catch (err) {
+    logger.error('notice mirror failed to start', { err: String(err) });
+  }
+
+  // Deliberately SILENT: a battle that resolved during downtime is old news, and
+  // announcing it on boot would replay stale results into chat.
   for (let i = 0; i < 5; i++) {
     const t = await advanceRaidPhases();
     if (!t) break;
@@ -332,13 +417,64 @@ async function main() {
   const phaseTimer = setInterval(async () => {
     try {
       const t = await advanceRaidPhases();
-      if (t) logger.info('raid phase advanced', t);
+      if (!t) return;
+      logger.info('raid phase advanced', t);
+      announceRaidPhase(t, send, logger);
     } catch (err) {
       logger.error('phase tick failed', { err: String(err) });
     }
   }, 30_000);
   phaseTimer.unref?.();
   shutdownHooks.push(() => clearInterval(phaseTimer));
+
+  // ── Enlistment reminder ───────────────────────────────────────────────────
+  //    One hero at a time, at most one per `minGapMs`, and only someone who has
+  //    a week-old character, never joined this season, and has been chatting in
+  //    the last few minutes. Not fired on their message — a bot that answers
+  //    your first line of the night with a nag reads as lying in wait.
+  let lastReminderAt = Date.now(); // don't fire the moment the bot boots
+  const reminderTimer = setInterval(async () => {
+    try {
+      const cfg = config.enlistReminder;
+      if (!cfg.enabled || isChatMuted() || !getConfig().live) return;
+      if (Date.now() - lastReminderAt < cfg.minGapMs) return;
+      const pointer = getRaidPointer();
+      if (pointer?.phase !== 'signup') return; // nothing to enlist into
+      const target = await findLapsedHero(pointer);
+      if (!target) return;
+      // Mark BEFORE saying it: a send failure should cost the invite, not risk
+      // asking the same person again on every later pass.
+      await markInvited(target.uid, pointer.seasonId);
+      lastReminderAt = Date.now();
+      send.say(
+        `🌱 @${target.player.displayName} — your ${target.player.class} isn't on this season's roster. ` +
+        `One !muster enlists you for every week of it, and a thin raid really can wipe.`,
+      );
+      logger.info('enlistment reminder sent', { userId: target.uid, season: pointer.seasonId });
+    } catch (err) {
+      logger.error('enlistment reminder failed', { err: String(err) });
+    }
+  }, config.enlistReminder.checkMs);
+  reminderTimer.unref?.();
+  shutdownHooks.push(() => clearInterval(reminderTimer));
+
+  // ── Backstop: a week that never got scheduled ─────────────────────────────
+  //    The prompt above rides the battle result, which covers the normal case.
+  //    This catches the rest — a restart across the transition, a muted bot, or
+  //    simply nobody acting on it — so the game can't silently sit idle.
+  let lastPromptAt = Date.now();
+  const promptTimer = setInterval(async () => {
+    try {
+      const cfg = config.schedulePrompt;
+      if (!cfg.enabled || isChatMuted() || !getConfig().live) return;
+      if (Date.now() - lastPromptAt < cfg.minGapMs) return;
+      if (await promptNextWeek(send, logger)) lastPromptAt = Date.now();
+    } catch (err) {
+      logger.error('schedule prompt tick failed', { err: String(err) });
+    }
+  }, config.schedulePrompt.checkMs);
+  promptTimer.unref?.();
+  shutdownHooks.push(() => clearInterval(promptTimer));
 
   // ── Muster roster refresh: during signup, keep each hero's card current with
   //    their live level/gear (frozen again at lock). No-op outside signup. ──

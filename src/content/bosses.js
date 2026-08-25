@@ -87,6 +87,57 @@ export function scaleBossHp(baseHp, playerCount, refCount = REFERENCE.heroes) {
   return Math.max(floor, Math.min(ceil, scaled));
 }
 
+/**
+ * BOSS ATTACK SCALING.
+ *
+ * HP scaled to headcount but ATK did not, and that asymmetry is what broke small
+ * raids. The boss lands roughly one SINGLE-TARGET attack per turn, so its damage
+ * is divided among however many heroes are present: at the 15-hero reference a
+ * given hero is hit about 1/15 of turns, but in a 4-hero raid about 1/4 — close
+ * to 4x the incoming damage per hero, against the same per-hero health pool.
+ *
+ * Measured with scripts/balance-sim.mjs (200 seeds, Season 1, level 10, starter
+ * gear — i.e. the first weeks of a fresh season):
+ *
+ *            w1    w2    w3    w4    w5    w6
+ *   15 heroes  100%   99%   99%   94%   92%   88%   ← reference: on target
+ *    4 heroes    0%    0%    0%    0%    0%    0%   ← every week impossible
+ *
+ * The reference size behaves exactly as designed, so this is a scaling gap, not
+ * mis-tuned content. With ATK scaled at the exponent below, the same 4-hero raid
+ * reads 100/34/65/70/100/16 — losses are frequent but no longer certain, and the
+ * result responds to how strong the raid is instead of to arithmetic.
+ *
+ *     scaleBossAtk(atk, n) = clamp( atk * (n / 15)^ATK_EXPONENT )
+ *
+ * The exponent sits just under HP's 0.92 on purpose. Matching 0.92 exactly makes
+ * a 6-hero raid win every week (100% across the board — no drama, no story in a
+ * wipe); dropping to 0.55 leaves weeks 2-4 near-impossible again. 0.75 keeps a
+ * thin raid genuinely harder than a full one without making it hopeless.
+ * test/rules/balance.test.js pins this so a later edit can't silently drift it.
+ *
+ * KNOWN LIMIT: weeks 1 and 5 stay easy at any roster size — week 5 carries the
+ * highest baseHp in the season, so HP scaling strips more from it than from the
+ * others. Evening that out means retuning the boss content itself, which is a
+ * gameplay decision rather than a scaling fix.
+ *
+ * @param {number} atk         boss.atk (reference-calibrated)
+ * @param {number} playerCount number of signed-up heroes
+ * @param {number} [refCount=15]
+ * @returns {number} integer attack power to pass to the engine
+ */
+export function scaleBossAtk(atk, playerCount, refCount = REFERENCE.heroes) {
+  const n = Math.max(1, Math.floor(playerCount || 0));
+  const f = Math.pow(n / refCount, ATK_EXPONENT);
+  const scaled = Math.round((atk || 0) * f);
+  const floor = Math.round((atk || 0) * 0.35);
+  const ceil = Math.round((atk || 0) * 1.5);
+  return Math.max(floor, Math.min(ceil, scaled));
+}
+
+/** Fitted with scripts/balance-sim.mjs — see scaleBossAtk for the measurements. */
+export const ATK_EXPONENT = 0.75;
+
 // Campy season arcs (flavor only — the bot can surface these on the muster page).
 export const SEASON_THEMES = Object.freeze([
   { id: 's1', title: 'The Proving Bed', sub: 'First Frost & Foul Weeds' },

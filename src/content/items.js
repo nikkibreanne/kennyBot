@@ -968,10 +968,20 @@ const SEASON_GEAR_BUILT = buildSeasonGear();
 /**
  * The full gear catalog: hand-authored entries (starter gear + the original 48
  * season items, whose ids are already in players' bags) plus the generated
- * pyramid. Hand-authored entries WIN on an id clash, so a generated item can
+ * pyramid appended.
+ *
+ * Built by explicit insertion rather than a spread so BOTH properties hold at
+ * once: hand-authored entries come FIRST (a spread would order by whichever
+ * side was spread first) and they WIN on an id clash, so a generated item can
  * never quietly redefine one people already own.
  */
-export const ITEMS = { ...SEASON_GEAR_BUILT.items, ...HAND_ITEMS };
+export const ITEMS = (() => {
+  const merged = { ...HAND_ITEMS };
+  for (const [id, item] of Object.entries(SEASON_GEAR_BUILT.items)) {
+    if (!(id in merged)) merged[id] = item;
+  }
+  return merged;
+})();
 
 /**
  * Per-season drop pools: the original hand-tuned ids first (stable, already

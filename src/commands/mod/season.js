@@ -2,8 +2,8 @@
 // Sets the season pointer + loot table and opens week 1's muster with the first
 // boss scheduled for the next raid night. Gear reset / prestige carryover on
 // season rollover is a later phase (§5.6) — flagged, not silently done.
-import { setSeason, getSeason } from '../../db/configStore.js';
-import { setupRaidWeek, computeNextRaidNight } from '../../db/raid.js';
+import { setSeason, getSeason, getRaidPointer } from '../../db/configStore.js';
+import { setupRaidWeek, computeNextRaidNight, weeksInSeasonDb } from '../../db/raid.js';
 import { rolloverAllPlayers } from '../../db/players.js';
 import { seasonBoss } from '../../content/bosses.js';
 import { SEASON_LOOT } from '../../content/items.js';
@@ -22,7 +22,10 @@ async function openSeason(id, name) {
   const startsAt = computeNextRaidNight();
   const boss = seasonBoss(tier, 1);
   await setupRaidWeek({ seasonId: id, weekId: 'w1', boss, locksAt: startsAt - config.raid.lockLeadMs, startsAt });
-  return boss;
+  // Week 1 starts empty. Heroes who don't re-enlist are invited later, one at a
+  // time, by the background pass in src/db/enlistReminder.js — never all at once
+  // and never the instant they speak.
+  return { boss, invited: 0 };
 }
 
 export default {
@@ -40,12 +43,32 @@ export default {
         reply('Usage: !season start <id> [name] — id is alphanumeric (e.g. t2).');
         return;
       }
-      const boss = await openSeason(id, name);
+      // Refuse to reopen a season that already has weeks. `openSeason` writes
+      // week 1 unconditionally, so re-running it on a live id overwrites that
+      // week's boss AND replaces its raid node — destroying the roster and the
+      // recorded result. Rolling to a NEW tier is `!season rollover`.
+      const existing = await weeksInSeasonDb(id);
+      if (existing > 0) {
+        reply(
+          `⚠️ Season "${id}" already exists with ${existing} week${existing === 1 ? '' : 's'} — ` +
+          `starting it again would wipe week 1's boss and roster. Use !season rollover <newId> for the next tier.`,
+        );
+        return;
+      }
+      const { boss } = await openSeason(id, name);
       reply(`🌱 Season started: ${name} (${id}, ${config.raid.seasonWeeks} weeks). Week 1 boss: ${boss.name}. Players: !muster to join!`);
       return;
     }
 
     if (sub === 'rollover') {
+      // Rolling over mid-battle would pay the finishing raid out of the new
+      // season's table into bags the rollover just emptied. Make the operator
+      // wait out the reveal (minutes), rather than silently corrupting a payout.
+      const active = getRaidPointer();
+      if (active && (active.phase === 'live' || active.phase === 'locked')) {
+        reply(`⏳ A raid is ${active.phase} right now — wait for it to finish paying out, then roll over.`);
+        return;
+      }
       // New tier: RESET everyone's gear (fresh start, newcomers aren't behind),
       // KEEP level + renown, and grant prestige renown to the heroes who actually
       // raided the OUTGOING season (§5.6 awards it to veterans). Read that season
@@ -56,7 +79,7 @@ export default {
       }
       const outgoing = getSeason();
       const { reset, prestiged, granted, best } = await rolloverAllPlayers({ seasonId: outgoing?.id });
-      const boss = await openSeason(id, name);
+      const { boss } = await openSeason(id, name);
       const from = outgoing?.name || outgoing?.id || 'the last season';
       const prestigeLine = prestiged
         ? `${prestiged} veteran${prestiged === 1 ? '' : 's'} of ${from} earned ${granted} prestige renown ` +

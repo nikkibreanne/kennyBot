@@ -9,9 +9,11 @@
 import { test, before, after, beforeEach } from 'node:test';
 import assert from 'node:assert/strict';
 import { initFirebase, database, closeFirebase, PATHS } from '../src/db/firebase.js';
-import { startConfigMirror, setSeason, getSeason } from '../src/db/configStore.js';
+import { startConfigMirror, setSeason, getSeason, setRaidPointer, getRaidPointer } from '../src/db/configStore.js';
 import { rolloverAllPlayers } from '../src/db/players.js';
 import bossCmd from '../src/commands/mod/boss.js';
+import seasonCmd from '../src/commands/mod/season.js';
+import { nextWeekId, raidScheduleStatus } from '../src/db/raid.js';
 import { itemObject } from '../src/content/items.js';
 import { config } from '../src/config.js';
 
@@ -56,6 +58,16 @@ async function seedScheduledWeeks(n) {
   const weeks = {};
   for (let i = 1; i <= n; i++) weeks[`w${i}`] = { name: `Boss ${i}`, baseHp: 1000, atk: 50, status: 'downed' };
   await database().ref(PATHS.bossesForSeason(SEASON)).set(weeks);
+}
+
+/** The raid mirror is fed by an async RTDB listener — poll until it converges. */
+async function waitForPointerPhase(phase, ms = 3000) {
+  const deadline = Date.now() + ms;
+  while (Date.now() < deadline) {
+    if (getRaidPointer()?.phase === phase) return;
+    await new Promise((r) => setTimeout(r, 25));
+  }
+  throw new Error('config/raid mirror did not converge in time');
 }
 
 /** Run `!boss <args>` and return what it said in chat. */
@@ -220,4 +232,103 @@ runOrSkip('prestige is bounded so an overlong season cannot mint a runaway veter
   const { best } = await rolloverAllPlayers({ seasonId: SEASON });
 
   assert.equal(best, config.raid.prestigeMax, 'capped at config.raid.prestigeMax');
+});
+
+// ── operator guards (the three small bugs) ──────────────────────────────────
+
+runOrSkip('!season start refuses to reopen a season that already has weeks', async () => {
+  // openSeason writes week 1 unconditionally, so re-running it on a live id
+  // overwrote that week's boss AND replaced its raid node — roster and result.
+  await setSeason({ id: SEASON, name: 'Rollover Test', tier: 1, weeks: WEEKS, startsAt: Date.now() });
+  await waitForSeason((s) => s?.id === SEASON);
+  await seedScheduledWeeks(3);
+  const db = database();
+  await db.ref(PATHS.signup(SEASON, 'w1', VET)).set({ displayName: 'Tester', role: 'dps', level: 12 });
+  await db.ref(`raids/${SEASON}/w1/result`).set({ downed: true, status: 'done' });
+
+  let said = '';
+  await seasonCmd.run({ args: ['start', SEASON, 'Again'], reply: (t) => { said = t; }, logger: noopLogger });
+
+  assert.match(said, /already exists/i, `expected a refusal, got: ${said}`);
+  assert.match(said, /rollover/i, 'and a pointer at the right command');
+  const roster = await db.ref(PATHS.signups(SEASON, 'w1')).get();
+  assert.equal(roster.exists(), true, "week 1's roster must survive");
+  const result = await db.ref(`raids/${SEASON}/w1/result`).get();
+  assert.equal(result.val()?.downed, true, "week 1's recorded result must survive");
+});
+
+runOrSkip('!season rollover refuses while a raid is locked or live', async () => {
+  await setSeason({ id: SEASON, name: 'Rollover Test', tier: 1, weeks: WEEKS, startsAt: Date.now() });
+  await waitForSeason((s) => s?.id === SEASON);
+  await setRaidPointer({ seasonId: SEASON, weekId: 'w1', phase: 'live', doneAt: Date.now() + 60_000 });
+  await waitForPointerPhase('live');
+
+  let said = '';
+  await seasonCmd.run({ args: ['rollover', 't_next'], reply: (t) => { said = t; }, logger: noopLogger });
+
+  assert.match(said, /wait/i, `rolling over mid-battle pays the finishing raid from the WRONG table; got: ${said}`);
+  const stillOld = (await database().ref(PATHS.seasonCurrent()).get()).val();
+  assert.equal(stillOld.id, SEASON, 'the season pointer must not have moved');
+  await setRaidPointer({ phase: 'done' });
+});
+
+runOrSkip('nextWeekId takes the highest week, so a deleted week cannot collide', async () => {
+  // With a child COUNT, deleting any week made the next id collide with an
+  // existing one and silently overwrite its boss and roster.
+  await seedScheduledWeeks(5);
+  await database().ref(PATHS.boss(SEASON, 'w2')).remove(); // a mis-scheduled week cleaned up
+  const next = await nextWeekId(SEASON);
+  assert.equal(next, 'w6', `expected w6 after the highest (w5), got ${next}`);
+});
+
+// ── the silent-stall guard ──────────────────────────────────────────────────
+// Weeks are scheduled BY HAND so the muster window opens while the stream is
+// live. The cost of that choice is that forgetting is invisible — the game just
+// stops for a week, which is how t1 drifted onto its finale three times.
+
+runOrSkip('raidScheduleStatus reports a week in flight as open', async () => {
+  await setSeason({ id: SEASON, name: 'Rollover Test', tier: 1, weeks: WEEKS, startsAt: Date.now() });
+  await waitForSeason((s) => s?.id === SEASON);
+  await seedScheduledWeeks(2);
+  await setRaidPointer({ seasonId: SEASON, weekId: 'w2', phase: 'signup' });
+  await waitForPointerPhase('signup');
+
+  const st = await raidScheduleStatus();
+  assert.equal(st.open, true, 'a signup-phase week needs no prompt');
+});
+
+runOrSkip('a finished week with the season unfinished names the next boss', async () => {
+  await setSeason({ id: SEASON, name: 'Rollover Test', tier: 1, weeks: WEEKS, startsAt: Date.now() });
+  await waitForSeason((s) => s?.id === SEASON);
+  await seedScheduledWeeks(2);
+  await setRaidPointer({ seasonId: SEASON, weekId: 'w2', phase: 'done' });
+  await waitForPointerPhase('done');
+
+  const st = await raidScheduleStatus();
+  assert.equal(st.open, false, 'nothing is scheduled — this is the stall');
+  assert.equal(st.seasonComplete, false);
+  assert.equal(st.nextWeek, 3, 'and it says which week is next');
+  assert.ok(st.nextBoss, 'and which boss, so the prompt is actionable');
+});
+
+runOrSkip('a finished SEASON prompts a rollover, not another week', async () => {
+  await setSeason({ id: SEASON, name: 'Rollover Test', tier: 1, weeks: WEEKS, startsAt: Date.now() });
+  await waitForSeason((s) => s?.id === SEASON);
+  await seedScheduledWeeks(WEEKS);
+  await setRaidPointer({ seasonId: SEASON, weekId: `w${WEEKS}`, phase: 'done' });
+  await waitForPointerPhase('done');
+
+  const st = await raidScheduleStatus();
+  assert.equal(st.seasonComplete, true);
+  assert.equal(st.nextWeek, null, 'there is no week 7 to schedule');
+  assert.equal(st.nextTier, 2, 'it points at the next tier instead');
+});
+
+runOrSkip('with no season at all there is nothing to prompt about', async () => {
+  await database().ref(PATHS.seasonCurrent()).remove();
+  await waitForSeason((s) => !s?.id);
+  const st = await raidScheduleStatus();
+  assert.equal(st.open, false);
+  assert.equal(st.nextWeek, null);
+  assert.equal(st.seasonComplete, false, 'no season is not a completed season');
 });

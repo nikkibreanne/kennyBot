@@ -9,6 +9,7 @@ import { rollStarterEquipped, itemObject, getItem, SLOTS } from '../content/item
 import { applyChatExp } from '../rules/leveling.js';
 import { engagementMultiplier, roleRating, contribution } from '../rules/rating.js';
 import { config } from '../config.js';
+import { clearAllNotices } from './notices.js';
 
 /** Read a player record (or null). */
 export async function getPlayer(userId) {
@@ -129,6 +130,16 @@ export async function equipItem(userId, itemId) {
 
   const res = await ref.transaction((curr) => {
     if (curr == null) { outcome = { ok: false, reason: 'no-character' }; return null; }
+    // ROLE LOCK. Gear pays out only through bonuses[wearer.role], so off-role
+    // gear was always worth exactly 0 — but nothing said so, and players wore it
+    // anyway (9 pieces were equipped off-role in prod, one hero in all three
+    // slots, running on zero gear rating without knowing). Refusing the equip
+    // turns a silent dead end into a reason to trade the piece to someone it
+    // helps. `item.role` is the item's affinity; a class fixes its wearer's role.
+    if (curr.role && typeof item.bonuses?.[curr.role] !== 'number') {
+      outcome = { ok: false, reason: 'wrong-role', item, wearerRole: curr.role };
+      return; // abort
+    }
     const inventory = Array.isArray(curr.inventory) ? [...curr.inventory] : [];
     const idx = inventory.indexOf(itemId);
     if (idx === -1) { outcome = { ok: false, reason: 'not-owned' }; return; } // abort
@@ -256,6 +267,10 @@ export function prestigeFor(raidsAttended, cfg = config) {
  *   granted = total renown handed out; best = the largest single award.
  */
 export async function rolloverAllPlayers({ seasonId = null, cfg = config } = {}) {
+  // Last season's undelivered "you got X" lines are stale the moment gear
+  // resets — saying one after a rollover would point at an item the wipe just
+  // removed from the bag.
+  await clearAllNotices();
   const attendance = await seasonAttendance(seasonId);
   const snap = await database().ref('players').get();
   const players = snap.val() || {};
@@ -281,6 +296,70 @@ export async function rolloverAllPlayers({ seasonId = null, cfg = config } = {})
     reset += 1;
   }
   return { reset, prestiged, granted, best };
+}
+
+/**
+ * Remove items from a player's bag, atomically. Returns what actually left —
+ * a racing `!equip` or `!trade` on the same item must not let it be sold twice.
+ * @param {string} userId
+ * @param {string[]} itemIds
+ * @returns {Promise<string[]>} the ids genuinely removed
+ */
+export async function removeFromBag(userId, itemIds) {
+  const wanted = [...itemIds];
+  let removed = [];
+  await database().ref(PATHS.player(userId)).transaction((curr) => {
+    if (curr == null) return null;
+    const inventory = Array.isArray(curr.inventory) ? [...curr.inventory] : [];
+    removed = [];
+    for (const id of wanted) {
+      const idx = inventory.indexOf(id);
+      if (idx !== -1) { inventory.splice(idx, 1); removed.push(id); }
+    }
+    if (!removed.length) return; // abort — nothing to do
+    return { ...curr, inventory };
+  });
+  return removed;
+}
+
+/**
+ * Change a player's class, and with it their ROLE (spec §5.6). Keeps level, EXP
+ * and renown; re-rolls starter gear because the old role's gear cannot be worn
+ * any more. The bag is left ALONE on purpose — those items are now off-role and
+ * become trade or `!salvage` fodder rather than being destroyed for them.
+ * @param {string} userId
+ * @param {string} className
+ * @returns {Promise<{ok:true,from:object,to:object}|{ok:false,reason:string}>}
+ */
+export async function respecPlayer(userId, className) {
+  const role = roleForClass(className);
+  if (!role) return { ok: false, reason: 'unknown-class' };
+
+  let outcome = { ok: false, reason: 'unknown' };
+  const res = await database().ref(PATHS.player(userId)).transaction((curr) => {
+    if (curr == null) { outcome = { ok: false, reason: 'no-character' }; return null; }
+    if (curr.class === className) { outcome = { ok: false, reason: 'same-class' }; return; }
+    const equipped = curr.equipped || {};
+    // Anything currently worn goes back to the bag rather than evaporating.
+    const returned = Object.values(equipped)
+      .filter(Boolean)
+      .map((v) => (typeof v === 'string' ? v : v.id))
+      .filter(Boolean);
+    outcome = {
+      ok: true,
+      from: { class: curr.class, role: curr.role },
+      to: { class: className, role },
+      returned: returned.length,
+    };
+    return {
+      ...curr,
+      class: className,
+      role,
+      equipped: rollStarterEquipped(role),
+      inventory: [...(Array.isArray(curr.inventory) ? curr.inventory : []), ...returned],
+    };
+  });
+  return outcome.ok && res.committed ? outcome : outcome;
 }
 
 /**

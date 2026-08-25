@@ -14,6 +14,7 @@ import { getCommand } from '../commands/registry.js';
 import { getConfig, isChatMuted } from '../db/configStore.js';
 import { config, shouldGrantExp } from '../config.js';
 import { applyChatTick } from '../db/players.js';
+import { hasNotice, takeNotice } from '../db/notices.js';
 
 /**
  * @param {{
@@ -92,6 +93,44 @@ export function createMessageHandler({ sender, channel, botUserId, logger, onAct
     }
   }
 
+  // Say "you got this" to someone who ALREADY HAS IT. Raid rewards land in the
+  // bag at payout with nobody required to be watching, so the line telling them
+  // is held until they next speak — the one moment we know they're here. Said
+  // PUBLICLY on purpose: other viewers seeing someone come back from a raid with
+  // loot is the cheapest advertising the raid has. Nothing is claimed and nothing
+  // is withheld; dropping a line loses the sentence, never the gear.
+  //
+  // Spaced globally so a post-raid rush can't burst a dozen lines into chat and
+  // trip Twitch's rate limit; anyone skipped simply gets theirs on their next
+  // message, which costs nothing because the notice stays parked until claimed.
+  let lastNoticeAt = 0;
+  async function deliverNotice(user) {
+    if (!hasNotice(user.id) || isChatMuted()) return; // Map lookup — no I/O
+    const now = Date.now();
+    if (now - lastNoticeAt < config.notices.minGapMs) return;
+    lastNoticeAt = now;
+
+    let notice;
+    try {
+      notice = await takeNotice(user.id); // atomic — delivered exactly once
+    } catch (err) {
+      logger.error('notice claim failed', { userId: user.id, err: String(err) });
+      return;
+    }
+    if (!notice) return; // another message beat us to saying it
+
+    if (notice.kind === 'raidReward') {
+      const rarity = notice.rarity ? `${notice.rarity} ` : '';
+      const badge = notice.mvp ? ' 🏅 MVP of the fight!' : '';
+      sender.say(
+        `🎁 @${user.displayName} — your hero brought back a ${rarity}${notice.itemName} from ${notice.bossName}!${badge} ` +
+        `It's in your !bag, ready to !equip.`,
+      );
+      logger.info('raid reward notice delivered', { userId: user.id, item: notice.itemId });
+      return;
+    }
+  }
+
   async function passiveTick(user) {
     const cfg = getConfig();
     if (!shouldGrantExp(cfg)) return; // live gate / expMode override (spec §5.1)
@@ -139,6 +178,7 @@ export function createMessageHandler({ sender, channel, botUserId, logger, onAct
       }
 
       await passiveTick(user);
+      await deliverNotice(user);
     } catch (err) {
       logger.error('message handler error', { err: String(err?.stack || err) });
     }
