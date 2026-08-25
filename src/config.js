@@ -287,13 +287,19 @@ export const config = {
   // gear for the new role since the old role's gear no longer works.
   respec: { cost: 500 },
 
-  // ── Season enlistment invite ──────────────────────────────────────────────
-  // NOT a recurring reminder. A repeating "hey muster" broadcast is exactly the
-  // thing that makes a bot tiresome, and enlistment lasts a whole season anyway,
-  // so there is nothing to repeat. Instead each hero who hasn't joined the new
-  // season is invited ONCE, delivered the next time they happen to speak
-  // (src/db/notices.js). Ceiling: one line per player per season.
-  seasonInvite: { enabled: true },
+  // ── "You made a hero and never joined the season" reminder ────────────────
+  // NOT a recurring broadcast and NOT fired the moment someone speaks — a bot
+  // that answers your first message with a nag reads as lying in wait. A
+  // background pass picks ONE hero who has been chatting anyway and invites them
+  // once (src/db/enlistReminder.js). Enlistment lasts a whole season, so there
+  // is nothing to repeat.
+  enlistReminder: {
+    enabled: true,
+    graceMs: 7 * 24 * 60 * 60 * 1000, // a full week after !create before we ever mention it
+    minGapMs: 45 * 60 * 1000,         // never two reminders close together
+    presentWithinMs: 20 * 60 * 1000,  // only @ someone who has chatted recently
+    checkMs: 10 * 60 * 1000,          // how often the background pass looks
+  },
 
   // ── Site link surfaced by !muster / !char ──────────────────────────────────
   siteUrl: 'https://okrafans.com',

@@ -197,12 +197,16 @@ function onChatMessage(user, config) {
   the standout drops). Nothing announced them before, so a cleared boss paid
   gear silently into bags — the single biggest reason raid rewards read as an
   opaque mechanism.
-- There is deliberately **no recurring "hey muster" broadcast**. Enlistment lasts
-  a season, so there is nothing to repeat, and a timer-driven nag is what makes a
-  bot tiresome. Instead: opening a season queues ONE personal invite per existing
-  hero (`inviteToSeason`), said the next time each happens to speak and skipped if
-  they enlisted in the meantime — a hard ceiling of one line per player per
-  season — and the weekly boss announcement, which goes out anyway, carries the
+- There is deliberately **no recurring "hey muster" broadcast**, and no reminder
+  fired the moment someone speaks — a bot that answers your first message of the
+  night with a nag reads as lying in wait. Instead a background pass
+  (`src/db/enlistReminder.js`) invites **one hero at a time**, and only one who
+  has had a character for a **full week**, never joined this season, and has
+  chatted in the last few minutes so the `@` lands on somebody present. One
+  invite per hero per season (tracked as `players/<uid>/invitedSeason`, written
+  before the message so a failed send can't cause a repeat), spaced by
+  `minGapMs` so reminders never clump, live-only, and only during `signup`.
+  Separately, the weekly boss announcement — which goes out anyway — carries the
   enlistment gap as a clause rather than as its own message.
 - On top of that, each rewarded hero gets a **personal `@`-mention the next time
   they chat** (`notices/<uid>`, src/db/notices.js). This is NOT a claim queue —
@@ -289,6 +293,13 @@ guaranteed win** (avoid pay-to-win resentment and gambling optics).
 
 ### 5.6 Raid tiers / seasons
 
+- **Weeks are scheduled by hand.** Nothing auto-opens a raid week: `setupRaidWeek`
+  is reached only from `!boss next` / `!boss set` (mods) and `!season
+  start`/`rollover`. If nobody runs it, no week opens — which is how t1 sat on
+  its finale for three weeks. Raid NIGHT, by contrast, is a fixed wall-clock slot
+  (`config.raidNight`, default Sun 20:00 America/Los_Angeles) resolved by the
+  phase timer whether or not the stream is live, so the battle and the broadcast
+  are decoupled by design; the site replays the fight afterwards.
 - A season = a **raid tier**: a themed multi-week arc (≈6–8 weekly bosses) with
   its own **loot table** and boss progression, culminating in a finale.
 - Season transition: award veterans a **prestige title** (the "cleared on time"

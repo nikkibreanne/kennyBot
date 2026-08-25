@@ -11,11 +11,10 @@
 // A lapsed sub keeps earning EXP on an existing character; only !create and loot
 // claims require an active sub (handled by the per-command `subOnly` gate).
 import { getCommand } from '../commands/registry.js';
-import { getConfig, isChatMuted, getRaidPointer } from '../db/configStore.js';
+import { getConfig, isChatMuted } from '../db/configStore.js';
 import { config, shouldGrantExp } from '../config.js';
 import { applyChatTick } from '../db/players.js';
 import { hasNotice, takeNotice } from '../db/notices.js';
-import { getSignup } from '../db/raid.js';
 
 /**
  * @param {{
@@ -129,21 +128,6 @@ export function createMessageHandler({ sender, channel, botUserId, logger, onAct
       );
       logger.info('raid reward notice delivered', { userId: user.id, item: notice.itemId });
       return;
-    }
-
-    if (notice.kind === 'seasonInvite') {
-      // Skip if they enlisted between the invite being queued and them speaking —
-      // being told to join something you already joined reads as a broken bot.
-      const p = getRaidPointer();
-      if (p?.seasonId && p.seasonId === notice.seasonId) {
-        const already = await getSignup(p.seasonId, p.weekId, user.id).catch(() => null);
-        if (already) return;
-      }
-      sender.say(
-        `🌱 @${user.displayName} — ${notice.seasonName} has begun and your hero isn't on the roster. ` +
-        `One !muster enlists you for the WHOLE season; you don't need to be around when the battles run.`,
-      );
-      logger.info('season invite delivered', { userId: user.id, season: notice.seasonId });
     }
   }
 

@@ -11,7 +11,7 @@ import { ChatClient } from '@twurple/chat';
 import { logger } from './src/logger.js';
 import { config } from './src/config.js';
 import { initFirebase, closeFirebase } from './src/db/firebase.js';
-import { startConfigMirror, setLive, isChatMuted } from './src/db/configStore.js';
+import { startConfigMirror, setLive, isChatMuted, getConfig, getRaidPointer } from './src/db/configStore.js';
 import { acquireLock, startHeartbeat, releaseLock, defaultInstanceId } from './src/db/lock.js';
 import { TokenStore } from './src/db/tokenStore.js';
 import { buildAuth } from './src/twitch/auth.js';
@@ -34,6 +34,7 @@ import { startReminderScheduler } from './src/events/reminderScheduler.js';
 import { seedReminders } from './src/db/reminders.js';
 import { processDrops } from './src/db/drops.js';
 import { startNoticeMirror } from './src/db/notices.js';
+import { findLapsedHero, markInvited } from './src/db/enlistReminder.js';
 
 // Running version, read from the bundled package.json (in the image at /app).
 // Surfaced in the startup log + heartbeat so "which release is this box on?"
@@ -393,6 +394,37 @@ async function main() {
   }, 30_000);
   phaseTimer.unref?.();
   shutdownHooks.push(() => clearInterval(phaseTimer));
+
+  // ── Enlistment reminder ───────────────────────────────────────────────────
+  //    One hero at a time, at most one per `minGapMs`, and only someone who has
+  //    a week-old character, never joined this season, and has been chatting in
+  //    the last few minutes. Not fired on their message — a bot that answers
+  //    your first line of the night with a nag reads as lying in wait.
+  let lastReminderAt = Date.now(); // don't fire the moment the bot boots
+  const reminderTimer = setInterval(async () => {
+    try {
+      const cfg = config.enlistReminder;
+      if (!cfg.enabled || isChatMuted() || !getConfig().live) return;
+      if (Date.now() - lastReminderAt < cfg.minGapMs) return;
+      const pointer = getRaidPointer();
+      if (pointer?.phase !== 'signup') return; // nothing to enlist into
+      const target = await findLapsedHero(pointer);
+      if (!target) return;
+      // Mark BEFORE saying it: a send failure should cost the invite, not risk
+      // asking the same person again on every later pass.
+      await markInvited(target.uid, pointer.seasonId);
+      lastReminderAt = Date.now();
+      send.say(
+        `🌱 @${target.player.displayName} — your ${target.player.class} isn't on this season's roster. ` +
+        `One !muster enlists you for every week of it, and a thin raid really can wipe.`,
+      );
+      logger.info('enlistment reminder sent', { userId: target.uid, season: pointer.seasonId });
+    } catch (err) {
+      logger.error('enlistment reminder failed', { err: String(err) });
+    }
+  }, config.enlistReminder.checkMs);
+  reminderTimer.unref?.();
+  shutdownHooks.push(() => clearInterval(reminderTimer));
 
   // ── Muster roster refresh: during signup, keep each hero's card current with
   //    their live level/gear (frozen again at lock). No-op outside signup. ──

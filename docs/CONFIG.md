@@ -386,16 +386,19 @@ streams — exactly the season-long grind it's meant to be.
 |---|---|---|
 | `cost` | `500` | Credits `!respec` charges (≈2.5 daily claims). Level/EXP/renown survive; gear returns to the bag and a starter set for the new role is rolled. |
 
-## `seasonInvite` — one-shot enlistment invite
+## `enlistReminder` — the "you never joined the season" nudge
 
-**Not** a recurring reminder. Enlistment lasts a whole season, so there is
-nothing to repeat; opening a season queues one personal invite per existing
-hero, delivered the next time each happens to speak. Ceiling: one line per
-player per season.
+**Not** a recurring broadcast, and never fired the moment someone speaks. A
+background pass invites one hero at a time; enlistment lasts a whole season, so
+there is nothing to repeat.
 
 | Key | Default | What it does |
 |---|---|---|
-| `enabled` | `true` | Master switch. Turn off and seasons open silently. |
+| `enabled` | `true` | Master switch. |
+| `graceMs` | `7d` | How long after `!create` before a hero can be reminded at all. |
+| `minGapMs` | `45m` | Minimum spacing between any two reminders, so they never clump. |
+| `presentWithinMs` | `20m` | Only `@` someone whose last chat tick is this recent. |
+| `checkMs` | `10m` | How often the background pass looks. Live + `signup` phase only. |
 
 ## `notices` — "tell them next time they chat"
 
