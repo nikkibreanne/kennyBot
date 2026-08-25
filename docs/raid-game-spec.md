@@ -293,13 +293,21 @@ guaranteed win** (avoid pay-to-win resentment and gambling optics).
 
 ### 5.6 Raid tiers / seasons
 
-- **Weeks are scheduled by hand.** Nothing auto-opens a raid week: `setupRaidWeek`
-  is reached only from `!boss next` / `!boss set` (mods) and `!season
-  start`/`rollover`. If nobody runs it, no week opens — which is how t1 sat on
-  its finale for three weeks. Raid NIGHT, by contrast, is a fixed wall-clock slot
+- **Weeks are scheduled BY HAND, deliberately.** Nothing auto-opens a raid week:
+  `setupRaidWeek` is reached only from `!boss next` / `!boss set` (mods) and
+  `!season start`/`rollover`. The stream has no fixed day, so a scheduler would
+  open the muster window into an empty channel; a human opening it while live is
+  the point. Raid NIGHT is separate — a fixed wall-clock slot
   (`config.raidNight`, default Sun 20:00 America/Los_Angeles) resolved by the
   phase timer whether or not the stream is live, so the battle and the broadcast
-  are decoupled by design; the site replays the fight afterwards.
+  are decoupled and the site replays the fight afterwards.
+- The cost of manual scheduling is a **silent stall**: forget `!boss next` and
+  the game just stops for a week with nothing said. That is how t1 drifted.
+  `raidScheduleStatus()` makes it visible — the battle-result announcement ends
+  by naming the next boss and the command to open it, and a slow live-only
+  backstop (`config.schedulePrompt`) repeats that if the moment was missed
+  (restart across the transition, muted bot, nobody acting). When the season is
+  finished it prompts a rollover instead of a seventh week.
 - A season = a **raid tier**: a themed multi-week arc (≈6–8 weekly bosses) with
   its own **loot table** and boss progression, culminating in a finale.
 - Season transition: award veterans a **prestige title** (the "cleared on time"

@@ -301,6 +301,17 @@ export const config = {
     checkMs: 10 * 60 * 1000,          // how often the background pass looks
   },
 
+  // ── "no raid week is open" prompt ─────────────────────────────────────────
+  // Weeks are scheduled by hand on purpose (the muster window should open when
+  // the stream is actually live, not on a timer firing into an empty channel).
+  // The cost is a SILENT stall if nobody runs `!boss next` — this makes it
+  // visible. Aimed at whoever can act on it, so it is rare and says what to type.
+  schedulePrompt: {
+    enabled: true,
+    minGapMs: 2 * 60 * 60 * 1000, // at most once every ~2h of live time
+    checkMs: 15 * 60 * 1000,
+  },
+
   // ── Site link surfaced by !muster / !char ──────────────────────────────────
   siteUrl: 'https://okrafans.com',
 };

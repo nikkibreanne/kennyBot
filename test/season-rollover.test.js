@@ -13,7 +13,7 @@ import { startConfigMirror, setSeason, getSeason, setRaidPointer, getRaidPointer
 import { rolloverAllPlayers } from '../src/db/players.js';
 import bossCmd from '../src/commands/mod/boss.js';
 import seasonCmd from '../src/commands/mod/season.js';
-import { nextWeekId } from '../src/db/raid.js';
+import { nextWeekId, raidScheduleStatus } from '../src/db/raid.js';
 import { itemObject } from '../src/content/items.js';
 import { config } from '../src/config.js';
 
@@ -279,4 +279,56 @@ runOrSkip('nextWeekId takes the highest week, so a deleted week cannot collide',
   await database().ref(PATHS.boss(SEASON, 'w2')).remove(); // a mis-scheduled week cleaned up
   const next = await nextWeekId(SEASON);
   assert.equal(next, 'w6', `expected w6 after the highest (w5), got ${next}`);
+});
+
+// ── the silent-stall guard ──────────────────────────────────────────────────
+// Weeks are scheduled BY HAND so the muster window opens while the stream is
+// live. The cost of that choice is that forgetting is invisible — the game just
+// stops for a week, which is how t1 drifted onto its finale three times.
+
+runOrSkip('raidScheduleStatus reports a week in flight as open', async () => {
+  await setSeason({ id: SEASON, name: 'Rollover Test', tier: 1, weeks: WEEKS, startsAt: Date.now() });
+  await waitForSeason((s) => s?.id === SEASON);
+  await seedScheduledWeeks(2);
+  await setRaidPointer({ seasonId: SEASON, weekId: 'w2', phase: 'signup' });
+  await waitForPointerPhase('signup');
+
+  const st = await raidScheduleStatus();
+  assert.equal(st.open, true, 'a signup-phase week needs no prompt');
+});
+
+runOrSkip('a finished week with the season unfinished names the next boss', async () => {
+  await setSeason({ id: SEASON, name: 'Rollover Test', tier: 1, weeks: WEEKS, startsAt: Date.now() });
+  await waitForSeason((s) => s?.id === SEASON);
+  await seedScheduledWeeks(2);
+  await setRaidPointer({ seasonId: SEASON, weekId: 'w2', phase: 'done' });
+  await waitForPointerPhase('done');
+
+  const st = await raidScheduleStatus();
+  assert.equal(st.open, false, 'nothing is scheduled — this is the stall');
+  assert.equal(st.seasonComplete, false);
+  assert.equal(st.nextWeek, 3, 'and it says which week is next');
+  assert.ok(st.nextBoss, 'and which boss, so the prompt is actionable');
+});
+
+runOrSkip('a finished SEASON prompts a rollover, not another week', async () => {
+  await setSeason({ id: SEASON, name: 'Rollover Test', tier: 1, weeks: WEEKS, startsAt: Date.now() });
+  await waitForSeason((s) => s?.id === SEASON);
+  await seedScheduledWeeks(WEEKS);
+  await setRaidPointer({ seasonId: SEASON, weekId: `w${WEEKS}`, phase: 'done' });
+  await waitForPointerPhase('done');
+
+  const st = await raidScheduleStatus();
+  assert.equal(st.seasonComplete, true);
+  assert.equal(st.nextWeek, null, 'there is no week 7 to schedule');
+  assert.equal(st.nextTier, 2, 'it points at the next tier instead');
+});
+
+runOrSkip('with no season at all there is nothing to prompt about', async () => {
+  await database().ref(PATHS.seasonCurrent()).remove();
+  await waitForSeason((s) => !s?.id);
+  const st = await raidScheduleStatus();
+  assert.equal(st.open, false);
+  assert.equal(st.nextWeek, null);
+  assert.equal(st.seasonComplete, false, 'no season is not a completed season');
 });

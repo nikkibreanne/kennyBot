@@ -22,7 +22,7 @@ import { initCapture, captureReady } from './src/integrations/capture.js';
 import { activeClipMode } from './src/commands/clip.js';
 import { startLivePoll } from './src/twitch/liveGate.js';
 import { startEventSub } from './src/twitch/eventsub.js';
-import { advanceRaidPhases, refreshMusteredRoster } from './src/db/raid.js';
+import { advanceRaidPhases, refreshMusteredRoster, raidScheduleStatus } from './src/db/raid.js';
 import { seedCuratedFacts } from './src/db/facts.js';
 import { seedCatalog } from './src/db/catalog.js';
 import { createMessageHandler } from './src/events/chat.js';
@@ -110,6 +110,7 @@ function announceRaidPhase(t, send, logger) {
     const r = t.result;
     if (!r.downed) {
       send.say(`💀 ${r.bossName} survived — the patch was wiped (${r.roster} heroes). No loot this week. Replay: ${config.siteUrl}/arena/`);
+      promptNextWeek(send, logger);
       return;
     }
     const mvp = r.mvpName ? ` MVP: @${r.mvpName}.` : '';
@@ -117,6 +118,9 @@ function announceRaidPhase(t, send, logger) {
       `🏆 ${r.bossName} is DOWN! ${r.survivors}/${r.roster} heroes walked away.${mvp} ` +
       `Everyone who raided got a piece of gear — check !bag, then !equip it.`,
     );
+    // The week just closed and nothing schedules the next one — say so here,
+    // while it's the obvious next step, rather than letting the game stall.
+    promptNextWeek(send, logger);
     // Name the standout drops rather than all of them: one line, not a wall.
     const best = (r.awards || [])
       .filter((a) => a.item && ['epic', 'legendary'].includes(a.item.rarity))
@@ -125,6 +129,34 @@ function announceRaidPhase(t, send, logger) {
     if (best.length) send.say(`✨ ${best.join(' · ')}`);
   } catch (err) {
     logger.error('raid announce failed', { err: String(err) });
+  }
+}
+
+/**
+ * Say what needs scheduling next, if anything. Weeks are opened by hand
+ * (`!boss next`) so the muster window lands while the stream is live — the
+ * trade-off is that forgetting is invisible, and a whole week quietly passes
+ * with no raid. Called after a battle resolves and, as a backstop, on a slow
+ * live-only timer.
+ */
+async function promptNextWeek(send, logger) {
+  try {
+    const st = await raidScheduleStatus();
+    if (st.open) return false;
+    if (st.seasonComplete) {
+      send.say(
+        st.nextTier
+          ? `🏁 ${st.seasonName || st.seasonId} is complete. Mods: !season rollover t${st.nextTier} <name> to start the next tier.`
+          : `🏁 ${st.seasonName || st.seasonId} is complete — every boss has been faced. Mods: !season start <id> <name> for a new tier.`,
+      );
+      return true;
+    }
+    if (!st.nextWeek) return false;
+    send.say(`⏭️ Nothing is scheduled yet — next up is week ${st.nextWeek}, ${st.nextBoss}. Mods: !boss next to open the muster.`);
+    return true;
+  } catch (err) {
+    logger.error('schedule prompt failed', { err: String(err) });
+    return false;
   }
 }
 
@@ -425,6 +457,24 @@ async function main() {
   }, config.enlistReminder.checkMs);
   reminderTimer.unref?.();
   shutdownHooks.push(() => clearInterval(reminderTimer));
+
+  // ── Backstop: a week that never got scheduled ─────────────────────────────
+  //    The prompt above rides the battle result, which covers the normal case.
+  //    This catches the rest — a restart across the transition, a muted bot, or
+  //    simply nobody acting on it — so the game can't silently sit idle.
+  let lastPromptAt = Date.now();
+  const promptTimer = setInterval(async () => {
+    try {
+      const cfg = config.schedulePrompt;
+      if (!cfg.enabled || isChatMuted() || !getConfig().live) return;
+      if (Date.now() - lastPromptAt < cfg.minGapMs) return;
+      if (await promptNextWeek(send, logger)) lastPromptAt = Date.now();
+    } catch (err) {
+      logger.error('schedule prompt tick failed', { err: String(err) });
+    }
+  }, config.schedulePrompt.checkMs);
+  promptTimer.unref?.();
+  shutdownHooks.push(() => clearInterval(promptTimer));
 
   // ── Muster roster refresh: during signup, keep each hero's card current with
   //    their live level/gear (frozen again at lock). No-op outside signup. ──

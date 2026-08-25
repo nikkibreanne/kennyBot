@@ -400,6 +400,18 @@ there is nothing to repeat.
 | `presentWithinMs` | `20m` | Only `@` someone whose last chat tick is this recent. |
 | `checkMs` | `10m` | How often the background pass looks. Live + `signup` phase only. |
 
+## `schedulePrompt` — "no raid week is open"
+
+Weeks are opened by hand so the muster window lands while the stream is live.
+The trade-off is that forgetting is invisible, so the bot says what needs
+scheduling: once when a battle resolves, plus a slow live-only backstop.
+
+| Key | Default | What it does |
+|---|---|---|
+| `enabled` | `true` | Master switch. |
+| `minGapMs` | `2h` | Backstop spacing. The post-battle prompt is not rate-limited — it fires once, when the week closes. |
+| `checkMs` | `15m` | How often the backstop looks. |
+
 ## `notices` — "tell them next time they chat"
 
 | Key | Default | What it does |

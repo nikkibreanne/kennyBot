@@ -9,7 +9,7 @@ import { database, increment, PATHS, SERVER_TIMESTAMP } from './firebase.js';
 import { getRaidPointer, setRaidPointer, getSeason } from './configStore.js';
 import { roleRating, engagementMultiplier } from '../rules/rating.js';
 import { combatStats, simulateBattle } from '../rules/combat.js';
-import { scaleBossHp, scaleBossAtk } from '../content/bosses.js';
+import { scaleBossHp, scaleBossAtk, weeksInSeason, seasonBoss, SEASON_COUNT } from '../content/bosses.js';
 import { getItem, DEFAULT_LOOT_TABLE } from '../content/items.js';
 import { pickDrop } from '../rules/loot.js';
 import { addLoot } from './players.js';
@@ -553,6 +553,42 @@ export async function enlistmentGap() {
   const unenlisted = Object.entries(players).filter(([uid, pl]) => pl?.role && !signups[uid]).length;
   const boss = bossSnap.val();
   return { enlisted, unenlisted, recommended: boss?.recommended ?? null, bossName: boss?.name ?? null };
+}
+
+/**
+ * Is a raid week currently open for business, and if not, what should happen?
+ *
+ * Weeks are scheduled BY HAND (`!boss next`), which is deliberate — the muster
+ * window opens when the streamer is actually live rather than on a timer firing
+ * into an empty channel. The cost of that choice is a SILENT failure mode: if
+ * nobody runs the command, no week opens, nothing is announced, and the game
+ * simply stops for a week. That is how t1 drifted. This is what makes the stall
+ * visible.
+ *
+ * @returns {Promise<{open: boolean, phase: string|null, seasonComplete: boolean,
+ *   nextWeek: number|null, nextBoss: string|null, seasonId: string|null,
+ *   seasonName: string|null, nextTier: number|null}>}
+ */
+export async function raidScheduleStatus() {
+  const season = getSeason();
+  const p = getRaidPointer();
+  const base = {
+    open: false, phase: p?.phase ?? null, seasonComplete: false, nextWeek: null,
+    nextBoss: null, seasonId: season?.id ?? null, seasonName: season?.name ?? null, nextTier: null,
+  };
+  if (!season?.id) return base;
+
+  // signup / locked / live all mean the week is in flight — nothing to prompt.
+  if (p?.seasonId === season.id && p.phase && p.phase !== 'done') return { ...base, open: true };
+
+  const tier = season.tier || 1;
+  const scheduled = await weeksInSeasonDb(season.id);
+  const total = weeksInSeason(tier);
+  if (scheduled >= total) {
+    return { ...base, seasonComplete: true, nextTier: tier + 1 <= SEASON_COUNT ? tier + 1 : null };
+  }
+  const nextWeek = scheduled + 1;
+  return { ...base, nextWeek, nextBoss: seasonBoss(tier, nextWeek).name };
 }
 
 /** How many weeks a season already has scheduled in the DB (0 if it's new). */
