@@ -200,27 +200,58 @@ export async function addLoot(userId, itemId) {
 }
 
 /**
+ * Who actually took part in a season: the uids with a `leaderboard/<seasonId>`
+ * entry. `finishBattle` writes one for EVERY signed-up hero of every resolved
+ * raid (damage 0 included), so this is participation, not a damage ranking — a
+ * healer who never hit the boss is in it, and it matches `stats.raidsParticipated`.
+ * @param {string|null|undefined} seasonId
+ * @returns {Promise<Set<string>>} empty when there is no season to be a veteran of
+ */
+async function seasonParticipants(seasonId) {
+  if (!seasonId) return new Set();
+  const snap = await database().ref(`leaderboard/${seasonId}`).get();
+  return new Set(Object.keys(snap.val() || {}));
+}
+
+/**
  * Season rollover (spec §5.6): reset every hero's GEAR (re-roll starter, clear
  * the bag) so a new tier starts fresh and newcomers aren't behind — but KEEP
- * level + renown, and award prestige renown for the season cleared. Returns the
- * number of heroes rolled over.
- * @param {{ prestigeRenown?: number }} [opts]
+ * level + renown.
+ *
+ * PRESTIGE IS EARNED, NOT GRANTED TO EVERYONE. Only heroes who actually raided
+ * in the outgoing season (`seasonId`) get the prestige renown and the
+ * `seasonsPlayed` bump — spec §5.6 awards it to *veterans*, and handing it to
+ * every account that ever ran `!create` would devalue it and inflate the
+ * permanent renown rating bonus for people who never showed up. Gear still
+ * resets for everyone, veteran or not.
+ *
+ * Called with no `seasonId` there is nothing to have been a veteran OF, so no
+ * prestige is awarded (the gear reset still happens).
+ *
+ * @param {{ prestigeRenown?: number, seasonId?: string|null }} [opts]
+ * @returns {Promise<{ reset: number, prestiged: number }>}
  */
-export async function rolloverAllPlayers({ prestigeRenown = 3 } = {}) {
+export async function rolloverAllPlayers({ prestigeRenown = 3, seasonId = null } = {}) {
+  const veterans = await seasonParticipants(seasonId);
   const snap = await database().ref('players').get();
   const players = snap.val() || {};
-  let count = 0;
+  let reset = 0;
+  let prestiged = 0;
   for (const [uid, p] of Object.entries(players)) {
     if (!p?.role) continue;
-    await database().ref(PATHS.player(uid)).update({
+    const update = {
       equipped: rollStarterEquipped(p.role),
       inventory: [],
-      renown: (p.renown || 0) + prestigeRenown,
-      'stats/seasonsPlayed': (p.stats?.seasonsPlayed || 0) + 1,
-    });
-    count += 1;
+    };
+    if (veterans.has(uid)) {
+      update.renown = (p.renown || 0) + prestigeRenown;
+      update['stats/seasonsPlayed'] = (p.stats?.seasonsPlayed || 0) + 1;
+      prestiged += 1;
+    }
+    await database().ref(PATHS.player(uid)).update(update);
+    reset += 1;
   }
-  return count;
+  return { reset, prestiged };
 }
 
 /**

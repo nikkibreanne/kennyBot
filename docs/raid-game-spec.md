@@ -204,6 +204,15 @@ guaranteed win** (avoid pay-to-win resentment and gambling optics).
 - Season transition: award veterans a **prestige title** (the "cleared on time"
   equivalent); **reset gear** so newcomers start fresh and the meta doesn't
   calcify (character + level may carry or partially reset — see §13).
+- A "veteran" is a hero who **actually raided the outgoing season** — i.e. has a
+  `leaderboard/<seasonId>` entry, which `finishBattle` writes for every signed-up
+  hero of every resolved raid (damage 0 included, so healers count). Prestige is
+  earned, never granted to every account that once ran `!create`: it carries a
+  permanent renown rating bonus. The **gear reset applies to everyone**.
+- A season **ends on its finale**. `!boss next` refuses to schedule past the last
+  scripted week and points at `!season rollover` — the boss lookup clamps an
+  out-of-range week to the finale, so without that guard a season silently never
+  ends and chat re-fights the same boss (this happened in prod for 3 weeks).
 - Season launch is the natural **invite-a-friend growth moment**; consider a
   referral bonus active at season start.
 
