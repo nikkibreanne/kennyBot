@@ -152,3 +152,58 @@ runOrSkip('a wipe pays nothing, so it parks no notices', async () => {
   await finishBattle(S, W);
   assert.equal((await database().ref(PATHS.notices()).get()).val(), null);
 });
+
+// ── season invites: one line per player per season, never a broadcast ───────
+
+import { inviteToSeason } from '../src/db/notices.js';
+
+runOrSkip('opening a season invites every hero exactly once', async () => {
+  const db = database();
+  for (const uid of HEROES) {
+    await db.ref(PATHS.player(uid)).set({ displayName: uid, class: 'Ranger', role: 'dps', level: 5, equipped: {}, inventory: [] });
+  }
+  // An account with no character has nothing to enlist.
+  await db.ref(PATHS.player('u_no_hero')).set({ displayName: 'Lurker' });
+
+  // `players/` is shared with the other emulator suites, so assert about THESE
+  // heroes rather than a global count.
+  const queued = await inviteToSeason('t_new', 'The Sweltering Patch');
+
+  assert.ok(queued >= HEROES.length, `expected at least ${HEROES.length} invites, got ${queued}`);
+  await settle(() => HEROES.every((u) => hasNotice(u)));
+  const n = (await db.ref(PATHS.notice(HEROES[0])).get()).val();
+  assert.equal(n.kind, 'seasonInvite');
+  assert.equal(n.seasonName, 'The Sweltering Patch');
+  assert.equal(hasNotice('u_no_hero'), false);
+  await db.ref(PATHS.player('u_no_hero')).remove();
+});
+
+runOrSkip('an invite never overwrites a reward — loot news outranks a nag', async () => {
+  const db = database();
+  for (const uid of HEROES) {
+    await db.ref(PATHS.player(uid)).set({ displayName: uid, class: 'Ranger', role: 'dps', level: 5, equipped: {}, inventory: [] });
+  }
+  await setNotice(HEROES[0], { kind: 'raidReward', itemId: 'x', itemName: 'Precious', bossName: 'B' });
+  await settle(() => hasNotice(HEROES[0]));
+
+  await inviteToSeason('t_new', 'Next Season');
+
+  const kept = (await db.ref(PATHS.notice(HEROES[0])).get()).val();
+  assert.equal(kept.kind, 'raidReward', 'the reward line survived');
+  assert.equal(kept.itemName, 'Precious');
+});
+
+runOrSkip('inviting twice does not queue a second line for the same hero', async () => {
+  const db = database();
+  for (const uid of HEROES) {
+    await db.ref(PATHS.player(uid)).set({ displayName: uid, class: 'Ranger', role: 'dps', level: 5, equipped: {}, inventory: [] });
+  }
+  await inviteToSeason('t_new', 'Next Season');
+  await settle(() => HEROES.every((u) => hasNotice(u)));
+  const before = await Promise.all(HEROES.map(async (u) => (await database().ref(PATHS.notice(u)).get()).val().at));
+
+  await inviteToSeason('t_new', 'Next Season');
+
+  const after = await Promise.all(HEROES.map(async (u) => (await database().ref(PATHS.notice(u)).get()).val().at));
+  assert.deepEqual(after, before, 'a second pass must not re-queue anyone — one line per season');
+});

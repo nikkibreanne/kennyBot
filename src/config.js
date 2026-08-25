@@ -287,16 +287,13 @@ export const config = {
   // gear for the new role since the old role's gear no longer works.
   respec: { cost: 500 },
 
-  // ── Season enlistment nudge ───────────────────────────────────────────────
-  // `!muster` enlists for a WHOLE season (§5.3), so this is not a weekly
-  // reminder — it's aimed at people who have a hero and never opted in at all.
-  // Rare on purpose: the streamer asked for infrequent, and viewers are usually
-  // not around when the automated battle actually runs.
-  musterNudge: {
-    enabled: true,
-    minGapMs: 3 * 60 * 60 * 1000, // at most once every ~3h of live time
-    minUnenlisted: 2, // don't nag on behalf of one person
-  },
+  // ── Season enlistment invite ──────────────────────────────────────────────
+  // NOT a recurring reminder. A repeating "hey muster" broadcast is exactly the
+  // thing that makes a bot tiresome, and enlistment lasts a whole season anyway,
+  // so there is nothing to repeat. Instead each hero who hasn't joined the new
+  // season is invited ONCE, delivered the next time they happen to speak
+  // (src/db/notices.js). Ceiling: one line per player per season.
+  seasonInvite: { enabled: true },
 
   // ── Site link surfaced by !muster / !char ──────────────────────────────────
   siteUrl: 'https://okrafans.com',

@@ -386,16 +386,16 @@ streams — exactly the season-long grind it's meant to be.
 |---|---|---|
 | `cost` | `500` | Credits `!respec` charges (≈2.5 daily claims). Level/EXP/renown survive; gear returns to the bag and a starter set for the new role is rolled. |
 
-## `musterNudge` — season enlistment reminder
+## `seasonInvite` — one-shot enlistment invite
 
-Enlistment is season-long (spec §5.3), so this is **not** a weekly reminder — it
-targets people who have a hero and never opted into the season at all.
+**Not** a recurring reminder. Enlistment lasts a whole season, so there is
+nothing to repeat; opening a season queues one personal invite per existing
+hero, delivered the next time each happens to speak. Ceiling: one line per
+player per season.
 
 | Key | Default | What it does |
 |---|---|---|
-| `enabled` | `true` | Master switch. |
-| `minGapMs` | `3h` | Minimum spacing. Only fires while LIVE and in the `signup` phase. |
-| `minUnenlisted` | `2` | Don't nag on behalf of one person. |
+| `enabled` | `true` | Master switch. Turn off and seasons open silently. |
 
 ## `notices` — "tell them next time they chat"
 

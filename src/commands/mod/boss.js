@@ -1,7 +1,7 @@
 // !boss set <name> (mod) — schedule the next week's boss + muster (spec §5.8/§11).
 // Roster locks `lockLeadMs` before raid night; the battle then plays out
 // automatically (or force it early with !raidnight).
-import { setupRaidWeek, nextWeekId, computeNextRaidNight } from '../../db/raid.js';
+import { setupRaidWeek, nextWeekId, computeNextRaidNight, enlistmentGap } from '../../db/raid.js';
 import { defaultBoss, seasonBoss, weeksInSeason, SEASON_COUNT } from '../../content/bosses.js';
 import { getSeason, setSeason } from '../../db/configStore.js';
 import { SEASON_LOOT } from '../../content/items.js';
@@ -21,7 +21,14 @@ async function schedule(seasonId, weekId, boss, reply, lead) {
   await setupRaidWeek({ seasonId, weekId, boss, locksAt: startsAt - config.raid.lockLeadMs, startsAt });
   const when = new Date(startsAt).toLocaleString();
   const rec = boss.recommended ? ` · recommended ~${boss.recommended} heroes` : '';
-  reply(`📣 ${lead}: ${boss.name}${rec}. Raid night: ${when}. Players: !muster to join.`);
+  // Ride the announcement that already goes out rather than adding a recurring
+  // "hey muster" broadcast: turnout genuinely changes the outcome now (boss ATK
+  // scales with roster size), so it's worth one clause — and zero extra messages.
+  const gap = await enlistmentGap().catch(() => null);
+  const short = gap && gap.unenlisted > 0
+    ? ` ${gap.enlisted} enlisted, ${gap.unenlisted} hero${gap.unenlisted === 1 ? '' : 'es'} still out — a thin raid is a real chance of wiping.`
+    : '';
+  reply(`📣 ${lead}: ${boss.name}${rec}. Raid night: ${when}.${short} Players: !muster to join.`);
 }
 
 export default {

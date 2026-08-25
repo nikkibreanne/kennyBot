@@ -5,6 +5,7 @@
 import { setSeason, getSeason, getRaidPointer } from '../../db/configStore.js';
 import { setupRaidWeek, computeNextRaidNight, weeksInSeasonDb } from '../../db/raid.js';
 import { rolloverAllPlayers } from '../../db/players.js';
+import { inviteToSeason } from '../../db/notices.js';
 import { seasonBoss } from '../../content/bosses.js';
 import { SEASON_LOOT } from '../../content/items.js';
 import { config } from '../../config.js';
@@ -22,7 +23,14 @@ async function openSeason(id, name) {
   const startsAt = computeNextRaidNight();
   const boss = seasonBoss(tier, 1);
   await setupRaidWeek({ seasonId: id, weekId: 'w1', boss, locksAt: startsAt - config.raid.lockLeadMs, startsAt });
-  return boss;
+  // Week 1 starts with an empty roster, so invite every existing hero exactly
+  // ONCE — said to each of them the next time they speak, never broadcast on a
+  // timer (config.seasonInvite).
+  if (config.seasonInvite.enabled) {
+    const invited = await inviteToSeason(id, name);
+    return { boss, invited };
+  }
+  return { boss, invited: 0 };
 }
 
 export default {
@@ -52,8 +60,8 @@ export default {
         );
         return;
       }
-      const boss = await openSeason(id, name);
-      reply(`🌱 Season started: ${name} (${id}, ${config.raid.seasonWeeks} weeks). Week 1 boss: ${boss.name}. Players: !muster to join!`);
+      const { boss, invited } = await openSeason(id, name);
+      reply(`🌱 Season started: ${name} (${id}, ${config.raid.seasonWeeks} weeks). Week 1 boss: ${boss.name}. Players: !muster to join!${invited ? ` (${invited} heroes will be invited as they chat)` : ''}`);
       return;
     }
 
@@ -76,7 +84,7 @@ export default {
       }
       const outgoing = getSeason();
       const { reset, prestiged, granted, best } = await rolloverAllPlayers({ seasonId: outgoing?.id });
-      const boss = await openSeason(id, name);
+      const { boss, invited } = await openSeason(id, name);
       const from = outgoing?.name || outgoing?.id || 'the last season';
       const prestigeLine = prestiged
         ? `${prestiged} veteran${prestiged === 1 ? '' : 's'} of ${from} earned ${granted} prestige renown ` +

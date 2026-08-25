@@ -197,6 +197,13 @@ function onChatMessage(user, config) {
   the standout drops). Nothing announced them before, so a cleared boss paid
   gear silently into bags — the single biggest reason raid rewards read as an
   opaque mechanism.
+- There is deliberately **no recurring "hey muster" broadcast**. Enlistment lasts
+  a season, so there is nothing to repeat, and a timer-driven nag is what makes a
+  bot tiresome. Instead: opening a season queues ONE personal invite per existing
+  hero (`inviteToSeason`), said the next time each happens to speak and skipped if
+  they enlisted in the meantime — a hard ceiling of one line per player per
+  season — and the weekly boss announcement, which goes out anyway, carries the
+  enlistment gap as a clause rather than as its own message.
 - On top of that, each rewarded hero gets a **personal `@`-mention the next time
   they chat** (`notices/<uid>`, src/db/notices.js). This is NOT a claim queue —
   `addLoot` already put the item in their bag — only the *sentence* is queued,
@@ -216,6 +223,15 @@ function onChatMessage(user, config) {
 
 ### 5.3 The weekly community raid (many-vs-1)
 
+- **Boss ATK scales with roster size**, as HP already did. The boss lands ~one
+  single-target attack per turn, so at 4 heroes each is hit ~4x as often as at
+  the 15-hero reference — measured, a 4-hero raid lost EVERY week of Season 1 at
+  every gear level while the reference roster cleared it. That was a scaling gap,
+  not mis-tuned content, so no boss numbers were changed. `scaleBossAtk` uses a
+  gentler exponent than HP (0.75 vs 0.92) so a thin raid stays genuinely harder
+  without being hopeless: the same 4-hero raid now reads 100/34/65/70/100/16.
+  Verify any change with `node scripts/balance-sim.mjs`; `test/rules/balance.test.js`
+  runs the real engine in CI and fails if the shape breaks.
 - **Enlistment is SEASON-LONG, not weekly.** `!muster` once and your hero is on
   the roster for every remaining week of that season: `setupRaidWeek` carries the
   previous week's signups forward (re-snapshotted from each player's live record,

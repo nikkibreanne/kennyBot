@@ -96,3 +96,31 @@ export async function clearAllNotices() {
   await database().ref(PATHS.notices()).remove();
   mirror = new Map();
 }
+
+/**
+ * Invite every hero who isn't on the new season's roster, ONCE.
+ *
+ * Called when a season opens, so it is bounded by construction: one line per
+ * player per season, delivered the next time each happens to speak. There is
+ * deliberately no recurring "hey muster" broadcast — enlistment lasts the whole
+ * season, so there is nothing to remind anyone about, and a repeating nag is
+ * what makes a bot tiresome.
+ *
+ * A reward notice is worth more than an invite, so this never overwrites one.
+ * @param {string} seasonId @param {string} [seasonName]
+ * @returns {Promise<number>} how many invites were queued
+ */
+export async function inviteToSeason(seasonId, seasonName) {
+  const db = database();
+  const players = (await db.ref('players').get()).val() || {};
+  const updates = {};
+  let queued = 0;
+  for (const [uid, p] of Object.entries(players)) {
+    if (!p?.role) continue; // no character — nothing to enlist
+    if (mirror.has(uid)) continue; // something better is already waiting
+    updates[uid] = { kind: 'seasonInvite', seasonId, seasonName: seasonName || seasonId, at: Date.now() };
+    queued += 1;
+  }
+  if (queued) await db.ref(PATHS.notices()).update(updates);
+  return queued;
+}

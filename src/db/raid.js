@@ -9,7 +9,7 @@ import { database, increment, PATHS, SERVER_TIMESTAMP } from './firebase.js';
 import { getRaidPointer, setRaidPointer, getSeason } from './configStore.js';
 import { roleRating, engagementMultiplier } from '../rules/rating.js';
 import { combatStats, simulateBattle } from '../rules/combat.js';
-import { scaleBossHp } from '../content/bosses.js';
+import { scaleBossHp, scaleBossAtk } from '../content/bosses.js';
 import { getItem, DEFAULT_LOOT_TABLE } from '../content/items.js';
 import { pickDrop } from '../rules/loot.js';
 import { addLoot } from './players.js';
@@ -114,7 +114,8 @@ export async function setupRaidWeek({ seasonId, weekId, boss, locksAt, startsAt 
     name: boss.name,
     baseHp,
     hp: baseHp, // placeholder; scaled to the mustered roster at lock
-    atk: boss.atk ?? config.raid.defaultBossAtk,
+    baseAtk: boss.atk ?? config.raid.defaultBossAtk,
+    atk: boss.atk ?? config.raid.defaultBossAtk, // placeholder; scaled at lock too
     thresholds: boss.thresholds,
     affix: boss.affix ?? null,
     abilities: boss.abilities ?? null,
@@ -225,9 +226,15 @@ export async function lockRaid(seasonId, weekId) {
   const bossSnap = await db.ref(PATHS.boss(seasonId, weekId)).get();
   const boss = bossSnap.val() || {};
   const scaledHp = scaleBossHp(boss.baseHp ?? boss.hp ?? config.raid.defaultBossHp, count);
+  // ATK scales too (see scaleBossAtk): the boss lands ~one single-target hit per
+  // turn, so at 4 heroes each is hit ~4x as often as at the 15-hero reference.
+  // Leaving ATK flat made small raids lose to arithmetic rather than to the
+  // fight. `baseAtk` is preserved so re-locking never compounds the scaling.
+  const baseAtk = boss.baseAtk ?? boss.atk ?? config.raid.defaultBossAtk;
+  const scaledAtk = scaleBossAtk(baseAtk, count);
 
   await db.ref(PATHS.raid(seasonId, weekId)).update({ signups: frozen, team: computeTeam(frozen) });
-  await db.ref(PATHS.boss(seasonId, weekId)).update({ status: 'locked', hp: scaledHp });
+  await db.ref(PATHS.boss(seasonId, weekId)).update({ status: 'locked', hp: scaledHp, atk: scaledAtk, baseAtk });
   await setRaidPointer({ phase: 'locked' });
   return { count };
 }
@@ -266,8 +273,9 @@ export async function runBattle(seasonId, weekId, { now = Date.now(), seed } = {
 
   // boss.hp was scaled to the roster at lock; fall back defensively.
   const effectiveHp = boss.hp ?? scaleBossHp(boss.baseHp ?? config.raid.defaultBossHp, party.length);
+  const effectiveAtk = boss.atk ?? scaleBossAtk(boss.baseAtk ?? config.raid.defaultBossAtk, party.length);
   const theSeed = seed ?? deriveSeed(seasonId, weekId, now);
-  const { events, result, bossMaxHp } = simulateBattle(party, { ...boss, hp: effectiveHp }, theSeed, config);
+  const { events, result, bossMaxHp } = simulateBattle(party, { ...boss, hp: effectiveHp, atk: effectiveAtk }, theSeed, config);
 
   // Event array → object keyed by ascending integers (UI sorts numerically).
   const log = {};
