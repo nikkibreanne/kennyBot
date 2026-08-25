@@ -178,3 +178,36 @@ test('a full legendary loadout stays in the band the hand-tuned gear set', () =>
     assert.ok(best > config.rating.renownCap * config.rating.renownPerPoint);
   }
 });
+
+// ─── role lock (who can wear what) ──────────────────────────────────────────
+// Gear pays out only through bonuses[wearer.role], so off-role gear was always
+// worth exactly 0 — but nothing said so and players wore it anyway (9 pieces
+// were equipped off-role in prod, one hero in all three slots, running on zero
+// gear rating). The lock turns a silent dead end into a reason to trade.
+
+import { CLASSES, classesForRole, classesForRoleLabel } from '../../src/content/classes.js';
+
+test('every role has at least one class that can wear its gear', () => {
+  for (const role of ROLES) {
+    const classes = classesForRole(role);
+    assert.ok(classes.length > 0, `no class can wear ${role} gear — that gear would be unequippable`);
+    for (const name of classes) assert.equal(CLASSES[name].role, role);
+  }
+});
+
+test('the class list is derived from CLASSES, never a second list to drift', () => {
+  const fromCatalog = Object.entries(CLASSES).map(([n, c]) => `${n}:${c.role}`).sort();
+  const fromHelper = ROLES.flatMap((r) => classesForRole(r).map((n) => `${n}:${r}`)).sort();
+  assert.deepEqual(fromHelper, fromCatalog, 'every class is reachable through exactly one role');
+});
+
+test('the chat label reads as a sentence for one class and for many', () => {
+  assert.equal(classesForRoleLabel('tank'), 'Guardian');
+  assert.match(classesForRoleLabel('dps'), /, .* or /);
+});
+
+test('every catalog item is wearable by some class', () => {
+  for (const [id, it] of Object.entries(ITEMS)) {
+    assert.ok(classesForRole(it.role).length > 0, `${id} is ${it.role} gear that nobody can wear`);
+  }
+});

@@ -121,12 +121,19 @@ export async function setupRaidWeek({ seasonId, weekId, boss, locksAt, startsAt 
     recommended: boss.recommended ?? null,
     status: 'signup',
   };
+  // Stamp the season's loot table onto the WEEK. finishBattle used to read
+  // `getSeason().lootTable` at payout time, so rolling the season over during a
+  // battle's reveal window paid the finishing raid out of the NEW season's table
+  // into bags the rollover had just emptied. The raid now carries its own.
+  const season = getSeason();
+  const lootTable = season?.id === seasonId && season?.lootTable?.length ? season.lootTable : null;
+
   await db.ref().update({
     [PATHS.boss(seasonId, weekId)]: bossRecord,
     // Do NOT seed a zeros `team` — the website computes team stats from
     // `signups` until lock writes the real aggregate; a zeros object is truthy
     // and would shadow that fallback (showing 0s).
-    [PATHS.raid(seasonId, weekId)]: { signups },
+    [PATHS.raid(seasonId, weekId)]: { signups, ...(lootTable ? { lootTable } : {}) },
     [PATHS.configRaid()]: { seasonId, weekId, phase: 'signup', locksAt, startsAt, doneAt: null },
   });
   return { seasonId, weekId, boss: bossRecord };
@@ -336,25 +343,38 @@ export async function finishBattle(seasonId, weekId, { now = Date.now() } = {}) 
   }
   if (Object.keys(updates).length) await db.ref().update(updates);
 
-  // Loot on victory (richer boss-rarity table): every participant gets a roll;
-  // SURVIVORS get a bonus roll; the MVP gets an extra. Stacks for an MVP who
-  // lived. Loot rolls are independent — not tied to sub tier.
+  // LOOT ON VICTORY — one line to explain: clear the boss and every hero on the
+  // roster gets ONE piece of gear, in their own role. Surviving raises the
+  // rarity floor; being MVP raises it further. Not tied to sub tier.
+  //
+  // It used to be three stacking rolls (participation + survivor + MVP), which
+  // paid a surviving MVP three items a week, filled bags with duplicates, and
+  // could not be described without a paragraph. Same generosity at the top end,
+  // expressed as quality instead of quantity.
+  const awards = [];
   if (downed) {
-    const lootTable = getSeason()?.lootTable?.length ? getSeason().lootTable : DEFAULT_LOOT_TABLE;
+    // The table the raid was SET UP with, not whatever season is current now.
+    const raidSnap = await db.ref(`${PATHS.raid(seasonId, weekId)}/lootTable`).get();
+    const stamped = raidSnap.val();
+    const season = getSeason();
+    const lootTable = stamped?.length
+      ? stamped
+      : (season?.id === seasonId && season?.lootTable?.length ? season.lootTable : DEFAULT_LOOT_TABLE);
     const weights = config.loot.bossRarityWeights;
     const survivors = new Set(combat.result?.survivors || []);
-    // Role-aware: a raid reward lands directly in ONE named hero's bag with no
-    // lottery and no choice, and gear only pays out via bonuses[player.role] —
-    // so an off-role item is worth exactly 0 to them, forever.
-    const roll = (uid) => {
-      const id = pickDrop(lootTable, getItem, Math.random, config, weights, { role: signups[uid]?.role });
-      return id ? addLoot(uid, id) : Promise.resolve();
-    };
+    const mvp = combat.result?.mvp;
+    const floors = config.loot.raidRewardFloors;
+
     for (const uid of Object.keys(signups)) {
-      await roll(uid); // participation reward
-      if (survivors.has(uid)) await roll(uid); // survived the fight → bonus
+      // Role-aware: the item lands directly in ONE named hero's bag with no
+      // lottery and no choice, and gear only pays out via bonuses[player.role].
+      const minRarity = uid === mvp ? floors.mvp : survivors.has(uid) ? floors.survivor : undefined;
+      const id = pickDrop(lootTable, getItem, Math.random, config, weights, { role: signups[uid]?.role, minRarity });
+      if (!id) continue;
+      await addLoot(uid, id);
+      const item = getItem(id);
+      awards.push({ uid, name: signups[uid]?.displayName || null, itemId: id, item, mvp: uid === mvp });
     }
-    if (combat.result?.mvp) await roll(combat.result.mvp); // MVP bonus
   }
 
   // combat/status was already set to 'done' by the claim above.
@@ -362,7 +382,15 @@ export async function finishBattle(seasonId, weekId, { now = Date.now() } = {}) 
   await db.ref(`${PATHS.boss(seasonId, weekId)}/status`).set(downed ? 'downed' : 'wiped');
   await db.ref(`${PATHS.raid(seasonId, weekId)}/result/resolvedAt`).set(SERVER_TIMESTAMP);
   await setRaidPointer({ phase: 'done' });
-  return { downed, mvp: combat.result?.mvp ?? null };
+  return {
+    downed,
+    mvp: combat.result?.mvp ?? null,
+    mvpName: signups[combat.result?.mvp]?.displayName ?? null,
+    bossName: (await db.ref(`${PATHS.boss(seasonId, weekId)}/name`).get()).val() || 'the boss',
+    roster: Object.keys(signups).length,
+    survivors: (combat.result?.survivors || []).length,
+    awards,
+  };
 }
 
 /**
@@ -386,8 +414,10 @@ export async function advanceRaidPhases(now = Date.now()) {
     return { transition: 'live', seasonId, weekId };
   }
   if (phase === 'live' && doneAt && now >= doneAt) {
-    await finishBattle(seasonId, weekId, { now });
-    return { transition: 'done', seasonId, weekId };
+    // Pass the payout summary up so the caller can ANNOUNCE it — a cleared boss
+    // used to pay gear into bags with nothing said in chat.
+    const result = await finishBattle(seasonId, weekId, { now });
+    return { transition: 'done', seasonId, weekId, result };
   }
   return null;
 }
@@ -445,8 +475,25 @@ export function computeNextRaidNight(now = Date.now()) {
   return epoch;
 }
 
-/** Sequential, human-friendly week id for a season ("w1", "w2", …). */
+/** How many weeks a season already has scheduled in the DB (0 if it's new). */
+export async function weeksInSeasonDb(seasonId) {
+  const snap = await database().ref(PATHS.bossesForSeason(seasonId)).get();
+  return Object.keys(snap.val() || {}).length;
+}
+
+/**
+ * Next sequential week id for a season ("w1", "w2", …).
+ *
+ * Takes the MAX existing week rather than counting children: with a count,
+ * deleting any week (a mis-scheduled boss, a cleanup) makes the next id collide
+ * with a week that already exists, silently overwriting its boss and roster.
+ */
 export async function nextWeekId(seasonId) {
   const snap = await database().ref(PATHS.bossesForSeason(seasonId)).get();
-  return `w${Object.keys(snap.val() || {}).length + 1}`;
+  const weeks = Object.keys(snap.val() || {});
+  const highest = weeks.reduce((max, id) => {
+    const n = parseInt(String(id).replace(/\D/g, ''), 10);
+    return Number.isFinite(n) && n > max ? n : max;
+  }, 0);
+  return `w${highest + 1}`;
 }

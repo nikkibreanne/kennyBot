@@ -129,6 +129,16 @@ export async function equipItem(userId, itemId) {
 
   const res = await ref.transaction((curr) => {
     if (curr == null) { outcome = { ok: false, reason: 'no-character' }; return null; }
+    // ROLE LOCK. Gear pays out only through bonuses[wearer.role], so off-role
+    // gear was always worth exactly 0 — but nothing said so, and players wore it
+    // anyway (9 pieces were equipped off-role in prod, one hero in all three
+    // slots, running on zero gear rating without knowing). Refusing the equip
+    // turns a silent dead end into a reason to trade the piece to someone it
+    // helps. `item.role` is the item's affinity; a class fixes its wearer's role.
+    if (curr.role && typeof item.bonuses?.[curr.role] !== 'number') {
+      outcome = { ok: false, reason: 'wrong-role', item, wearerRole: curr.role };
+      return; // abort
+    }
     const inventory = Array.isArray(curr.inventory) ? [...curr.inventory] : [];
     const idx = inventory.indexOf(itemId);
     if (idx === -1) { outcome = { ok: false, reason: 'not-owned' }; return; } // abort

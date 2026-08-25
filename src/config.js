@@ -69,9 +69,16 @@ export const config = {
   loot: {
     // Chat drops: weighted rarity ladder (rarer = much less likely).
     rarityWeights: { common: 60, uncommon: 25, rare: 10, epic: 4, legendary: 1 },
-    // BOSS-battle rewards roll on a HIGHER-rarity table (clearing a raid should
-    // feel better than a chat drop — owner request).
+    // RAID REWARDS roll on a HIGHER-rarity table than chat drops (clearing a raid
+    // should feel better than catching a drop — owner request).
     bossRarityWeights: { common: 18, uncommon: 34, rare: 28, epic: 14, legendary: 6 },
+    // A cleared raid pays EVERY hero on the roster exactly ONE piece of gear,
+    // in their own role. How good it can be is the reward for how the fight went:
+    // surviving and taking MVP each raise the rarity FLOOR rather than handing
+    // out extra items. One roll each keeps it explainable in a sentence and stops
+    // bags filling with duplicates (the old participation + survivor + MVP stack
+    // paid a surviving MVP three items a week).
+    raidRewardFloors: { survivor: 'uncommon', mvp: 'rare' },
     // BITS → a communal chat drop. `minBits` is the trigger (100 fired far too
     // often); above it the cheer buys a rarity FLOOR, so a big cheer cannot roll
     // a common. Bands are [minBits, floor] ascending — the highest one the cheer

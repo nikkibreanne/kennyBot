@@ -86,6 +86,46 @@ async function touchHeartbeat() {
   }
 }
 
+/**
+ * Say what just happened to the raid. Nothing announced these transitions, so a
+ * cleared boss paid gear silently into bags — the single biggest reason the raid
+ * rewards read as an opaque mechanism. Chat now hears the lock, the result, and
+ * who got what.
+ * @param {{transition: string, seasonId: string, weekId: string, result?: object}} t
+ */
+function announceRaidPhase(t, send, logger) {
+  try {
+    if (t.transition === 'locked') {
+      send.say('🔒 The roster is LOCKED — no more !muster. The battle begins shortly; watch it at ' + `${config.siteUrl}/arena/`);
+      return;
+    }
+    if (t.transition === 'live') {
+      send.say(`⚔️ RAID NIGHT! The battle is playing out now — watch it at ${config.siteUrl}/arena/`);
+      return;
+    }
+    if (t.transition !== 'done' || !t.result) return;
+
+    const r = t.result;
+    if (!r.downed) {
+      send.say(`💀 ${r.bossName} survived — the patch was wiped (${r.roster} heroes). No loot this week. Replay: ${config.siteUrl}/arena/`);
+      return;
+    }
+    const mvp = r.mvpName ? ` MVP: @${r.mvpName}.` : '';
+    send.say(
+      `🏆 ${r.bossName} is DOWN! ${r.survivors}/${r.roster} heroes walked away.${mvp} ` +
+      `Everyone who raided got a piece of gear — check !bag, then !equip it.`,
+    );
+    // Name the standout drops rather than all of them: one line, not a wall.
+    const best = (r.awards || [])
+      .filter((a) => a.item && ['epic', 'legendary'].includes(a.item.rarity))
+      .slice(0, 3)
+      .map((a) => `@${a.name || 'a hero'} → ${a.item.rarity} ${a.item.name}`);
+    if (best.length) send.say(`✨ ${best.join(' · ')}`);
+  } catch (err) {
+    logger.error('raid announce failed', { err: String(err) });
+  }
+}
+
 async function main() {
   requireEnv();
   const channel = process.env.TWITCH_CHANNEL;
@@ -231,6 +271,8 @@ async function main() {
   // ── Resolve-on-boot: advance raid phases by stored timestamps, never a timer
   //    a restart could lose (§H.5 / §L.1). Loop to catch up after downtime
   //    (e.g. signup→locked→live→done all overdue).
+  // Deliberately SILENT: a battle that resolved during downtime is old news, and
+  // announcing it on boot would replay stale results into chat.
   for (let i = 0; i < 5; i++) {
     const t = await advanceRaidPhases();
     if (!t) break;
@@ -332,7 +374,9 @@ async function main() {
   const phaseTimer = setInterval(async () => {
     try {
       const t = await advanceRaidPhases();
-      if (t) logger.info('raid phase advanced', t);
+      if (!t) return;
+      logger.info('raid phase advanced', t);
+      announceRaidPhase(t, send, logger);
     } catch (err) {
       logger.error('phase tick failed', { err: String(err) });
     }

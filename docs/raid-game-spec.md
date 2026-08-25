@@ -134,11 +134,13 @@ function onChatMessage(user, config) {
 
 ### 5.2 Loot drops & equipment
 
-- **Loot drops in chat** at semi-random intervals while live (and as raid
-  rewards). Viewers claim with `!loot` / `!grab` within a time window.
-- Claiming is a **window with independent rolls** (inclusive), not first-to-type
-  — same rationale as before (don't reward reflexes/bots; don't exclude
-  casuals). Higher-rarity drops may be contested/lottery (§13).
+- **Chat drops** land at semi-random intervals while live, on a bits cheer, or by
+  mod `!drop`. Viewers enter with `!grab` / `!loot` within a time window.
+- Entering is a **window LOTTERY**, not first-to-type and not per-user rolls:
+  every `!grab` in the window ENTERS the viewer, and at close exactly ONE winner
+  is drawn for the ONE item (so a drop can never mint duplicates). Rationale
+  unchanged — don't reward reflexes/bots, don't exclude casuals — and every
+  entrant has identical odds regardless of sub tier.
 - **Rarity ladder** (genre-standard): common → uncommon → rare → epic →
   legendary, driving stat magnitude.
 - **Equipment slots** (proposal — adjust as desired): `weapon`, `armor`,
@@ -157,6 +159,20 @@ function onChatMessage(user, config) {
   lands on, forever. Chat drops stay role-blind on purpose — the winner is
   unknown when the item is picked, the item is announced before anyone grabs,
   and `!trade` / `!offer` (aka `!give`) can move it.
+- A cleared raid pays every roster hero **exactly ONE item**. Surviving and
+  taking MVP raise the rarity FLOOR (`loot.raidRewardFloors`), not the item
+  count. This replaced three stacking rolls (participation + survivor + MVP),
+  which paid a surviving MVP three items a week, filled bags with duplicates,
+  and could not be explained in a sentence.
+- **Gear is role-locked at equip time.** `!equip` refuses another role's item
+  rather than letting a player wear something worth nothing, and names the
+  classes it *is* for so the piece gets traded on; `!bag` marks unusable items.
+  A class fixes its role at `!create`, so "who can wear this" is derived from
+  `CLASSES`, never stored per item.
+- **Every phase transition is announced in chat** (lock, raid night, result, and
+  the standout drops). Nothing announced them before, so a cleared boss paid
+  gear silently into bags — the single biggest reason raid rewards read as an
+  opaque mechanism.
 - **Bits set a rarity floor, not just a trigger** (`loot.cheer`). Below
   `minBits` nothing drops; above it the highest band the cheer clears sets a
   floor, and the ladder re-rolls on the remaining relative weights — so a big
@@ -474,7 +490,7 @@ for OAuth secrets; channel is configurable.
 | Command | Who | Effect |
 |---|---|---|
 | `!create <class>` | everyone | create character + grant starter gear |
-| `!grab` / `!loot` | everyone | claim the active drop (rolls within window) |
+| `!grab` / `!loot` | everyone | enter the active drop's draw (one winner at close) |
 | `!char` / `!me` | everyone | view character (class, level, role rating) |
 | `!bag` / `!inventory` | everyone | view unequipped loot |
 | `!equip <item>` | everyone | equip an item into its slot |
