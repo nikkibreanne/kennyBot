@@ -146,6 +146,25 @@ function onChatMessage(user, config) {
   (gear that boosts tank/heal/dps ratings). Equipping raises the character's
   role rating → raid contribution.
 - Items live in an **item catalog** you define per raid tier (§5.4 / §5.5).
+- **Two loot paths, and they are not the same.** *Chat drops* are a communal
+  LOTTERY into general chat — announced by name and rarity, `!grab` enters, one
+  random entrant wins — fired by a cheer, the live scheduler, or mod `!drop`.
+  *Raid rewards* are paid by `finishBattle` on a clear straight into each roster
+  hero's bag (participation roll · survivor bonus · MVP bonus) on the richer
+  `bossRarityWeights` ladder, with no lottery and no choice.
+- Raid rewards are therefore **role-aware**: gear only pays out through
+  `bonuses[player.role]`, so an off-role item is worth exactly 0 to the hero it
+  lands on, forever. Chat drops stay role-blind on purpose — the winner is
+  unknown when the item is picked, the item is announced before anyone grabs,
+  and `!trade` / `!offer` (aka `!give`) can move it.
+- **Bits set a rarity floor, not just a trigger** (`loot.cheer`). Below
+  `minBits` nothing drops; above it the highest band the cheer clears sets a
+  floor, and the ladder re-rolls on the remaining relative weights — so a big
+  cheer can still hit legendary but can never fall to common.
+- Payout is **claimed atomically** (`combat/status` live→done in a transaction).
+  The phase pointer is an in-memory mirror two callers can both read as `live`;
+  without the claim, overlapping ticks award loot, renown and leaderboard
+  damage twice.
 
 ### 5.3 The weekly community raid (many-vs-1)
 
@@ -204,6 +223,21 @@ guaranteed win** (avoid pay-to-win resentment and gambling optics).
 - Season transition: award veterans a **prestige title** (the "cleared on time"
   equivalent); **reset gear** so newcomers start fresh and the meta doesn't
   calcify (character + level may carry or partially reset — see §13).
+- **Renown is the only veteran stat; "prestige" is a source of it, not a second
+  number.** Renown comes from two places — `+1` per raid **cleared**, and a
+  **prestige** award at rollover — and converts to a permanent role-rating bonus
+  at `rating.renownPerPoint`, capped at `rating.renownCap`. Gear resets each
+  season; renown never does. That is the whole veteran ladder.
+- Prestige is **earned and scaled by attendance**: `prestigePerRaid` renown for
+  each raid of the outgoing season the hero was actually on the roster for
+  (counted from `raids/<seasonId>/<week>` entries that have a `result` — a week
+  scheduled but never fought counts for nobody), bounded by `prestigeMax`. It is
+  never granted to every account that once ran `!create`. The **gear reset
+  applies to everyone**, veteran or not.
+- A season **ends on its finale**. `!boss next` refuses to schedule past the last
+  scripted week and points at `!season rollover` — the boss lookup clamps an
+  out-of-range week to the finale, so without that guard a season silently never
+  ends and chat re-fights the same boss (this happened in prod for 3 weeks).
 - Season launch is the natural **invite-a-friend growth moment**; consider a
   referral bonus active at season start.
 

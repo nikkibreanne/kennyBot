@@ -227,6 +227,23 @@ export function bossFor(seasonNumber, weekNumber) {
 /** Flat list of all 18 bosses (id-keyed iteration / admin tooling). */
 export const ALL_BOSSES = SEASONS.flat();
 
+/**
+ * How many scripted weekly bosses a season has (its finale is the last one).
+ * `bossFor` CLAMPS an out-of-range week to the finale, which is the right
+ * defensive behavior for a lookup but silently repeats the finale forever if a
+ * caller keeps asking for week 7, 8, 9… Callers that schedule content must ask
+ * this FIRST and stop at the end of the season (see !boss next).
+ * @param {number} seasonNumber 1-based
+ * @returns {number}
+ */
+export function weeksInSeason(seasonNumber) {
+  const s = Math.max(1, Math.min(SEASONS.length, seasonNumber || 1)) - 1;
+  return SEASONS[s].length;
+}
+
+/** How many seasons of scripted content exist (the last tier has no successor). */
+export const SEASON_COUNT = SEASONS.length;
+
 // ─── engine wiring (resolve ability sets + back-compat helpers) ──────────────
 import { BOSS_ABILITY_SETS, DEFAULT_BOSS_ABILITIES } from './abilities.js';
 

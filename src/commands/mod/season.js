@@ -2,7 +2,7 @@
 // Sets the season pointer + loot table and opens week 1's muster with the first
 // boss scheduled for the next raid night. Gear reset / prestige carryover on
 // season rollover is a later phase (§5.6) — flagged, not silently done.
-import { setSeason } from '../../db/configStore.js';
+import { setSeason, getSeason } from '../../db/configStore.js';
 import { setupRaidWeek, computeNextRaidNight } from '../../db/raid.js';
 import { rolloverAllPlayers } from '../../db/players.js';
 import { seasonBoss } from '../../content/bosses.js';
@@ -47,14 +47,25 @@ export default {
 
     if (sub === 'rollover') {
       // New tier: RESET everyone's gear (fresh start, newcomers aren't behind),
-      // KEEP level + renown, and grant prestige renown for the season cleared (§5.6).
+      // KEEP level + renown, and grant prestige renown to the heroes who actually
+      // raided the OUTGOING season (§5.6 awards it to veterans). Read that season
+      // before openSeason() overwrites the pointer.
       if (!/^[a-zA-Z0-9_-]{1,32}$/.test(id)) {
         reply('Usage: !season rollover <id> [name]');
         return;
       }
-      const count = await rolloverAllPlayers();
+      const outgoing = getSeason();
+      const { reset, prestiged, granted, best } = await rolloverAllPlayers({ seasonId: outgoing?.id });
       const boss = await openSeason(id, name);
-      reply(`🔄 Season rolled over to ${name} (${id}). ${count} heroes' gear reset — levels & veteran renown kept, prestige granted. Week 1: ${boss.name}.`);
+      const from = outgoing?.name || outgoing?.id || 'the last season';
+      const prestigeLine = prestiged
+        ? `${prestiged} veteran${prestiged === 1 ? '' : 's'} of ${from} earned ${granted} prestige renown ` +
+          `(+${config.raid.prestigePerRaid} per raid attended, best ${best})`
+        : `no veterans of ${from} to reward`;
+      reply(
+        `🔄 Season rolled over to ${name} (${id}). ${reset} heroes' gear reset (levels & renown kept) · ` +
+        `${prestigeLine}. Week 1: ${boss.name} — !muster to join!`,
+      );
       return;
     }
 
