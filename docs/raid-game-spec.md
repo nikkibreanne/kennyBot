@@ -204,11 +204,17 @@ guaranteed win** (avoid pay-to-win resentment and gambling optics).
 - Season transition: award veterans a **prestige title** (the "cleared on time"
   equivalent); **reset gear** so newcomers start fresh and the meta doesn't
   calcify (character + level may carry or partially reset — see §13).
-- A "veteran" is a hero who **actually raided the outgoing season** — i.e. has a
-  `leaderboard/<seasonId>` entry, which `finishBattle` writes for every signed-up
-  hero of every resolved raid (damage 0 included, so healers count). Prestige is
-  earned, never granted to every account that once ran `!create`: it carries a
-  permanent renown rating bonus. The **gear reset applies to everyone**.
+- **Renown is the only veteran stat; "prestige" is a source of it, not a second
+  number.** Renown comes from two places — `+1` per raid **cleared**, and a
+  **prestige** award at rollover — and converts to a permanent role-rating bonus
+  at `rating.renownPerPoint`, capped at `rating.renownCap`. Gear resets each
+  season; renown never does. That is the whole veteran ladder.
+- Prestige is **earned and scaled by attendance**: `prestigePerRaid` renown for
+  each raid of the outgoing season the hero was actually on the roster for
+  (counted from `raids/<seasonId>/<week>` entries that have a `result` — a week
+  scheduled but never fought counts for nobody), bounded by `prestigeMax`. It is
+  never granted to every account that once ran `!create`. The **gear reset
+  applies to everyone**, veteran or not.
 - A season **ends on its finale**. `!boss next` refuses to schedule past the last
   scripted week and points at `!season rollover` — the boss lookup clamps an
   out-of-range week to the finale, so without that guard a season silently never

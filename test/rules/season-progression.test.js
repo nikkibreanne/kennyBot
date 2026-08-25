@@ -12,6 +12,8 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { SEASONS, SEASON_COUNT, weeksInSeason, bossFor, seasonBoss } from '../../src/content/bosses.js';
 import { SEASON_LOOT } from '../../src/content/items.js';
+import { prestigeFor } from '../../src/db/players.js';
+import { renownBonus } from '../../src/rules/rating.js';
 import { config } from '../../src/config.js';
 
 test('every season has the number of weeks the config promises', () => {
@@ -64,4 +66,33 @@ test('seasonBoss resolves abilities and a recommended roster for every week', ()
       assert.ok(b.recommended > 0, `${b.id} has no recommended count`);
     }
   }
+});
+
+// ── prestige (spec §5.6) ────────────────────────────────────────────────────
+// There is no separate "prestige" stat: prestige is renown, awarded at rollover
+// for the weeks you actually raided. These pin the scale, since renown converts
+// into a PERMANENT role-rating bonus that gear resets never take away.
+
+test('prestige is zero for a hero who never raided the season', () => {
+  assert.equal(prestigeFor(0), 0);
+  assert.equal(prestigeFor(undefined), 0);
+  assert.equal(prestigeFor(-3), 0, 'nonsense input cannot mint renown');
+});
+
+test('prestige scales one-for-one with raids attended, up to the cap', () => {
+  const per = config.raid.prestigePerRaid;
+  assert.equal(prestigeFor(1), per);
+  assert.equal(prestigeFor(6), 6 * per);
+  assert.ok(prestigeFor(6) > prestigeFor(2), 'showing up every week beats a cameo');
+  assert.equal(prestigeFor(config.raid.prestigeMax + 50), config.raid.prestigeMax);
+});
+
+test('a full-attendance season stays a perk, never a substitute for gear', () => {
+  // A perfect season ≈ prestige for every week + 1 renown per clear.
+  const seasonRenown = prestigeFor(config.raid.seasonWeeks) + config.raid.seasonWeeks;
+  const rating = renownBonus({ renown: seasonRenown }, config);
+  // Season-1 epics sit at +58..64 role rating for a single slot.
+  assert.ok(rating < 60, `one perfect season is worth +${rating} rating — should stay under one epic item`);
+  // …and a career vet is capped, by design.
+  assert.equal(renownBonus({ renown: 9999 }, config), config.rating.renownCap * config.rating.renownPerPoint);
 });

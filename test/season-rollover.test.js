@@ -42,6 +42,16 @@ async function waitForSeason(pred, ms = 3000) {
 }
 
 /** Pretend `n` bosses have already been scheduled this season, so nextWeekId → w(n+1). */
+/** Record that `uid` was on the roster of `n` RESOLVED raids this season. */
+async function seedAttendance(uid, n) {
+  const updates = {};
+  for (let i = 1; i <= n; i++) {
+    updates[`raids/${SEASON}/w${i}/result`] = { downed: true, bossHpRemaining: 0, status: 'done' };
+    updates[`raids/${SEASON}/w${i}/signups/${uid}`] = { displayName: uid, role: 'dps', level: 12 };
+  }
+  await database().ref().update(updates);
+}
+
 async function seedScheduledWeeks(n) {
   const weeks = {};
   for (let i = 1; i <= n; i++) weeks[`w${i}`] = { name: `Boss ${i}`, baseHp: 1000, atk: 50, status: 'downed' };
@@ -118,17 +128,19 @@ runOrSkip('rollover grants prestige ONLY to heroes who raided the outgoing seaso
   const db = database();
   await db.ref(PATHS.player(VET)).set(makePlayer(4));
   await db.ref(PATHS.player(AFK)).set(makePlayer(0));
-  // finishBattle writes a leaderboard entry for every signup of a resolved raid.
-  // The AFK hero has a character but never raided, so has none.
-  await db.ref(PATHS.leaderboardEntry(SEASON, VET)).set({ damage: 12345 });
+  // The veteran was on the roster of 3 resolved raids; the AFK hero has a
+  // character but never raided, so attends none.
+  await seedAttendance(VET, 3);
 
-  const { reset, prestiged } = await rolloverAllPlayers({ seasonId: SEASON, prestigeRenown: 3 });
+  const { reset, prestiged, best } = await rolloverAllPlayers({ seasonId: SEASON });
 
   assert.equal(prestiged, 1, 'exactly one veteran');
   assert.ok(reset >= 2, 'gear resets for everyone, veteran or not');
 
   const vet = (await db.ref(PATHS.player(VET)).get()).val();
-  assert.equal(vet.renown, 7, 'veteran keeps its 4 renown and gains 3 prestige');
+  const expected = 3 * config.raid.prestigePerRaid;
+  assert.equal(best, expected);
+  assert.equal(vet.renown, 4 + expected, 'veteran keeps its 4 renown and gains prestige per raid attended');
   assert.equal(vet.stats.seasonsPlayed, 1);
 
   const afk = (await db.ref(PATHS.player(AFK)).get()).val();
@@ -140,7 +152,7 @@ runOrSkip('rollover resets gear for everyone, including non-participants', async
   const db = database();
   await db.ref(PATHS.player(VET)).set(makePlayer(4));
   await db.ref(PATHS.player(AFK)).set(makePlayer(0));
-  await db.ref(PATHS.leaderboardEntry(SEASON, VET)).set({ damage: 1 });
+  await seedAttendance(VET, 1);
 
   await rolloverAllPlayers({ seasonId: SEASON });
 
@@ -155,7 +167,7 @@ runOrSkip('rollover resets gear for everyone, including non-participants', async
 runOrSkip('with no outgoing season nobody is a veteran, but gear still resets', async () => {
   const db = database();
   await db.ref(PATHS.player(VET)).set(makePlayer(4));
-  await db.ref(PATHS.leaderboardEntry(SEASON, VET)).set({ damage: 1 });
+  await seedAttendance(VET, 4);
 
   const { prestiged } = await rolloverAllPlayers({ seasonId: null });
 
@@ -163,4 +175,49 @@ runOrSkip('with no outgoing season nobody is a veteran, but gear still resets', 
   const vet = (await db.ref(PATHS.player(VET)).get()).val();
   assert.equal(vet.renown, 4, 'renown untouched');
   assert.ok(vet.equipped.weapon.id.startsWith('itm_starter_'));
+});
+
+runOrSkip('prestige SCALES with attendance — more raids, more renown', async () => {
+  const db = database();
+  const KEEN = 'u_keen_test';
+  const RARE = 'u_rare_test';
+  await db.ref(PATHS.player(KEEN)).set(makePlayer(0));
+  await db.ref(PATHS.player(RARE)).set(makePlayer(0));
+  await seedAttendance(KEEN, 6); // every week
+  await seedAttendance(RARE, 2); // turned up twice
+
+  const { granted, best } = await rolloverAllPlayers({ seasonId: SEASON });
+
+  const keen = (await db.ref(PATHS.player(KEEN)).get()).val();
+  const rare = (await db.ref(PATHS.player(RARE)).get()).val();
+  assert.equal(keen.renown, 6 * config.raid.prestigePerRaid);
+  assert.equal(rare.renown, 2 * config.raid.prestigePerRaid);
+  assert.ok(keen.renown > rare.renown, 'attendance must be worth more than a cameo');
+  assert.equal(best, keen.renown);
+  assert.equal(granted, keen.renown + rare.renown);
+
+  await db.ref(PATHS.player(KEEN)).remove();
+  await db.ref(PATHS.player(RARE)).remove();
+});
+
+runOrSkip('a week that was scheduled but never fought earns no prestige', async () => {
+  const db = database();
+  await db.ref(PATHS.player(VET)).set(makePlayer(0));
+  await seedAttendance(VET, 2);
+  // A third week exists with a roster but no result — the battle never ran.
+  await db.ref(`raids/${SEASON}/w3/signups/${VET}`).set({ displayName: 'Tester', role: 'dps', level: 12 });
+
+  const { best } = await rolloverAllPlayers({ seasonId: SEASON });
+
+  assert.equal(best, 2 * config.raid.prestigePerRaid, 'only the two RESOLVED raids count');
+});
+
+runOrSkip('prestige is bounded so an overlong season cannot mint a runaway veteran', async () => {
+  const db = database();
+  await db.ref(PATHS.player(VET)).set(makePlayer(0));
+  await seedAttendance(VET, config.raid.prestigeMax + 5);
+
+  const { best } = await rolloverAllPlayers({ seasonId: SEASON });
+
+  assert.equal(best, config.raid.prestigeMax, 'capped at config.raid.prestigeMax');
 });

@@ -89,6 +89,14 @@ export const config = {
   // ── Weekly raid: muster → raid night → automated battle (spec §5.8) ───────
   raid: {
     seasonWeeks: 6, // a season = 6 weekly bosses + a prestige finale (§5.6)
+    // PRESTIGE at season rollover (§5.6): renown granted for the weeks a hero
+    // actually raided that season, so attendance scales the reward instead of
+    // everyone getting the same flat lump. Renown is the ONLY veteran stat —
+    // "prestige" is a source of it, not a separate number — and it converts at
+    // rating.renownPerPoint, so a full 6-week season (~6 prestige + ~6 clear
+    // renown) is about +24 rating and three seasons lands near renownCap.
+    prestigePerRaid: 1,
+    prestigeMax: 10, // safety bound if a season ever runs long (t1 ran 8 weeks)
     // Roster locks this long before raid night; gear/level after lock don't
     // affect this battle (determinism + fairness, IMPLEMENTATION §L.1).
     lockLeadMs: 15 * 60 * 1000,

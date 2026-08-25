@@ -55,13 +55,16 @@ export default {
         return;
       }
       const outgoing = getSeason();
-      const { reset, prestiged } = await rolloverAllPlayers({ seasonId: outgoing?.id });
+      const { reset, prestiged, granted, best } = await rolloverAllPlayers({ seasonId: outgoing?.id });
       const boss = await openSeason(id, name);
       const from = outgoing?.name || outgoing?.id || 'the last season';
+      const prestigeLine = prestiged
+        ? `${prestiged} veteran${prestiged === 1 ? '' : 's'} of ${from} earned ${granted} prestige renown ` +
+          `(+${config.raid.prestigePerRaid} per raid attended, best ${best})`
+        : `no veterans of ${from} to reward`;
       reply(
         `🔄 Season rolled over to ${name} (${id}). ${reset} heroes' gear reset (levels & renown kept) · ` +
-        `${prestiged} veteran${prestiged === 1 ? '' : 's'} of ${from} earned prestige. ` +
-        `Week 1: ${boss.name} — !muster to join!`,
+        `${prestigeLine}. Week 1: ${boss.name} — !muster to join!`,
       );
       return;
     }
