@@ -146,6 +146,25 @@ function onChatMessage(user, config) {
   (gear that boosts tank/heal/dps ratings). Equipping raises the character's
   role rating → raid contribution.
 - Items live in an **item catalog** you define per raid tier (§5.4 / §5.5).
+- **Two loot paths, and they are not the same.** *Chat drops* are a communal
+  LOTTERY into general chat — announced by name and rarity, `!grab` enters, one
+  random entrant wins — fired by a cheer, the live scheduler, or mod `!drop`.
+  *Raid rewards* are paid by `finishBattle` on a clear straight into each roster
+  hero's bag (participation roll · survivor bonus · MVP bonus) on the richer
+  `bossRarityWeights` ladder, with no lottery and no choice.
+- Raid rewards are therefore **role-aware**: gear only pays out through
+  `bonuses[player.role]`, so an off-role item is worth exactly 0 to the hero it
+  lands on, forever. Chat drops stay role-blind on purpose — the winner is
+  unknown when the item is picked, the item is announced before anyone grabs,
+  and `!trade` / `!offer` (aka `!give`) can move it.
+- **Bits set a rarity floor, not just a trigger** (`loot.cheer`). Below
+  `minBits` nothing drops; above it the highest band the cheer clears sets a
+  floor, and the ladder re-rolls on the remaining relative weights — so a big
+  cheer can still hit legendary but can never fall to common.
+- Payout is **claimed atomically** (`combat/status` live→done in a transaction).
+  The phase pointer is an in-memory mirror two callers can both read as `live`;
+  without the claim, overlapping ticks award loot, renown and leaderboard
+  damage twice.
 
 ### 5.3 The weekly community raid (many-vs-1)
 

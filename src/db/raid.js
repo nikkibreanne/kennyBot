@@ -295,7 +295,26 @@ function damageByUid(log) {
 export async function finishBattle(seasonId, weekId, { now = Date.now() } = {}) {
   const db = database();
   const p = getRaidPointer();
-  if (p?.phase === 'done') return null;
+  if (p?.phase === 'done') return null; // cheap short-circuit; NOT the real guard
+
+  // ATOMIC CLAIM (same shape as processDrops' draw claim). The pointer check
+  // above reads the in-memory config mirror, which two overlapping callers can
+  // both see as 'live' — two instances, or a payout that outruns the 30s phase
+  // tick. Without this, every award below runs twice: doubled loot rolls,
+  // doubled leaderboard damage, doubled renown. Flipping combat status
+  // live→done in a transaction lets exactly one caller through.
+  //
+  // Claiming BEFORE paying out means a crash mid-payout leaves it partially
+  // awarded rather than retried — deliberately preferred over a silent,
+  // compounding double-award, and recoverable by hand.
+  let claimed = false;
+  const claim = await db.ref(`${PATHS.combat(seasonId, weekId)}/status`).transaction((status) => {
+    if (status == null) return null; // no combat to finish (or empty cache → refetch)
+    if (status === 'done') return undefined; // already paid out → abort
+    claimed = true;
+    return 'done';
+  });
+  if (!claimed || !claim.committed) return null;
 
   const [combatSnap, signupSnap] = await Promise.all([
     db.ref(PATHS.combat(seasonId, weekId)).get(),
@@ -324,8 +343,11 @@ export async function finishBattle(seasonId, weekId, { now = Date.now() } = {}) 
     const lootTable = getSeason()?.lootTable?.length ? getSeason().lootTable : DEFAULT_LOOT_TABLE;
     const weights = config.loot.bossRarityWeights;
     const survivors = new Set(combat.result?.survivors || []);
+    // Role-aware: a raid reward lands directly in ONE named hero's bag with no
+    // lottery and no choice, and gear only pays out via bonuses[player.role] —
+    // so an off-role item is worth exactly 0 to them, forever.
     const roll = (uid) => {
-      const id = pickDrop(lootTable, getItem, Math.random, config, weights);
+      const id = pickDrop(lootTable, getItem, Math.random, config, weights, { role: signups[uid]?.role });
       return id ? addLoot(uid, id) : Promise.resolve();
     };
     for (const uid of Object.keys(signups)) {
@@ -335,7 +357,7 @@ export async function finishBattle(seasonId, weekId, { now = Date.now() } = {}) 
     if (combat.result?.mvp) await roll(combat.result.mvp); // MVP bonus
   }
 
-  await db.ref(`${PATHS.combat(seasonId, weekId)}/status`).set('done');
+  // combat/status was already set to 'done' by the claim above.
   await db.ref(`${PATHS.raid(seasonId, weekId)}/result/status`).set('done');
   await db.ref(`${PATHS.boss(seasonId, weekId)}/status`).set(downed ? 'downed' : 'wiped');
   await db.ref(`${PATHS.raid(seasonId, weekId)}/result/resolvedAt`).set(SERVER_TIMESTAMP);
