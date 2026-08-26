@@ -1,11 +1,17 @@
-// !season start <id> [name] (mod) — start a new 6-week raid tier (spec §5.6).
-// Sets the season pointer + loot table and opens week 1's muster with the first
-// boss scheduled for the next raid night. Gear reset / prestige carryover on
-// season rollover is a later phase (§5.6) — flagged, not silently done.
+// !season (mod) — run the season lifecycle (spec §5.6).
+//
+// `!season next` is the one to use: it works out the tier and the name itself.
+// Both were already in the code — the tier is just the current one plus one, and
+// the name is in SEASON_THEMES — so making the operator retype
+// `!season rollover t2 The Sweltering Patch` was asking them to memorise data the
+// bot already has, with a typo silently creating a season called "Tier t2".
+//
+// `start` and `rollover` remain for the off-script cases (a custom tier id or
+// name, or re-running a tier); `next` is the everyday path.
 import { setSeason, getSeason, getRaidPointer } from '../../db/configStore.js';
 import { setupRaidWeek, computeNextRaidNight, weeksInSeasonDb } from '../../db/raid.js';
 import { rolloverAllPlayers } from '../../db/players.js';
-import { seasonBoss } from '../../content/bosses.js';
+import { seasonBoss, SEASON_THEMES, SEASON_COUNT } from '../../content/bosses.js';
 import { SEASON_LOOT } from '../../content/items.js';
 import { config } from '../../config.js';
 
@@ -28,17 +34,55 @@ async function openSeason(id, name) {
   return { boss, invited: 0 };
 }
 
+/**
+ * What `!season next` would do, derived from the current season. Pure enough to
+ * test: the tier is the current one + 1 (or 1 from a cold start) and the name
+ * comes from the authored SEASON_THEMES rather than from the operator's memory.
+ * @param {{id?: string, tier?: number, name?: string}|null} current
+ * @returns {{ok: true, id: string, name: string, tier: number, rollover: boolean}
+ *          |{ok: false, reason: string, tier: number}}
+ */
+export function nextSeasonPlan(current) {
+  const tier = (current?.tier || 0) + 1;
+  if (tier > SEASON_COUNT) return { ok: false, reason: 'no-more-content', tier };
+  const theme = SEASON_THEMES[tier - 1];
+  return {
+    ok: true,
+    id: `t${tier}`,
+    name: theme?.title || `Tier ${tier}`,
+    tier,
+    rollover: Boolean(current?.id), // nothing to roll over from on a cold start
+  };
+}
+
 export default {
   names: ['season'],
   mod: true,
   cooldownMs: 0,
-  help: '!season start <id> [name] | !season rollover <id> [name]',
+  help: '!season next — advance to the next tier (works out the id + name) | !season start <id> [name] | !season rollover <id> [name]',
   async run({ args, reply }) {
     const sub = (args[0] || '').toLowerCase();
-    const id = (args[1] || '').trim();
-    const name = args.slice(2).join(' ').trim() || `Tier ${id}`;
+    let id = (args[1] || '').trim();
+    let name = args.slice(2).join(' ').trim() || `Tier ${id}`;
 
-    if (sub === 'start') {
+    // `!season next` resolves the tier and name, then runs the same path the
+    // explicit commands do — so there is one implementation, not two.
+    let planned = null;
+    if (sub === 'next') {
+      const current = getSeason();
+      planned = nextSeasonPlan(current);
+      if (!planned.ok) {
+        reply(
+          `🏁 There's no scripted tier ${planned.tier} — ${SEASON_COUNT} seasons of content exist. ` +
+          `Use !season start <id> <name> to run a custom one.`,
+        );
+        return;
+      }
+      id = planned.id;
+      name = planned.name;
+    }
+
+    if (sub === 'start' || (planned && !planned.rollover)) {
       if (!/^[a-zA-Z0-9_-]{1,32}$/.test(id)) {
         reply('Usage: !season start <id> [name] — id is alphanumeric (e.g. t2).');
         return;
@@ -51,7 +95,7 @@ export default {
       if (existing > 0) {
         reply(
           `⚠️ Season "${id}" already exists with ${existing} week${existing === 1 ? '' : 's'} — ` +
-          `starting it again would wipe week 1's boss and roster. Use !season rollover <newId> for the next tier.`,
+          `starting it again would wipe week 1's boss and roster. Use !season next to advance a tier.`,
         );
         return;
       }
@@ -60,7 +104,7 @@ export default {
       return;
     }
 
-    if (sub === 'rollover') {
+    if (sub === 'rollover' || (planned && planned.rollover)) {
       // Rolling over mid-battle would pay the finishing raid out of the new
       // season's table into bags the rollover just emptied. Make the operator
       // wait out the reveal (minutes), rather than silently corrupting a payout.
@@ -92,6 +136,6 @@ export default {
       return;
     }
 
-    reply('Usage: !season start <id> [name] | !season rollover <id> [name]');
+    reply('Usage: !season next (recommended — picks the tier + name for you) | !season start <id> [name] | !season rollover <id> [name]');
   },
 };

@@ -1,9 +1,18 @@
 // Item catalog → Firebase seed. The static gear catalog (src/content/items.js)
 // is the SINGLE source of truth; this projects it into `items/<id>` (client-READ,
 // Admin-write) on boot so the website's /items/ Compendium renders the exact data
-// the raid engine uses — no second copy to drift (cf. seedCuratedFacts in
-// src/db/facts.js). Idempotent: item ids ARE the keys, so writes upsert in place
-// and any id dropped from the catalog is pruned. Runs every boot; non-fatal.
+// the raid engine uses (cf. seedCuratedFacts in src/db/facts.js). Idempotent:
+// item ids ARE the keys, so writes upsert in place and any id dropped from the
+// catalog is pruned. Runs every boot; non-fatal.
+//
+// This node is the ONLY thing the Compendium reads. The site used to also ship a
+// build-time copy of the catalog as a fallback, which meant a site deploy could
+// carry a NEWER catalog than the database it rendered — the page then showed the
+// older one with no symptom at all (it sat at 72 items after the 699-item
+// expansion shipped, looking healthy). One copy, one failure mode you can see.
+//
+// So: A CATALOG CHANGE IS A BOT DEPLOY. Edit items.js, ship the bot, and the
+// page updates live — no site rebuild involved.
 
 import { database, PATHS } from './firebase.js';
 import { ITEMS } from '../content/items.js';
@@ -33,7 +42,7 @@ const rank = (list, v) => {
 
 /**
  * The catalog projected to display rows, in browse order. Pure — no I/O — so
- * both seedCatalog() and scripts/export-catalog.mjs share one projection.
+ * seedCatalog() is its only consumer.
  * Each row carries the engine fields ({slot,rarity,role,bonuses}) plus display
  * helpers ({set, order}); `id` lives on the row here (it's the KEY in Firebase).
  * @returns {Array<{id:string,name:string,slot:string,rarity:string,role:string,bonuses:object,set:string,order:number}>}
