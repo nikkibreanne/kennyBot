@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.15.0](https://github.com/nikkibreanne/kennyBot/compare/kennybot-v0.14.0...kennybot-v0.15.0) (2026-08-26)
+
+
+### Features
+
+* **raid:** make a season rollover an actual prestige ([#80](https://github.com/nikkibreanne/kennyBot/issues/80)) ([08525d2](https://github.com/nikkibreanne/kennyBot/commit/08525d2e720be4860f6ca5a02d8eaf4b919a153c))
+
 ## [0.14.0](https://github.com/nikkibreanne/kennyBot/compare/kennybot-v0.13.0...kennybot-v0.14.0) (2026-08-26)
 
 
