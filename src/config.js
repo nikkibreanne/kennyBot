@@ -46,11 +46,23 @@ export const config = {
   rating: {
     classBase: { tank: 100, healer: 90, dps: 80 },
     perLevel: 10,
-    // Veteran reputation (spec §5.6): renown earned by clearing raids grants a
-    // small role-rating bonus that PERSISTS across seasons (gear resets, renown
-    // doesn't). renownBonus = min(renown, renownCap) * renownPerPoint.
+    // RENOWN — this season's standing. +1 per raid cleared, worth a little role
+    // rating, and RESET at rollover where it is converted into prestige. It is
+    // deliberately not permanent: that job belongs to prestige below.
     renownPerPoint: 2,
-    renownCap: 40, // max +80 rating — meaningful for vets, never dominant
+    renownCap: 40,
+    // PRESTIGE — the permanent half, and the point of the whole loop. Earned
+    // only by SACRIFICING a character at season rollover (level back to 1), so
+    // it is never just a participation counter. Two multipliers, because a
+    // prestige bonus that doesn't make the next run FASTER isn't prestige:
+    //   · rating — you hit harder at any given level
+    //   · exp    — you climb back up quicker than you did last time
+    // Multiplicative on purpose. A flat additive bonus (which is what renown
+    // was) gets swamped by levels and never compounds, so run 3 feels exactly
+    // like run 1.
+    prestigeRatingPct: 0.05, // +5% role rating per prestige point
+    prestigeExpPct: 0.12,    // +12% EXP per point — the visible "faster" part
+    prestigeCap: 20,         // ceiling: +100% rating, +240% exp
     // MATCHED SET (rules/rating.js#setBonus): a percentage of gear rating once
     // all three slots are filled with gear this hero can actually use, tiered by
     // the WEAKEST piece worn. Gives the 25-item-per-slot pyramid a goal beyond
@@ -137,14 +149,13 @@ export const config = {
   // ── Weekly raid: muster → raid night → automated battle (spec §5.8) ───────
   raid: {
     seasonWeeks: 6, // a season = 6 weekly bosses + a prestige finale (§5.6)
-    // PRESTIGE at season rollover (§5.6): renown granted for the weeks a hero
-    // actually raided that season, so attendance scales the reward instead of
-    // everyone getting the same flat lump. Renown is the ONLY veteran stat —
-    // "prestige" is a source of it, not a separate number — and it converts at
-    // rating.renownPerPoint, so a full 6-week season (~6 prestige + ~6 clear
-    // renown) is about +24 rating and three seasons lands near renownCap.
-    prestigePerRaid: 1,
-    prestigeMax: 10, // safety bound if a season ever runs long (t1 ran 8 weeks)
+    // PRESTIGE payout at rollover. This season's RENOWN is what converts:
+    // renown is +1 per raid the patch clears, so every boss you help kill this
+    // season becomes permanent power in the next one. Renown itself resets.
+    prestige: {
+      perRenown: 1,     // 1 renown earned this season → 1 permanent prestige
+      maxPerSeason: 12, // bound a single season's payout
+    },
     // Roster locks this long before raid night; gear/level after lock don't
     // affect this battle (determinism + fairness, IMPLEMENTATION §L.1).
     lockLeadMs: 15 * 60 * 1000,

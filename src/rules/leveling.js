@@ -18,10 +18,13 @@ export function levelThreshold(level, config) {
  * EXP granted for one qualifying chat message, after engagement scaling.
  * @param {number} engagementMult  >= 1 (see rating.engagementMultiplier)
  * @param {{ exp: { perMessage: number } }} config
+ * @param {number} [prestigeMult=1]  >= 1 (see rating.prestigeExpMultiplier) —
+ *   the permanent speed-up a prestiged hero keeps, so each climb back up the
+ *   levels is faster than the last.
  * @returns {number}
  */
-export function xpForMessage(engagementMult, config) {
-  return Math.round(config.exp.perMessage * Math.max(0, engagementMult));
+export function xpForMessage(engagementMult, config, prestigeMult = 1) {
+  return Math.round(config.exp.perMessage * Math.max(0, engagementMult) * Math.max(1, prestigeMult));
 }
 
 /**
@@ -79,8 +82,8 @@ export function rollLevelUp(state, { rng, config }) {
  * @returns {{ level: number, exp: number, levelPressure: number,
  *            gainedExp: number, leveledUp: boolean, fromLevel: number, toLevel: number }}
  */
-export function applyChatExp(state, { engagementMult, rng, config }) {
-  const gainedExp = xpForMessage(engagementMult, config);
+export function applyChatExp(state, { engagementMult, prestigeMult = 1, rng, config }) {
+  const gainedExp = xpForMessage(engagementMult, config, prestigeMult);
   const withExp = {
     level: Math.max(1, Math.floor(state.level || 1)),
     exp: Math.max(0, state.exp || 0) + gainedExp,
