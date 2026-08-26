@@ -1,5 +1,18 @@
 # Changelog
 
+## [0.13.0](https://github.com/nikkibreanne/kennyBot/compare/kennybot-v0.12.0...kennybot-v0.13.0) (2026-08-25)
+
+
+### Features
+
+* **items:** fill every season out to a full rarity pyramid (72 -&gt; 699 items) ([#75](https://github.com/nikkibreanne/kennyBot/issues/75)) ([b6d5088](https://github.com/nikkibreanne/kennyBot/commit/b6d5088e350394682bc09859da575cfb25a94548))
+* **raid:** role-lock gear, pay one reward per clear, and say what happened ([#76](https://github.com/nikkibreanne/kennyBot/issues/76)) ([578627d](https://github.com/nikkibreanne/kennyBot/commit/578627dd078403568a44a206e9b55e5a75fe905f))
+
+
+### Bug Fixes
+
+* **raid:** end seasons at the finale, earn prestige, and fix loot payout ([#74](https://github.com/nikkibreanne/kennyBot/issues/74)) ([50d5a0d](https://github.com/nikkibreanne/kennyBot/commit/50d5a0dc12988736e17ce374b086fb0eb73ba1e4))
+
 ## [0.12.0](https://github.com/nikkibreanne/kennyBot/compare/kennybot-v0.11.2...kennybot-v0.12.0) (2026-08-15)
 
 
