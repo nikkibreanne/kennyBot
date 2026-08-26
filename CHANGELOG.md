@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.14.0](https://github.com/nikkibreanne/kennyBot/compare/kennybot-v0.13.0...kennybot-v0.14.0) (2026-08-26)
+
+
+### Features
+
+* **raid:** !season next, and one home for the item catalog ([#78](https://github.com/nikkibreanne/kennyBot/issues/78)) ([707bd89](https://github.com/nikkibreanne/kennyBot/commit/707bd8962c4533136d733bd189a3d3c7f85969a8))
+
 ## [0.13.0](https://github.com/nikkibreanne/kennyBot/compare/kennybot-v0.12.0...kennybot-v0.13.0) (2026-08-25)
 
 
