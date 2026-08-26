@@ -146,7 +146,7 @@ async function promptNextWeek(send, logger) {
     if (st.seasonComplete) {
       send.say(
         st.nextTier
-          ? `🏁 ${st.seasonName || st.seasonId} is complete. Mods: !season rollover t${st.nextTier} <name> to start the next tier.`
+          ? `🏁 ${st.seasonName || st.seasonId} is complete. Mods: !season next to start the next tier.`
           : `🏁 ${st.seasonName || st.seasonId} is complete — every boss has been faced. Mods: !season start <id> <name> for a new tier.`,
       );
       return true;

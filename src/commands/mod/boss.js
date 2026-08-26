@@ -69,7 +69,7 @@ export default {
       if (weekNum > total) {
         const next = tier + 1;
         const how = next <= SEASON_COUNT
-          ? `Start the next tier: !season rollover t${next}`
+          ? 'Start the next tier: !season next'
           : 'No further scripted tier exists — use !season start <id> or !boss set <name>.';
         reply(`🏁 ${season.name || season.id} is complete — all ${total} bosses have been faced. ${how}`);
         return;

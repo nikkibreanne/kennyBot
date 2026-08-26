@@ -236,6 +236,14 @@ function onChatMessage(user, config) {
   without being hopeless: the same 4-hero raid now reads 100/34/65/70/100/16.
   Verify any change with `node scripts/balance-sim.mjs`; `test/rules/balance.test.js`
   runs the real engine in CI and fails if the shape breaks.
+- **`!season next` is the season lifecycle command.** It derives the tier
+  (current + 1, or 1 from cold) and the name (from `SEASON_THEMES`) rather than
+  asking the operator to retype them — `!season rollover t2 The Sweltering Patch`
+  required remembering two things the bot already knows, and a typo silently
+  produced a season called "Tier t2". It routes into the same start/rollover
+  paths, so there is one implementation. `start` and `rollover` remain for
+  off-script cases (custom id or name). Past the last scripted tier `next`
+  refuses rather than inventing one.
 - **Enlistment is SEASON-LONG, not weekly.** `!muster` once and your hero is on
   the roster for every remaining week of that season: `setupRaidWeek` carries the
   previous week's signups forward (re-snapshotted from each player's live record,
