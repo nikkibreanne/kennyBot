@@ -369,10 +369,33 @@ Intended arc: starter (+18) → end of season a dps at ~epic weapon + uncommon
 trinket ≈ +86 role rating ≈ +20 atk ≈ ~7 levels of power from gear — which is why
 gear must reset each season (§3.4) or the meta calcifies.
 
-### 3.4 Season gear-reset + prestige carry (concrete, simple mechanic)
+### 3.4 Season gear-reset + prestige carry — ✅ IMPLEMENTED (2026-08)
 
-Today this is explicitly **unimplemented** (`mod/season.js` comment: "Gear reset
-/ prestige carryover … is a later phase — flagged, not silently done"). Proposal:
+**Shipped, and it follows this section — including the full level reset.** Worth
+recording why that took two attempts: an intermediate version reset only GEAR and
+left level and class untouched, contradicting step 2 below. Nothing was actually
+surrendered, so the carry-over compensated for nothing; renown was a flat `+2`
+rating that levels dwarfed (9% of the gap between a level-24 veteran and a
+newcomer), and "prestige" named a mechanic that did not exist. The section below
+was right the first time.
+
+**What shipped, vs the proposal:**
+
+| | proposed here | shipped |
+|---|---|---|
+| level/exp reset | yes | **yes** |
+| gear reset | yes | yes |
+| archive to `history/` | yes | **no** — dropped as unused weight |
+| prestige criteria | a clear-count threshold | **this season's renown, 1:1** (`raid.prestige.perRenown`) — smoother, and it makes every downed boss count |
+| prestige effect | capped **additive** rating | **multiplicative**, on rating *and* EXP (`rating.prestigeRatingPct` / `prestigeExpPct`) |
+| character | not stated | **kept** — class/role survive; `!respec` changes those |
+
+The effect changed from additive to multiplicative deliberately: a flat bonus
+gets swamped by the levels you rebuild and never compounds, so run 3 feels like
+run 1. And the EXP multiplier is the half that makes the loop worth repeating —
+without it, resetting is pure loss no matter how much rating you bank.
+
+Original proposal, for reference:
 
 **On `!season start` (a `rolloverSeason` step):**
 1. **Archive** each player's `equipped` + `inventory` to a `history/<prevSeason>`

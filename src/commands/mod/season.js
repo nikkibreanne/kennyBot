@@ -126,12 +126,12 @@ export default {
       const { boss } = await openSeason(id, name);
       const from = outgoing?.name || outgoing?.id || 'the last season';
       const prestigeLine = prestiged
-        ? `${prestiged} veteran${prestiged === 1 ? '' : 's'} of ${from} earned ${granted} prestige renown ` +
-          `(+${config.raid.prestigePerRaid} per raid attended, best ${best})`
-        : `no veterans of ${from} to reward`;
+        ? `${prestiged} hero${prestiged === 1 ? '' : 'es'} banked ${granted} prestige from ${from} (best ${best})`
+        : `nobody earned prestige in ${from}`;
       reply(
-        `🔄 Season rolled over to ${name} (${id}). ${reset} heroes' gear reset (levels & renown kept) · ` +
-        `${prestigeLine}. Week 1: ${boss.name} — !muster to join!`,
+        `🔄 PRESTIGE — ${name} (${id}) begins. ${reset} heroes reset to level 1 with fresh starter gear · ` +
+        `${prestigeLine}. Prestige is permanent: more power and faster levelling, every run. ` +
+        `Week 1: ${boss.name} — !muster to join!`,
       );
       return;
     }

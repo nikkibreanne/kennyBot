@@ -13,7 +13,7 @@ import assert from 'node:assert/strict';
 import { SEASONS, SEASON_COUNT, weeksInSeason, bossFor, seasonBoss } from '../../src/content/bosses.js';
 import { SEASON_LOOT } from '../../src/content/items.js';
 import { prestigeFor } from '../../src/db/players.js';
-import { renownBonus } from '../../src/rules/rating.js';
+import { roleRating, prestigeMultiplier, prestigeExpMultiplier } from '../../src/rules/rating.js';
 import { config } from '../../src/config.js';
 
 test('every season has the number of weeks the config promises', () => {
@@ -69,30 +69,58 @@ test('seasonBoss resolves abilities and a recommended roster for every week', ()
 });
 
 // ── prestige (spec §5.6) ────────────────────────────────────────────────────
-// There is no separate "prestige" stat: prestige is renown, awarded at rollover
-// for the weeks you actually raided. These pin the scale, since renown converts
-// into a PERMANENT role-rating bonus that gear resets never take away.
+// Prestige is a TRADE: a rollover resets level, EXP and gear, and in exchange
+// you keep a permanent multiplier on power AND on levelling speed. The reset is
+// the mechanic; the bonus is what makes giving it up worth doing.
 
-test('prestige is zero for a hero who never raided the season', () => {
+test('nothing is banked from a season you did nothing in', () => {
   assert.equal(prestigeFor(0), 0);
   assert.equal(prestigeFor(undefined), 0);
-  assert.equal(prestigeFor(-3), 0, 'nonsense input cannot mint renown');
+  assert.equal(prestigeFor(-5), 0, 'nonsense input cannot mint prestige');
 });
 
-test('prestige scales one-for-one with raids attended, up to the cap', () => {
-  const per = config.raid.prestigePerRaid;
+test('this season\'s renown converts into permanent prestige', () => {
+  const per = config.raid.prestige.perRenown;
   assert.equal(prestigeFor(1), per);
-  assert.equal(prestigeFor(6), 6 * per);
-  assert.ok(prestigeFor(6) > prestigeFor(2), 'showing up every week beats a cameo');
-  assert.equal(prestigeFor(config.raid.prestigeMax + 50), config.raid.prestigeMax);
+  assert.equal(prestigeFor(6), 6 * per, 'a six-clear season banks six raids worth');
+  assert.ok(prestigeFor(6) > prestigeFor(2), 'clearing more bosses banks more');
+  assert.equal(prestigeFor(9999), config.raid.prestige.maxPerSeason, 'one season is bounded');
 });
 
-test('a full-attendance season stays a perk, never a substitute for gear', () => {
-  // A perfect season ≈ prestige for every week + 1 renown per clear.
-  const seasonRenown = prestigeFor(config.raid.seasonWeeks) + config.raid.seasonWeeks;
-  const rating = renownBonus({ renown: seasonRenown }, config);
-  // Season-1 epics sit at +58..64 role rating for a single slot.
-  assert.ok(rating < 60, `one perfect season is worth +${rating} rating — should stay under one epic item`);
-  // …and a career vet is capped, by design.
-  assert.equal(renownBonus({ renown: 9999 }, config), config.rating.renownCap * config.rating.renownPerPoint);
+test('prestige multiplies BOTH power and levelling speed', () => {
+  // A bonus that only adds power isn't prestige — the run back up has to be
+  // faster too, or resetting is pure loss.
+  const none = { prestige: 0 };
+  const some = { prestige: 6 };
+  assert.equal(prestigeMultiplier(none, config), 1);
+  assert.equal(prestigeExpMultiplier(none, config), 1);
+  assert.ok(prestigeMultiplier(some, config) > 1, 'power must scale');
+  assert.ok(prestigeExpMultiplier(some, config) > 1, 'levelling must speed up');
+  assert.ok(
+    prestigeExpMultiplier(some, config) > prestigeMultiplier(some, config),
+    'the speed-up should outpace the raw power gain — that is what makes the loop worth repeating',
+  );
+});
+
+test('prestige compounds — run three genuinely beats run one', () => {
+  const r1 = roleRating({ role: 'dps', level: 10, equipped: {}, prestige: 0 }, config, () => null);
+  const r2 = roleRating({ role: 'dps', level: 10, equipped: {}, prestige: 6 }, config, () => null);
+  const r3 = roleRating({ role: 'dps', level: 10, equipped: {}, prestige: 12 }, config, () => null);
+  assert.ok(r2 > r1 && r3 > r2, 'the same level is stronger each time around');
+  assert.ok(r3 - r2 >= r2 - r1, 'multiplicative, so it does not flatten out');
+});
+
+test('a fresh prestiged hero beats a brand-new one at the same level', () => {
+  // This is the promise: level 1 with history > level 1 without. It only holds
+  // because the rollover actually resets the level.
+  const veteran = roleRating({ role: 'dps', level: 1, equipped: {}, prestige: 6 }, config, () => null);
+  const newcomer = roleRating({ role: 'dps', level: 1, equipped: {}, prestige: 0 }, config, () => null);
+  assert.ok(veteran > newcomer, `veteran ${veteran} should beat newcomer ${newcomer}`);
+});
+
+test('prestige is capped so it cannot run away', () => {
+  const capped = { prestige: config.rating.prestigeCap };
+  const absurd = { prestige: config.rating.prestigeCap * 100 };
+  assert.equal(prestigeMultiplier(absurd, config), prestigeMultiplier(capped, config));
+  assert.equal(prestigeExpMultiplier(absurd, config), prestigeExpMultiplier(capped, config));
 });

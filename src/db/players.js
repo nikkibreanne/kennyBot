@@ -7,7 +7,7 @@ import { database, increment, PATHS } from './firebase.js';
 import { roleForClass, CLASSES } from '../content/classes.js';
 import { rollStarterEquipped, itemObject, getItem, SLOTS } from '../content/items.js';
 import { applyChatExp } from '../rules/leveling.js';
-import { engagementMultiplier, roleRating, contribution } from '../rules/rating.js';
+import { engagementMultiplier, roleRating, contribution, prestigeExpMultiplier } from '../rules/rating.js';
 import { config } from '../config.js';
 import { clearAllNotices } from './notices.js';
 
@@ -41,7 +41,8 @@ export async function createPlayer({ userId, login, displayName, className, isSu
     levelPressure: 0,
     subTier: isSubscriber ? 1 : 0, // exact 2/3 refined by sub events / Helix lookup
     subMonths: 0,
-    renown: 0, // veteran reputation (persists across seasons; §5.6)
+    renown: 0, // THIS season's standing (+1 per raid cleared); spent at rollover
+    prestige: 0, // permanent, earned by giving up a run at rollover
     lastExpAt: 0,
     equipped: rollStarterEquipped(role),
     inventory: [],
@@ -90,7 +91,7 @@ export async function applyChatTick(userId, { rng = Math.random, isSubscriber } 
     const mult = engagementMultiplier({ ...curr, subTier }, config);
     const rolled = applyChatExp(
       { level: curr.level, exp: curr.exp, levelPressure: curr.levelPressure },
-      { engagementMult: mult, rng, config },
+      { engagementMult: mult, prestigeMult: prestigeExpMultiplier(curr, config), rng, config },
     );
     result = {
       leveledUp: rolled.leveledUp,
@@ -211,67 +212,45 @@ export async function addLoot(userId, itemId) {
 }
 
 /**
- * How many of a season's raids each hero actually turned up for: uid → week count.
- *
- * A week counts when the battle RESOLVED (`result` exists — a scheduled week that
- * never ran is not a raid anyone attended) and the hero was on its roster. Read
- * straight from `raids/<seasonId>` rather than from a stored counter so it is
- * retroactively correct for seasons that predate this code, and so it needs no
- * new write on the raid-night hot path. One read per rollover; the node is
- * bounded by weeks × roster.
- * @param {string|null|undefined} seasonId
- * @returns {Promise<Map<string, number>>} empty when there is no season to be a veteran of
+ * Prestige earned by ending a season: this season's RENOWN converts into
+ * permanent prestige. Renown is +1 per raid the patch clears, so every boss you
+ * helped kill becomes power you keep after the reset. Bounded. Pure.
+ * @param {number} renownThisSeason
+ * @param {object} [cfg]
+ * @returns {number} 0 when nothing was earned this season
  */
-async function seasonAttendance(seasonId) {
-  if (!seasonId) return new Map();
-  const snap = await database().ref(`raids/${seasonId}`).get();
-  const counts = new Map();
-  for (const week of Object.values(snap.val() || {})) {
-    if (!week?.result) continue; // scheduled but never fought
-    for (const uid of Object.keys(week.signups || {})) counts.set(uid, (counts.get(uid) || 0) + 1);
-  }
-  return counts;
-}
-
-/**
- * Prestige earned for a season: renown scaled by how many of its raids you
- * attended, bounded so a long season can't mint a runaway veteran. Pure.
- * @param {number} raidsAttended
- * @param {{ raid: { prestigePerRaid: number, prestigeMax: number } }} cfg
- * @returns {number} 0 when the hero never raided that season
- */
-export function prestigeFor(raidsAttended, cfg = config) {
-  const n = Math.max(0, Math.floor(raidsAttended || 0));
+export function prestigeFor(renownThisSeason, cfg = config) {
+  const n = Math.max(0, Math.floor(renownThisSeason || 0));
   if (n === 0) return 0;
-  return Math.min(n * cfg.raid.prestigePerRaid, cfg.raid.prestigeMax);
+  return Math.min(n * cfg.raid.prestige.perRenown, cfg.raid.prestige.maxPerSeason);
 }
 
 /**
- * Season rollover (spec §5.6): reset every hero's GEAR (re-roll starter, clear
- * the bag) so a new tier starts fresh and newcomers aren't behind — but KEEP
- * level + renown.
+ * SEASON ROLLOVER = PRESTIGE.
  *
- * PRESTIGE IS EARNED, AND IT SCALES WITH ATTENDANCE. Only heroes who actually
- * raided the outgoing season (`seasonId`) get prestige renown and the
- * `seasonsPlayed` bump — spec §5.6 awards it to *veterans*, and handing it to
- * every account that ever ran `!create` would devalue it and inflate a permanent
- * rating bonus for people who never showed up. Someone who raided every week
- * earns proportionally more than someone who turned up twice. Gear still resets
- * for everyone, veteran or not.
+ * THE SACRIFICE — the run is given up:
+ *   level back to 1, EXP and level pressure to 0,
+ *   gear back to a fresh starter set, bag emptied,
+ *   this season's renown spent.
+ * THE REWARD — kept forever:
+ *   `prestige`, converted from that renown, which MULTIPLIES both role rating
+ *   and EXP gain (rules/rating.js) — so the next run hits harder AND climbs the
+ *   levels back faster than this one did. That compounding is the whole point.
  *
- * Called with no `seasonId` there is nothing to have been a veteran OF, so no
- * prestige is awarded (the gear reset still happens).
+ * The CHARACTER survives — same class, same role. Changing role is `!respec`,
+ * deliberately a separate decision from prestiging.
+ *
+ * An earlier version reset only GEAR and left levels untouched, so nothing was
+ * ever actually surrendered: the bonus compensated for nothing, and a level-24
+ * veteran simply stayed a level-24 veteran. Resetting the levels is what makes
+ * the permanent bonus mean anything at all.
  *
  * @param {{ seasonId?: string|null, cfg?: object }} [opts]
- * @returns {Promise<{ reset: number, prestiged: number, granted: number, best: number }>}
- *   granted = total renown handed out; best = the largest single award.
+ * @returns {Promise<{reset: number, prestiged: number, granted: number, best: number}>}
  */
 export async function rolloverAllPlayers({ seasonId = null, cfg = config } = {}) {
-  // Last season's undelivered "you got X" lines are stale the moment gear
-  // resets — saying one after a rollover would point at an item the wipe just
-  // removed from the bag.
+  // Last season's undelivered "you got X" lines name gear this wipe removes.
   await clearAllNotices();
-  const attendance = await seasonAttendance(seasonId);
   const snap = await database().ref('players').get();
   const players = snap.val() || {};
   let reset = 0;
@@ -280,20 +259,22 @@ export async function rolloverAllPlayers({ seasonId = null, cfg = config } = {})
   let best = 0;
   for (const [uid, p] of Object.entries(players)) {
     if (!p?.role) continue;
-    const update = {
+    const earned = prestigeFor(p.renown, cfg);
+    await database().ref(PATHS.player(uid)).update({
+      // ── the sacrifice ──
+      level: 1,
+      exp: 0,
+      levelPressure: 0,
       equipped: rollStarterEquipped(p.role),
       inventory: [],
-    };
-    const prestige = prestigeFor(attendance.get(uid), cfg);
-    if (prestige > 0) {
-      update.renown = (p.renown || 0) + prestige;
-      update['stats/seasonsPlayed'] = (p.stats?.seasonsPlayed || 0) + 1;
-      prestiged += 1;
-      granted += prestige;
-      best = Math.max(best, prestige);
-    }
-    await database().ref(PATHS.player(uid)).update(update);
+      renown: 0,
+      // ── what you keep ──
+      prestige: (p.prestige || 0) + earned,
+      'stats/seasonsPlayed': (p.stats?.seasonsPlayed || 0) + 1,
+      'stats/highestLevel': Math.max(p.stats?.highestLevel || 0, p.level || 1),
+    });
     reset += 1;
+    if (earned > 0) { prestiged += 1; granted += earned; best = Math.max(best, earned); }
   }
   return { reset, prestiged, granted, best };
 }

@@ -55,9 +55,37 @@ export function roleRating(player, config, getItem) {
   const level = Math.max(1, Math.floor(player?.level || 1));
   const base = config.rating.classBase[role] ?? 0;
   const gear = gearBonus(player, getItem);
-  return Math.round(
-    base + level * config.rating.perLevel + gear + setBonus(player, config, getItem) + renownBonus(player, config),
-  );
+  const raw = base + level * config.rating.perLevel + gear + setBonus(player, config, getItem) + renownBonus(player, config);
+  // Prestige MULTIPLIES. It is the permanent reward for having surrendered a
+  // character, so it has to scale with everything you rebuild rather than being
+  // a flat lump that later levels swamp.
+  return Math.round(raw * prestigeMultiplier(player, config));
+}
+
+/**
+ * Permanent power multiplier from prestige — the half of the prestige trade you
+ * keep. `prestige` is only ever granted by a season rollover, which resets level
+ * and EXP to 1/0, so this always represents a character actually given up.
+ * @param {{ prestige?: number }} player
+ * @param {{ rating: { prestigeRatingPct: number, prestigeCap: number } }} config
+ * @returns {number} >= 1
+ */
+export function prestigeMultiplier(player, config) {
+  const p = Math.min(Math.max(0, player?.prestige || 0), config.rating.prestigeCap);
+  return 1 + p * config.rating.prestigeRatingPct;
+}
+
+/**
+ * Permanent EXP multiplier from prestige. This is the part that makes a prestige
+ * loop worth repeating: each run back up the levels is faster than the last.
+ * Without it, resetting is pure loss.
+ * @param {{ prestige?: number }} player
+ * @param {{ rating: { prestigeExpPct: number, prestigeCap: number } }} config
+ * @returns {number} >= 1
+ */
+export function prestigeExpMultiplier(player, config) {
+  const p = Math.min(Math.max(0, player?.prestige || 0), config.rating.prestigeCap);
+  return 1 + p * config.rating.prestigeExpPct;
 }
 
 /**
@@ -116,9 +144,10 @@ export function setTier(player, getItem) {
 }
 
 /**
- * Persistent veteran-reputation bonus (spec §5.6). Renown is earned by clearing
- * raids and survives season gear resets, so returning subscribers stay a step
- * ahead. Capped so it's a perk, never dominant.
+ * THIS SEASON's veteran standing. +1 per raid cleared, worth a little rating,
+ * and reset at rollover where it is converted into prestige. Deliberately not
+ * permanent — permanence is prestige's job, and having two permanent stats is
+ * what made renown feel like it did nothing.
  * @param {{ renown?: number }} player
  * @param {{ rating: { renownCap: number, renownPerPoint: number } }} config
  */

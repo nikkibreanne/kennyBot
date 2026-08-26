@@ -318,24 +318,41 @@ guaranteed win** (avoid pay-to-win resentment and gambling optics).
   finished it prompts a rollover instead of a seventh week.
 - A season = a **raid tier**: a themed multi-week arc (≈6–8 weekly bosses) with
   its own **loot table** and boss progression, culminating in a finale.
-- Season transition: award veterans a **prestige title** (the "cleared on time"
-  equivalent); **reset gear** so newcomers start fresh and the meta doesn't
-  calcify (character + level may carry or partially reset — see §13).
-- **Renown is the only veteran stat; "prestige" is a source of it, not a second
-  number.** Renown comes from two places — `+1` per raid **cleared**, and a
-  **prestige** award at rollover — and converts to a permanent role-rating bonus
-  at `rating.renownPerPoint`, capped at `rating.renownCap`. Gear resets each
-  season; renown never does. That is the whole veteran ladder.
-- Prestige is **earned and scaled by attendance**: `prestigePerRaid` renown for
-  each raid of the outgoing season the hero was actually on the roster for
-  (counted from `raids/<seasonId>/<week>` entries that have a `result` — a week
-  scheduled but never fought counts for nobody), bounded by `prestigeMax`. It is
-  never granted to every account that once ran `!create`. The **gear reset
-  applies to everyone**, veteran or not.
+- **A season transition IS A PRESTIGE.** It is a trade, and both halves matter:
+
+  | | |
+  |---|---|
+  | **You give up** | level → 1, EXP → 0, gear → a fresh starter set, bag emptied, this season's renown spent |
+  | **You keep** | `prestige`, permanently |
+
+  The **character survives** — same class, same role. Changing role is
+  `!respec`, a separate decision from prestiging.
+
+- **Prestige multiplies, and it multiplies two things** (`rules/rating.js`):
+  `rating.prestigeRatingPct` on role rating (you hit harder at any level) and
+  `rating.prestigeExpPct` on EXP gain (you climb back **faster than last time**).
+  Both capped at `rating.prestigeCap`. The EXP half is not decoration — a bonus
+  that doesn't accelerate the next run isn't a prestige mechanic, it is just a
+  reward, and the reset would be pure loss.
+- **Multiplicative on purpose.** A flat additive bonus gets swamped by levels
+  and never compounds, so run 3 feels exactly like run 1.
+- **Renown is THIS season's standing**, not a permanent stat: `+1` per raid the
+  patch clears, worth a little role rating while the season runs, and converted
+  1:1 into prestige at rollover (`raid.prestige.perRenown`, bounded by
+  `maxPerSeason`) before being reset to 0. So every boss you help kill becomes
+  permanent power next run. The reset applies to everyone; prestige is earned.
+
+  > **This was wrong until 2026-08.** The rollover reset only GEAR and left level
+  > and class untouched, so nothing was ever surrendered — the bonus compensated
+  > for nothing, renown was a flat `+2` rating that levels dwarfed (9% of the gap
+  > between a level-24 veteran and a newcomer), and "prestige" named a mechanic
+  > that did not exist. Resetting the level is what makes the permanent bonus
+  > mean anything at all.
 - A season **ends on its finale**. `!boss next` refuses to schedule past the last
   scripted week and points at `!season rollover` — the boss lookup clamps an
   out-of-range week to the finale, so without that guard a season silently never
   ends and chat re-fights the same boss (this happened in prod for 3 weeks).
+- The everyday command is `!season next` (§ above): it derives the tier and name.
 - Season launch is the natural **invite-a-friend growth moment**; consider a
   referral bonus active at season start.
 

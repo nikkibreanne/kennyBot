@@ -95,8 +95,15 @@ persistent veteran bonus.
 |---|---|---|---|
 | `classBase.tank` / `.healer` / `.dps` | `100` / `90` / `80` | The floor rating each role starts with at level 1 (before gear). | Re-tunes the relative baseline of the three roles. Raising one role's base makes that role stronger before anyone has leveled or geared. |
 | `perLevel` | `10` | Rating gained per hero level. | Higher = levels matter more for combat (steeper power curve). Combined with gear, +10 rating ≈ a meaningful but not dominant step. |
-| `renownPerPoint` | `2` | Permanent rating granted per point of veteran **renown**. Renown is earned by clearing raids and **persists across seasons** (gear resets, renown doesn't). | Higher = veterans get a bigger lasting edge. |
-| `renownCap` | `40` | Maximum renown that counts toward the bonus → max permanent bonus is `renownCap × renownPerPoint` = **+80 rating**. | The ceiling on the veteran advantage. Keeps long-time players ahead but never untouchable for newcomers. |
+| `renownPerPoint` | `2` | Rating per point of **renown**. Renown is THIS season's standing (+1 per raid the patch clears) and is **spent at rollover**, converting into prestige. Not permanent. | Higher = clearing bosses matters more within a season. |
+| `renownCap` | `40` | Maximum renown that counts toward the in-season bonus. | Ceiling on the within-season veteran edge. |
+| `prestigeRatingPct` | `0.05` | **Permanent** role-rating multiplier per prestige point (+5% each). | The "I hit harder every run" half. |
+| `prestigeExpPct` | `0.12` | **Permanent** EXP-gain multiplier per prestige point (+12% each). | The "I climb back faster every run" half — this is what makes resetting worth doing. Raise it and the loop tightens. |
+| `prestigeCap` | `20` | Maximum prestige that counts → +100% rating, +240% EXP. | Stops a long-running veteran becoming untouchable. |
+
+**Why multiplicative:** a flat additive bonus gets swamped by levels and never
+compounds, so run 3 feels exactly like run 1. Prestige scales with everything
+you rebuild, which is what makes each run genuinely faster than the last.
 
 ---
 
@@ -380,11 +387,22 @@ streams — exactly the season-long grind it's meant to be.
   a level popping the moment the bar fills (i.e. lucky early levels). `0` is what
   keeps leveling free of luck.
 
+## `raid.prestige` — what a rollover banks
+
+A season rollover **is** the prestige: level → 1, EXP → 0, gear → starter, bag
+emptied, renown spent. What you keep is `prestige`, which multiplies power and
+levelling speed forever (see `rating.prestige*` above).
+
+| Key | Default | What it does |
+|---|---|---|
+| `perRenown` | `1` | Prestige banked per point of that season's renown — i.e. per boss the patch downed. |
+| `maxPerSeason` | `12` | Bound on a single season's payout. |
+
 ## `respec` — changing class
 
 | Key | Default | What it does |
 |---|---|---|
-| `cost` | `500` | Credits `!respec` charges (≈2.5 daily claims). Level/EXP/renown survive; gear returns to the bag and a starter set for the new role is rolled. |
+| `cost` | `500` | Credits `!respec` charges (≈2.5 daily claims). Level, EXP and prestige survive; gear returns to the bag and a starter set for the new role is rolled. Changing role is deliberately separate from prestiging — a rollover keeps your class. |
 
 ## `enlistReminder` — the "you never joined the season" nudge
 
