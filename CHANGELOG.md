@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.15.1](https://github.com/nikkibreanne/kennyBot/compare/kennybot-v0.15.0...kennybot-v0.15.1) (2026-09-18)
+
+
+### Bug Fixes
+
+* **deps:** bump firebase-admin ([#82](https://github.com/nikkibreanne/kennyBot/issues/82)) ([d5d2959](https://github.com/nikkibreanne/kennyBot/commit/d5d2959c8620b7977e2625d51f0051ff0bf72a31))
+* **deps:** bump the production group with 5 updates ([#90](https://github.com/nikkibreanne/kennyBot/issues/90)) ([559772b](https://github.com/nikkibreanne/kennyBot/commit/559772b5647cb31e18698e31a6f3de0ae3e78665))
+
 ## [0.15.0](https://github.com/nikkibreanne/kennyBot/compare/kennybot-v0.14.0...kennybot-v0.15.0) (2026-08-26)
 
 
