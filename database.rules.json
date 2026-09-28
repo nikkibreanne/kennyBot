@@ -54,6 +54,13 @@
     // sensitive) so the archiver needs no admin key; Admin-write only.
     "clipSync": { ".read": true, ".write": false },
 
+    // LA CHASE MONITOR: the monitor's carry-over state and its shadow-mode log.
+    // Public-READABLE (nothing here is sensitive — video ids and titles are
+    // already public, and the site may want to show a running pursuit) but
+    // Admin-write only, like every other game path. The live-tunable knobs live
+    // at config/chaseMonitor, which stays unreadable with the rest of config.
+    "chaseMonitor": { ".read": true, ".write": false },
+
     // OKRAMARKET: okra-buck balances and market state are public-READABLE (the
     // site renders the board + odds) but Admin-write only — points can never be
     // minted client-side; bets/opens/resolves all go through kennyBot. The bet

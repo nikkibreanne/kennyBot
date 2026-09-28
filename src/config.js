@@ -339,6 +339,80 @@ export const config = {
     checkMs: 15 * 60 * 1000,
   },
 
+  // ── LA police-chase monitor (docs/chase-monitor-design.md) ────────────────
+  // Announces a live LA pursuit in chat, with a link, from automated detection.
+  // Runs whether or not the channel is live — that is deliberate (design §6.2).
+  //
+  // Scoring, in one paragraph: each org contributes at most one signal per
+  // EVIDENCE CHANNEL (title / audience / liveness / editorial), so one
+  // measurement can never score twice under two names. An org's channels are
+  // summed with a discount on all but the strongest, because one newsroom
+  // covering a chase drives all of its systems at once. Orgs are then summed
+  // with NO discount, because two newsrooms are two independent decisions.
+  // A single org CAN cross the threshold — it just needs two genuinely
+  // different observations to do it.
+  chase: {
+    enabled: false, // seeded to RTDB once; mods flip it with !chasemon
+    mode: 'shadow', // 'shadow' = score + log, never speak · 'live' = announce
+    pollMs: 60_000, // fast loop: 1 YouTube quota unit per tick
+    discoveryMs: 10 * 60_000, // RSS sweep for NEW live video ids (feeds cache 15m)
+    threshold: 8, // totalScore at or above which an incident opens
+    groupCap: 10, // per-org ceiling; ABOVE threshold, so one org can fire alone
+    withinOrgDiscount: 0.6, // multiplier on every channel after an org's strongest
+    dwell: 3, // consecutive polls at/over threshold before announcing (~90s)
+    // Hysteresis floor. Deliberately ABOVE a lone standing title (T1=5): a station
+    // that leaves "LIVE: Police pursuit" up for hours after the chase ended must not
+    // hold the incident open, because an open incident blocks every NEW one — a stuck
+    // incident silently disables the whole monitor, which is the worst failure here.
+    clearScore: 6,
+    clearPolls: 5, // consecutive polls under clearScore before the incident closes
+    maxIncidentMs: 3 * 60 * 60_000, // belt-and-braces: nothing stays open past this, whatever it scores
+    reopenCooldownMs: 20 * 60_000, // no NEW incident this soon after one closed
+    maxPerHour: 3, // channel-wide announcement cap (never per-user)
+
+    // Audience channel. A 30-minute TRAILING median, not a 24h one: viewership is
+    // strongly diurnal, so a flat daily baseline reads every evening as a spike.
+    baselineWindowMs: 30 * 60_000,
+    minSamples: 20, // below this the audience channel is DISABLED (no cold-start firing)
+    minViewers: 500, // absolute floor — 3 → 24 viewers is 8x and means nothing
+    spikeStrong: 8, // x median → V1
+    spikeWeak: 3, // x median → V2
+
+    // L1 is 5, not 3: an `episodic` station going dark->live AND titling it a pursuit
+    // is two independent editorial acts, and it has to be able to fire. Its brand-new
+    // broadcast mints a NEW videoId, so `audience` has no baseline and stays disabled
+    // for ~minSamples*pollMs (~20 min) — at L1=3 that class topped out at 6.8 and could
+    // never open an incident on its own, which was a structural miss, not a taste call.
+    weights: { T1: 5, T2: 2, V1: 5, V2: 2, L1: 5, A1: 2 },
+
+    // Title vocabulary. Calibrated against a broadcaster's dedicated chase feed, where
+    // 'chase' and 'pursuit' are near-universal (design §1.4).
+    strongVocab: ['pursuit', 'chase'],
+    weakVocab: ['high-speed', 'high speed', 'fleeing', 'standoff', 'suspect', 'police activity'],
+    // Retrospective clips are the COMMON false positive in these feeds — a
+    // negative marker zeroes the whole org for that tick.
+    negativeVocab: [
+      'recap', 'yesterday', 'bodycam', 'body cam', 'dashcam', 'dash cam',
+      'raw video', 'full video', 'caught on camera', 'highlights', 'replay',
+      'aftermath', 'sentenced', 'pleads', 'trial',
+    ],
+
+    // SOURCES ARE PRIVATE — see CLAUDE.md. This ships EMPTY on purpose: the real
+    // roster (outlet names, channel ids, feed urls) must never appear in a public
+    // repo, in config, in a comment or in a test fixture. It lives in
+    // `.workspace/chase-sources.json` (gitignored) and is loaded into RTDB
+    // `config/chaseMonitor/orgs` by `npm run chase:sources`; getChaseSettings()
+    // layers RTDB over this. With no sources loaded the monitor is INERT and
+    // !chasemon says so, which is the correct default for a fresh clone.
+    //
+    // Shape, with placeholder values only:
+    //   { id: 'org1', name: 'Org One', channelId: 'UC<22 chars>',
+    //     streamClass: 'chopper' | 'newscast' | 'episodic',
+    //     articleFeed: 'https://<host>/<path>?rss=y',  // optional
+    //     groupCap: 7 }                                 // optional, per-org override
+    orgs: [],
+  },
+
   // ── Site link surfaced by !muster / !char ──────────────────────────────────
   siteUrl: 'https://okrafans.com',
 };

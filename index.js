@@ -35,6 +35,7 @@ import { attachSubathonEvents } from './src/events/subathonEvents.js';
 import { startDropScheduler } from './src/events/dropScheduler.js';
 import { startTimerScheduler } from './src/events/timerScheduler.js';
 import { startReminderScheduler } from './src/events/reminderScheduler.js';
+import { startChaseMonitor } from './src/events/chaseMonitor.js';
 import { seedReminders } from './src/db/reminders.js';
 import { processDrops } from './src/db/drops.js';
 import { startNoticeMirror } from './src/db/notices.js';
@@ -402,6 +403,12 @@ async function main() {
   // so this only supplies the clock and the channel — which is also what makes a
   // reminder channel-specific without any per-channel branch in the code.
   shutdownHooks.push(startReminderScheduler({ send, channel, logger }));
+
+  // LA police-chase monitor (docs/chase-monitor-design.md). Runs whether or not the
+  // channel is live — that is deliberate. It ships DOUBLE-LOCKED: config/chaseMonitor
+  // seeds `enabled:false` and `mode:'shadow'`, so it polls nothing and says nothing
+  // until a mod turns it on twice with !chasemon. Failures here can never reach chat.
+  shutdownHooks.push(startChaseMonitor({ send, logger }));
 
   // Now-playing overlay: writes the current track into an OBS text source named
   // by SPOTIFY_OVERLAY_SOURCE. No source name → no polling at all.
