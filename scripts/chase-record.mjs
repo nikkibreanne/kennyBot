@@ -65,7 +65,7 @@ import { dirname, extname, join, sep } from 'node:path';
 import { config } from '../src/config.js';
 import { evaluateChase } from '../src/rules/chase.js';
 import {
-  fetchLiveSamples, discoverVideoIds, fetchArticles, youtubeKeyPresent,
+  fetchLiveSamples, discoverVideoIds, findLiveVideos, fetchArticles, youtubeKeyPresent, SEARCH_UNITS,
 } from '../src/integrations/chaseSources.js';
 
 if (process.argv.includes('--help') || process.argv.includes('-h')) {
@@ -286,15 +286,54 @@ function flatten(byOrg) {
   return [...seen];
 }
 
+/**
+ * orgId -> the video id that org was last seen LIVE on. THE important state here:
+ * channel RSS lists recent UPLOADS, so a stream live for hours is pushed out by newer
+ * clips and disappears from discovery entirely (measured: 4 of 6 sources live, their
+ * live video absent from the feed). A live id found once is then polled for free by
+ * the 1-unit videos.list call until it reports not-live.
+ */
+let liveByOrg = {};
+let lastSearchAt = {};
+let searchUnits = 0;
+let searchDay = null;
+/** The quota day in Google's reset zone, not the host's local midnight. */
+const quotaDay = () => new Intl.DateTimeFormat('en-CA', { timeZone: 'America/Los_Angeles' }).format(new Date());
+
 async function discover() {
   try {
     const byOrg = await discoverVideoIds(orgs, log);
     if (byOrg && typeof byOrg === 'object') knownByOrg = { ...knownByOrg, ...byOrg };
-    known = flatten(knownByOrg);
+    known = flatten({ ...knownByOrg, __live: Object.values(liveByOrg) });
     write({ kind: 'discovery', at: Date.now(), ids: byOrg });
   } catch (err) {
     fetchFailures += 1;
     log.error('discovery failed', { err: err?.message });
+  }
+  // What RSS cannot do: find a stream that has been live a while. 100 units a call, so
+  // ONLY for orgs with no known live video — one already streaming is tracked free by
+  // the fast loop — and the day's spend is capped.
+  try {
+    const now = Date.now();
+    const today = quotaDay();
+    if (searchDay !== today) { searchDay = today; searchUnits = 0; }
+    const affordable = Math.max(0, Math.floor((chase.searchDailyUnitCap - searchUnits) / SEARCH_UNITS));
+    const askable = orgs
+      .filter((o) => !liveByOrg[o.id] && now - (lastSearchAt[o.id] || 0) >= chase.searchCooldownMs)
+      .slice(0, affordable);
+    if (askable.length) {
+      for (const o of askable) lastSearchAt[o.id] = now;
+      searchUnits += askable.length * SEARCH_UNITS;
+      quotaUnits += askable.length * SEARCH_UNITS;
+      const live = await findLiveVideos(askable, log);
+      for (const [orgId, videoId] of Object.entries(live)) liveByOrg[orgId] = videoId;
+      known = flatten({ ...knownByOrg, __live: Object.values(liveByOrg) });
+      write({ kind: 'search', at: now, asked: askable.map((o) => o.id), found: Object.keys(live), units: askable.length * SEARCH_UNITS });
+      if (Object.keys(live).length) console.log(`${clock()}  search    found ${Object.keys(live).length} live stream(s) RSS could not see`);
+    }
+  } catch (err) {
+    fetchFailures += 1;
+    log.error('live search failed', { err: err?.message });
   }
   try {
     articles = (await fetchArticles(orgs, log)) || [];
@@ -342,6 +381,15 @@ async function poll() {
       fetchFailures += 1;
       pollLog.error('sample fetch failed', { err: err?.message });
     }
+    // Keep the sticky set honest: a stream that ENDED must be dropped, or that org is
+    // never searched again and its next broadcast is never found.
+    for (const s of samples) {
+      if (liveByOrg[s.org] === s.videoId && !s.live) {
+        delete liveByOrg[s.org];
+        console.log(`${clock()}  ${s.org} stream ended — will search again`);
+      }
+    }
+    for (const s of samples) if (s.live) liveByOrg[s.org] = s.videoId;
 
     // UNCHANGED, and first: this line is the evidence. Everything below it is an
     // opinion about the evidence, and opinions get re-derived from a replay.

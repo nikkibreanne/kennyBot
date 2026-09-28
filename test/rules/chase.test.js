@@ -304,15 +304,40 @@ test('baselines are trimmed to the window and capped, so state cannot grow forev
 
 // ── liveness and editorial ───────────────────────────────────────────────────
 
-test('L1 is for episodic channels only, and only for the first 10 minutes', () => {
+test('L1 needs a WITNESSED off->on transition, not a stream class', () => {
+  // We watched it while it was off, and now it is on. That is the signal.
   const justLive = evalAt(NOW, [sample('org6')], { streams: knows('org6', { live: false, wentLiveAt: null }), baselines: {} });
   assert.equal(justLive.groups.org6.channels.liveness, 5);
 
   const stale = evalAt(NOW, [sample('org6')], { streams: knows('org6', { wentLiveAt: NOW - 11 * MIN }), baselines: {} });
   assert.equal(stale.groups.org6.channels.liveness, undefined, 'going live stops being news after 10 minutes');
 
+  // NOT gated on class. A chopper cam is not a 24/7 stream — it goes up BECAUSE
+  // something is happening — so a real transition has to count whatever the org's
+  // usual stream looks like. This is the highest-value signal in the system.
+  const chopper = evalAt(NOW, [sample('org1')], { streams: knows('org1', { live: false, wentLiveAt: null }), baselines: {} });
+  assert.equal(chopper.groups.org1.channels.liveness, 5, 'a chopper going up is the whole point');
   const newscast = evalAt(NOW, [sample('org2')], { streams: knows('org2', { live: false, wentLiveAt: null }), baselines: {} });
-  assert.equal(newscast.groups.org2.channels.liveness, undefined, 'a newscast is always live — it is not a signal');
+  assert.equal(newscast.groups.org2.channels.liveness, 5);
+});
+
+test('an always-live stream never scores L1, because it never transitions', () => {
+  // What the old class gate was really protecting against — and this holds without it.
+  let state = { streams: knows('org2', { live: true, wentLiveAt: null }), baselines: {} };
+  for (let i = 0; i < 20; i += 1) {
+    const r = evalAt(NOW + i * MIN, [sample('org2')], state);
+    assert.equal(r.groups.org2?.channels?.liveness, undefined, `poll ${i}: continuously live is not an event`);
+    state = r.state;
+  }
+});
+
+test('a stream found ALREADY running does not score L1 — no cold-start firing', () => {
+  // A restart must not read every standing stream as freshly live and light up the
+  // whole roster. With no prior observation there is no transition to witness.
+  const first = evalAt(NOW, [sample('org6')], { streams: {}, baselines: {} });
+  assert.equal(first.groups.org6?.channels?.liveness, undefined, 'first sighting is not a transition');
+  const next = evalAt(NOW + MIN, [sample('org6')], first.state);
+  assert.equal(next.groups.org6?.channels?.liveness, undefined, 'and it does not appear a poll later either');
 });
 
 test('A1 needs a fresh, present-tense article', () => {

@@ -367,6 +367,15 @@ export const config = {
     clearScore: 6,
     clearPolls: 5, // consecutive polls under clearScore before the incident closes
     maxIncidentMs: 3 * 60 * 60_000, // belt-and-braces: nothing stays open past this, whatever it scores
+    // Live-stream DISCOVERY. RSS cannot find a stream that has been live a while
+    // (measured: 4 of 6 sources live, their video absent from the feed entirely), so
+    // search.list is the only reliable finder — at 100 units against a 10,000/day
+    // budget. Two bounds make that safe: it is only ever asked about orgs with no
+    // known live video (a live one is tracked free by the 1-unit poll), and the day's
+    // total spend is capped. Worst case 6 dark orgs every 30 min would be 28,800
+    // units/day; the cap is what stops that.
+    searchCooldownMs: 30 * 60_000, // min gap between searches for the SAME dark org
+    searchDailyUnitCap: 5000, // hard ceiling; 1,440 (fast loop) + this stays under 10k
     reopenCooldownMs: 20 * 60_000, // no NEW incident this soon after one closed
     maxPerHour: 3, // channel-wide announcement cap (never per-user)
 
@@ -378,11 +387,16 @@ export const config = {
     spikeStrong: 8, // x median → V1
     spikeWeak: 3, // x median → V2
 
-    // L1 is 5, not 3: an `episodic` station going dark->live AND titling it a pursuit
-    // is two independent editorial acts, and it has to be able to fire. Its brand-new
-    // broadcast mints a NEW videoId, so `audience` has no baseline and stays disabled
-    // for ~minSamples*pollMs (~20 min) — at L1=3 that class topped out at 6.8 and could
-    // never open an incident on its own, which was a structural miss, not a taste call.
+    // L1 is 5, not 3, and is NOT gated on stream class. A source going dark->live AND
+    // titling it a pursuit is two independent editorial acts, and it has to be able to
+    // fire: a brand-new broadcast mints a NEW videoId, so `audience` has no baseline
+    // and stays disabled for ~minSamples*pollMs (~20 min).
+    // MEASURED 2026-09-28: a chopper cam is NOT a 24/7 stream — it was dark while its
+    // org's separate 24/7 news loop ran. It goes up BECAUSE something is happening,
+    // which makes a witnessed off->on transition the single earliest signal available.
+    // An org's class describes its usual stream; it must not decide whether a real
+    // transition counts. A continuously-live stream never transitions, so it scores 0
+    // here by construction — the old class gate was protecting nothing.
     weights: { T1: 5, T2: 2, V1: 5, V2: 2, L1: 5, A1: 2 },
 
     // Title vocabulary. Calibrated against a broadcaster's dedicated chase feed, where

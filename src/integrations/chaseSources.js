@@ -59,8 +59,27 @@ const CHANNEL_FEED = 'https://www.youtube.com/feeds/videos.xml';
 const HTTP_TIMEOUT_MS = 10_000;
 /** `videos.list` bills 1 unit per CALL, not per id — but only up to 50 ids. */
 const MAX_IDS = 50;
-/** Newest N entries per channel feed. 6 orgs x 5 stays inside one billed call. */
+/**
+ * Newest N entries per channel feed.
+ *
+ * MEASURED 2026-09-28, and it is the reason `findLiveVideos` below exists: channel
+ * RSS lists recent UPLOADS, so a stream that has been live for hours gets pushed out
+ * by newer clips. Probing the real roster, FOUR of six sources were live and their
+ * live video was NOT IN THE FEED AT ALL — not merely below this cap. RSS alone is
+ * therefore useless for finding a persistent live stream, whatever this number is.
+ * It stays small because its only remaining job is catching a BRAND-NEW broadcast
+ * (which is genuinely the newest upload) cheaply between search sweeps.
+ */
 const MAX_IDS_PER_ORG = 5;
+
+/**
+ * `search.list` costs 100 units against a 10,000/day budget, so it can never go in a
+ * per-minute loop — but it is the ONLY call that reliably answers "is this channel
+ * live right now, and which video is it". Used sparingly, and only for orgs we do not
+ * already have a live video for (see the sticky set in the scheduler): a 24/7 stream
+ * is found once and then tracked for free by the 1-unit videos.list poll.
+ */
+export const SEARCH_UNITS = 100;
 /**
  * Coarse pre-filter for article items. The evaluator applies the real 15-minute
  * A1 window (design §2.4); this only keeps the list short and bounded.
@@ -320,6 +339,38 @@ export async function fetchLiveSamples(orgs, knownVideoIds, logger = console, no
     logger?.warn?.('chase: videos.list unreachable', { err: redact(err?.message || err) });
     return [];
   }
+}
+
+/**
+ * Ask YouTube which video each given org is live on RIGHT NOW. 100 units PER ORG, so
+ * the caller decides who is worth asking — never call this for an org whose live
+ * video is already known.
+ * @param {Array<object>} orgs @param {any} logger
+ * @returns {Promise<Record<string, string>>} orgId -> live videoId (absent = not live)
+ */
+export async function findLiveVideos(orgs, logger = console) {
+  const key = (process.env.YOUTUBE_API_KEY || '').trim();
+  if (!key || !orgs?.length) return {};
+  const found = {};
+  await Promise.all(orgs.map(async (org) => {
+    if (!org?.channelId) return;
+    const url = 'https://www.googleapis.com/youtube/v3/search'
+      + `?part=id&channelId=${encodeURIComponent(org.channelId)}`
+      + `&eventType=live&type=video&maxResults=1&key=${encodeURIComponent(key)}`;
+    try {
+      const res = await http(url, { signal: AbortSignal.timeout(HTTP_TIMEOUT_MS) });
+      if (!res?.ok) {
+        logger?.warn?.('chase: live search rejected', { org: org.id, status: res?.status ?? 0 });
+        return;
+      }
+      const json = await res.json();
+      const id = json?.items?.[0]?.id?.videoId;
+      if (id) found[org.id] = id;
+    } catch (err) {
+      logger?.warn?.('chase: live search unreachable', { org: org.id, err: redact(err?.message || err) });
+    }
+  }));
+  return found;
 }
 
 /**

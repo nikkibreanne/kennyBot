@@ -150,7 +150,7 @@ when they are genuinely different observations of the world.
 |---|---|---|
 | `title` | The stream's title **changed** to chase vocabulary | A deliberate editorial act by a producer |
 | `audience` | Concurrent viewers vs. trailing baseline | Audience behaviour — nobody chose it |
-| `liveness` | An `episodic` channel went not-live → live | A scheduling/ops act, distinct from titling |
+| `liveness` | A stream we watched go **not-live → live** | A scheduling/ops act, distinct from titling |
 | `editorial` | The org's article RSS carries a present-tense chase item | A second newsroom system, published separately |
 
 `V1`/`V2` are the same measurement at two thresholds, so only the higher scores —
@@ -184,7 +184,7 @@ regardless (§2.9). The article-RSS `editorial` channel is the free stand-in.
 | **T2** | `title` | Title **changed** to weak vocab (`high-speed`, `fleeing`, `standoff`, `suspect`) | 2 |
 | **V1** | `audience` | Viewers ≥ **8×** the 30-min trailing median **and** ≥ `minViewers` | 5 |
 | **V2** | `audience` | Viewers ≥ **3×** the 30-min trailing median **and** ≥ `minViewers` | 2 |
-| **L1** | `liveness` | `episodic` channel went not-live → live within 10 min | 5 |
+| **L1** | `liveness` | A **witnessed** off→on transition within 10 min (any class) | 5 |
 | **A1** | `editorial` | Org's article RSS has a present-tense chase item < 15 min old | 2 |
 | **N1** | — | Negative marker in title (§2.5) | **org → 0** |
 
@@ -220,6 +220,15 @@ Worked cases:
 | A `chopper` org live + "chopper" in static title + 3× | **2** | no | ✅ the §2.1 stacking attack, defused |
 | An `episodic` org live, titled "Raw video: chase ends in crash" | N1 → **0** | no | ✅ retrospective clip |
 | Two orgs both weak (V2 each) | 2 + 2 = **4** | no | ✅ |
+
+**`L1` is not gated on stream class, and that matters.** A chopper cam is *not* a 24/7
+stream — measured, it sat dark while its org's separate round-the-clock news loop ran.
+It goes up **because** something is happening, which makes a witnessed off→on
+transition the earliest signal available anywhere in this design. Gating L1 to a class
+would have discarded it. The gate was also protecting nothing: a stream that never goes
+off never transitions, so it scores 0 here by construction. What L1 *does* require is a
+**witnessed** transition — a stream found already running scores nothing, which is what
+stops a restart reading the whole roster as freshly live.
 
 **Why `L1` is 5 and not 3.** An `episodic` station going dark→live *and* titling it a
 pursuit is two independent editorial acts. It also has to be able to fire, and at

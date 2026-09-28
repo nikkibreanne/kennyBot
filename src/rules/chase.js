@@ -231,8 +231,13 @@ export function evaluateChase({ samples = [], articles = [], state = null, now =
     // live — i.e. a broadcast that just appeared. Anything else is seeded in
     // silence, which is what stops a restart from reading every standing title
     // as a fresh editorial decision.
-    const newlyLive = live && !prev?.live;
-    const wentLiveAt = live ? (newlyLive ? at : (numOrNull(prev?.wentLiveAt) ?? at)) : null;
+    // A GENUINE transition: we watched this stream while it was off, and now it is on.
+    // First sighting does NOT count — otherwise every restart would read every standing
+    // stream as freshly live and fire L1 across the whole roster.
+    const newlyLive = live && prev != null && prev.live === false;
+    // Null until a transition is actually witnessed, so `sinceLive` stays Infinity for
+    // a stream we simply found already running.
+    const wentLiveAt = live ? (newlyLive ? at : numOrNull(prev?.wentLiveAt)) : null;
     const restingTitle = prev ? prev.title : (live ? '' : title);
 
     const strong = matchesAny(title, cfg?.strongVocab);
@@ -254,10 +259,16 @@ export function evaluateChase({ samples = [], articles = [], state = null, now =
       else if (ratio >= spikeWeak) audienceScore = w('V2', 2);
     }
 
+    // NO class gate. It used to require `streamClass === 'episodic'`, on the theory
+    // that an always-live stream is not a signal — but that is already true by
+    // construction: a stream that never goes off never transitions, so `wentLiveAt`
+    // stays null and this scores 0 anyway. The gate added nothing and cost the single
+    // most valuable signal available: a chopper cam is NOT a 24/7 stream (measured —
+    // it was dark while the org's separate news loop ran), and it goes up BECAUSE
+    // something is happening. An org's class describes its usual stream; it must not
+    // decide whether a real off->on transition counts.
     const sinceLive = wentLiveAt == null ? Infinity : at - wentLiveAt;
-    const livenessScore = streamClass === 'episodic' && sinceLive >= 0 && sinceLive <= LIVENESS_WINDOW_MS
-      ? w('L1', 3)
-      : 0;
+    const livenessScore = sinceLive >= 0 && sinceLive <= LIVENESS_WINDOW_MS ? w('L1', 5) : 0;
 
     if (viewers != null) readings.push([videoId, viewers]);
     nextStreams[videoId] = {

@@ -16,7 +16,7 @@
 //     the pure evaluator built; API errors, keys and quota state go to the log.
 import { config } from '../config.js';
 import { evaluateChase } from '../rules/chase.js';
-import { fetchLiveSamples, discoverVideoIds, fetchArticles, youtubeKeyPresent } from '../integrations/chaseSources.js';
+import { fetchLiveSamples, discoverVideoIds, findLiveVideos, fetchArticles, youtubeKeyPresent, SEARCH_UNITS } from '../integrations/chaseSources.js';
 import { getChaseSettings, loadMonitorState, saveMonitorState, logShadowAnnouncement } from '../db/chaseMonitor.js';
 
 /**
@@ -32,6 +32,24 @@ export function startChaseMonitor({ send, logger = console }) {
   let warnedNoSources = false;
   /** @type {Record<string, string[]>} orgId -> candidate video ids, from the RSS sweep */
   let knownVideoIds = {};
+  /**
+   * orgId -> the video id that org was last seen LIVE on. This is the sticky set, and
+   * it is what makes the whole thing work: channel RSS lists recent UPLOADS, so a
+   * stream that has been live for hours is pushed out by newer clips and vanishes from
+   * discovery (measured: 4 of 6 real sources were live with their video absent from
+   * the feed entirely). Once a live video is known it is polled every tick by the
+   * 1-unit videos.list call for free, and only dropped when it reports not-live — so a
+   * 24/7 stream costs one search to find and nothing to keep.
+   * @type {Record<string, string>}
+   */
+  let liveVideoIds = {};
+  /** When each org was last searched, so a persistently-dark org is not hammered. */
+  let lastSearchAt = {};
+  /** Search units spent today, and which day that is. Quota resets midnight Pacific. */
+  let searchUnitsToday = 0;
+  let searchDay = null;
+  /** The quota day, in the zone Google resets on — not the host's local midnight. */
+  const quotaDay = () => new Intl.DateTimeFormat('en-CA', { timeZone: 'America/Los_Angeles' }).format(new Date());
   let polling = false;
   let sweeping = false;
   let stopped = false;
@@ -58,6 +76,28 @@ export function startChaseMonitor({ send, logger = console }) {
       // result rather than empty, so merging keeps that org's last good ids
       // instead of forgetting a live stream because one request timed out.
       if (found && typeof found === 'object') knownVideoIds = { ...knownVideoIds, ...found };
+
+      // Then the part RSS cannot do. Ask ONLY about orgs we have no live video for —
+      // a source already streaming is tracked for free by the fast loop, so the 100-unit
+      // search is spent exclusively on the ones that are dark or newly unknown.
+      const now = Date.now();
+      const cooldown = Math.max(0, Number(settings.searchCooldownMs) || 30 * 60_000);
+      const today = quotaDay();
+      if (searchDay !== today) { searchDay = today; searchUnitsToday = 0; }
+      const unitCap = Math.max(0, Number(settings.searchDailyUnitCap) || 5000);
+      const affordable = Math.max(0, Math.floor((unitCap - searchUnitsToday) / SEARCH_UNITS));
+      const askable = settings.orgs
+        .filter((o) => !liveVideoIds[o.id] && now - (lastSearchAt[o.id] || 0) >= cooldown)
+        .slice(0, affordable); // the day's budget is a hard stop, not a warning
+      if (askable.length) {
+        searchUnitsToday += askable.length * SEARCH_UNITS;
+        for (const o of askable) lastSearchAt[o.id] = now;
+        const live = await findLiveVideos(askable, logger);
+        for (const [orgId, videoId] of Object.entries(live)) {
+          liveVideoIds[orgId] = videoId;
+          logger.info?.('chase: found a live stream', { org: orgId });
+        }
+      }
     } catch (err) {
       logger.error?.('chase discovery failed', { err: String(err?.stack || err) });
     } finally {
@@ -76,10 +116,23 @@ export function startChaseMonitor({ send, logger = console }) {
       // Articles are a second, independent newsroom system and a dead feed must
       // not delay the detector, so both are in flight at once. Neither fetcher
       // throws — they return partial results and log.
+      // Sticky live ids FIRST — they are the only ids that can actually score — then
+      // the RSS candidates fill whatever is left of the one billed call.
+      const ids = [...new Set([...Object.values(liveVideoIds), ...Object.values(knownVideoIds).flat()])];
       const [samples, articles] = await Promise.all([
-        fetchLiveSamples(settings.orgs, knownVideoIds, logger),
+        fetchLiveSamples(settings.orgs, ids, logger),
         fetchArticles(settings.orgs, logger),
       ]);
+
+      // A stream that stopped must leave the sticky set, or the next search for that
+      // org never happens and a NEW broadcast is never found.
+      for (const s2 of samples || []) {
+        if (liveVideoIds[s2.org] === s2.videoId && !s2.live) {
+          delete liveVideoIds[s2.org];
+          logger.info?.('chase: live stream ended', { org: s2.org });
+        }
+      }
+      for (const s2 of samples || []) if (s2.live) liveVideoIds[s2.org] = s2.videoId;
 
       const state = await loadMonitorState();
       const result = evaluateChase({
