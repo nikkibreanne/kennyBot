@@ -146,6 +146,7 @@ function normalizeState(state) {
       live: Boolean(rec.live),
       wentLiveAt: numOrNull(rec.wentLiveAt),
       seenAt: Math.max(0, num(rec.seenAt, 0)),
+      org: rec.org ? String(rec.org) : undefined,
     };
   }
   const baselines = {};
@@ -213,6 +214,9 @@ export function evaluateChase({ samples = [], articles = [], state = null, now =
   }
 
   // ── per-stream evidence ────────────────────────────────────────────────────
+  // Which orgs we already had observations for, computed from the INCOMING state so a
+  // stream added during this tick cannot vouch for itself.
+  const orgSeenBefore = new Set(Object.values(s.streams).map((r) => r?.org).filter(Boolean));
   const nextStreams = { ...s.streams };
   const evidence = [];
   const readings = [];
@@ -231,10 +235,16 @@ export function evaluateChase({ samples = [], articles = [], state = null, now =
     // live — i.e. a broadcast that just appeared. Anything else is seeded in
     // silence, which is what stops a restart from reading every standing title
     // as a fresh editorial decision.
-    // A GENUINE transition: we watched this stream while it was off, and now it is on.
-    // First sighting does NOT count — otherwise every restart would read every standing
-    // stream as freshly live and fire L1 across the whole roster.
-    const newlyLive = live && prev != null && prev.live === false;
+    // A GENUINE transition, in either of the two shapes it really takes:
+    //   a) the SAME stream we watched go dark comes back on, or
+    //   b) a stream we have never seen appears live for an org we were ALREADY
+    //      watching — which is what a chopper going up actually looks like, because
+    //      a new broadcast mints a new videoId rather than reusing one.
+    // (b) is why a bare "have we seen this videoId before" test is not enough, and
+    // why the org must be known: on a cold start we have no records at all, so
+    // `orgSeenBefore` is false and a restart cannot read standing streams as fresh.
+    const newBroadcast = live && prev == null && orgSeenBefore.has(orgId);
+    const newlyLive = live && ((prev != null && prev.live === false) || newBroadcast);
     // Null until a transition is actually witnessed, so `sinceLive` stays Infinity for
     // a stream we simply found already running.
     const wentLiveAt = live ? (newlyLive ? at : numOrNull(prev?.wentLiveAt)) : null;
@@ -276,6 +286,7 @@ export function evaluateChase({ samples = [], articles = [], state = null, now =
       live,
       wentLiveAt,
       seenAt: at,
+      org: orgId, // so a NEW stream can be told apart from a cold start (see newBroadcast)
     };
     evidence.push({ orgId, videoId, title, live, negative, titleScore, audienceScore, livenessScore, viewers });
   }

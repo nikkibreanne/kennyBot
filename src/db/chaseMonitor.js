@@ -22,7 +22,7 @@ import { config } from '../config.js';
  * Persisted monitor state. The evaluator is PURE over this: it takes one and
  * returns the next. Must survive a JSON round-trip through RTDB.
  * @typedef {object} MonitorState
- * @property {Record<string, {title: string, live: boolean, wentLiveAt: number|null, seenAt: number}>} streams
+ * @property {Record<string, {title: string, live: boolean, wentLiveAt: number|null, seenAt: number, org?: string}>} streams
  *           keyed by videoId. `title` is the stream's RESTING title — what a
  *           change is measured against, not necessarily what is showing now —
  *           and `seenAt` is how the evaluator decides which stream to evict when
@@ -254,6 +254,9 @@ function normalizeState(raw) {
       // stale. Dropped, it reads back as 0 for all of them and the pruner would
       // evict the stream currently being watched.
       seenAt: toCount(s.seenAt),
+      // Carries which org the stream belongs to — the evaluator needs it to tell a NEW
+      // broadcast from a cold start. Dropping it here would silently disable that.
+      ...(s.org ? { org: String(s.org) } : {}),
     };
   }
 

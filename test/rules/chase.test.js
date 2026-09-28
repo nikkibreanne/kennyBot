@@ -633,3 +633,32 @@ test('maxIncidentMs closes an incident whatever it scores', () => {
   assert.equal(past.state.incident, null, 'closed on age alone');
   assert.equal(past.closed, true);
 });
+
+test('a NEW broadcast from an org we were already watching scores L1', () => {
+  // The shape a chopper going up actually takes: not the same stream flicking back
+  // on, but a brand-new videoId appearing beside the org's existing 24/7 stream.
+  // Requiring a witnessed off->on transition of the SAME video missed this entirely,
+  // which is the single earliest signal in the system.
+  const loop = (at) => ({ ...sample('org1'), videoId: 'loop', title: 'a permanent 24/7 stream', viewers: null, at });
+  let state = evaluateChase({ samples: [loop(NOW)], state: null, now: NOW, cfg }).state;
+  assert.ok(state.streams.loop.org, 'the stream record carries its org, or none of this works');
+  for (let i = 1; i < 5; i += 1) {
+    state = evaluateChase({ samples: [loop(NOW + i * MIN)], state, now: NOW + i * MIN, cfg }).state;
+  }
+
+  const r = evaluateChase({
+    samples: [loop(NOW + 5 * MIN), { ...sample('org1'), videoId: 'fresh', title: 'LIVE: Police pursuit', viewers: null, at: NOW + 5 * MIN }],
+    state, now: NOW + 5 * MIN, cfg,
+  });
+  assert.equal(r.groups.org1.channels.liveness, 5, 'a new broadcast beside a standing one IS the event');
+});
+
+test('a cold start never scores L1, however many streams are already running', () => {
+  // The other half of the same rule. With no prior records the org is unknown, so
+  // nothing can be called new — otherwise a restart lights up the entire roster.
+  const running = ['org1', 'org2', 'org6'].map((o) => ({ ...sample(o), viewers: null }));
+  const r = evaluateChase({ samples: running, state: null, now: NOW, cfg });
+  for (const o of ['org1', 'org2', 'org6']) {
+    assert.equal(r.groups[o]?.channels?.liveness, undefined, `${o}: found running is not a transition`);
+  }
+});
