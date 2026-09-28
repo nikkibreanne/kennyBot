@@ -20,7 +20,9 @@ kennyBot already runs in.
 
 | Resource | Budget | We use | Headroom |
 |---|---|---|---|
-| YouTube Data API quota | 10,000 units/day (free) | **~1,440** (1 `videos.list`/min) | 86% |
+| YouTube Data API quota | 10,000 units/day (free) | **~2,200–5,400** | 46–78% |
+| ├ polling (`videos.list`, 1 unit) | | 1,440 | |
+| └ live search (`search.list`, 100 units) | capped at 5,000 | 800–4,000 | |
 | Bandwidth | — | ~17 MB/day (6 RSS feeds every 10 min) | — |
 | RTDB | existing project | a few KB of state + a 200-entry shadow log | — |
 | Twitch | existing bot | ≤ 3 messages/hour, hard-capped | — |

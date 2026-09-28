@@ -374,7 +374,16 @@ export const config = {
     // known live video (a live one is tracked free by the 1-unit poll), and the day's
     // total spend is capped. Worst case 6 dark orgs every 30 min would be 28,800
     // units/day; the cap is what stops that.
-    searchCooldownMs: 30 * 60_000, // min gap between searches for the SAME dark org
+    // 3h, not 30min, because the two discovery paths do DIFFERENT jobs and the cheap
+    // one covers the urgent case. RSS fails for a stream that has been live a while
+    // (it lists recent UPLOADS, so the stream sinks as clips are posted) — but a
+    // BRAND-NEW broadcast is by definition the newest upload, and shows up in the
+    // free 10-minute sweep. So search is a backstop for long-running streams and for
+    // recovering the sticky set after a restart, NOT the thing that catches a source
+    // going live. At 30min with 3 dark sources it burned 600 units/hour and hit the
+    // daily cap after ~8 hours, which silently ended searching for the rest of the
+    // day — worse than searching less often.
+    searchCooldownMs: 3 * 60 * 60_000, // min gap between searches for the SAME dark org
     searchDailyUnitCap: 5000, // hard ceiling; 1,440 (fast loop) + this stays under 10k
     reopenCooldownMs: 20 * 60_000, // no NEW incident this soon after one closed
     maxPerHour: 3, // channel-wide announcement cap (never per-user)
