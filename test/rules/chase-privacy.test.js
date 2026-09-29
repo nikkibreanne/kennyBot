@@ -85,6 +85,12 @@ test('nothing from the private roster leaks into a tracked file', (t) => {
     if (org.articleFeed) {
       try { secrets.add(new URL(org.articleFeed).hostname.toLowerCase()); } catch { /* not a url */ }
     }
+    // Org ids too, because a roster may use outlet-derived ids rather than opaque ones
+    // and those identify a source just as plainly as its display name. A deliberately
+    // OPAQUE id (org1, source2) is skipped — it reveals nothing, and guarding it would
+    // fire on this repo's own fixtures, which use exactly that shape by convention.
+    const id = String(org.id ?? '').toLowerCase();
+    if (id.length >= 4 && !/^(org|source|src)\d+$/.test(id)) secrets.add(id);
   }
 
   const hits = [];

@@ -17,6 +17,7 @@
     "test:chase": "firebase emulators:exec --only database --project okrafans \"node scripts/chase-sim.mjs\"",
     "chase:record": "node scripts/chase-record.mjs",
     "chase:report": "node scripts/chase-report.mjs",
+    "chase:backtest": "node scripts/chase-backtest.mjs",
     "chase:sources": "node scripts/chase-sources-load.mjs",
     "synthetic": "firebase emulators:exec --only database --project okrafans \"node scripts/synthetic-chat.js\"",
     "dev:console": "firebase emulators:exec --only database --project okrafans \"node scripts/dev-console.js\"",
