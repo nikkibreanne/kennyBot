@@ -214,6 +214,14 @@ export function parseVideosListResponse(json, orgByChannelId, now = Date.now()) 
     if (!found) continue;
     const org = typeof found === 'string' ? { id: found } : found;
 
+    // YouTube reports when the broadcast ACTUALLY began. That is the only
+    // trustworthy way to tell "this just went live" from "this has been live for
+    // weeks and we only just started looking at it" — our own observation history
+    // cannot, because discovering a stream for the first time looks identical to a
+    // stream starting. Absent (or unparseable) leaves it null, and the evaluator
+    // then declines to score liveness rather than guessing.
+    const startedRaw = item?.liveStreamingDetails?.actualStartTime;
+    const startedAt = startedRaw ? Date.parse(startedRaw) : NaN;
     const raw = item?.liveStreamingDetails?.concurrentViewers;
     const viewers = raw == null || raw === '' ? null : Number.parseInt(raw, 10);
 
@@ -226,6 +234,7 @@ export function parseVideosListResponse(json, orgByChannelId, now = Date.now()) 
       live: snippet.liveBroadcastContent === 'live',
       title: typeof snippet.title === 'string' ? snippet.title : '',
       viewers: Number.isFinite(viewers) ? viewers : null,
+      startedAt: Number.isFinite(startedAt) ? startedAt : null,
       at: now,
     });
   }

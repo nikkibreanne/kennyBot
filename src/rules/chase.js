@@ -214,9 +214,6 @@ export function evaluateChase({ samples = [], articles = [], state = null, now =
   }
 
   // ── per-stream evidence ────────────────────────────────────────────────────
-  // Which orgs we already had observations for, computed from the INCOMING state so a
-  // stream added during this tick cannot vouch for itself.
-  const orgSeenBefore = new Set(Object.values(s.streams).map((r) => r?.org).filter(Boolean));
   const nextStreams = { ...s.streams };
   const evidence = [];
   const readings = [];
@@ -235,16 +232,15 @@ export function evaluateChase({ samples = [], articles = [], state = null, now =
     // live — i.e. a broadcast that just appeared. Anything else is seeded in
     // silence, which is what stops a restart from reading every standing title
     // as a fresh editorial decision.
-    // A GENUINE transition, in either of the two shapes it really takes:
-    //   a) the SAME stream we watched go dark comes back on, or
-    //   b) a stream we have never seen appears live for an org we were ALREADY
-    //      watching — which is what a chopper going up actually looks like, because
-    //      a new broadcast mints a new videoId rather than reusing one.
-    // (b) is why a bare "have we seen this videoId before" test is not enough, and
-    // why the org must be known: on a cold start we have no records at all, so
-    // `orgSeenBefore` is false and a restart cannot read standing streams as fresh.
-    const newBroadcast = live && prev == null && orgSeenBefore.has(orgId);
-    const newlyLive = live && ((prev != null && prev.live === false) || newBroadcast);
+    // WHEN DID THIS BROADCAST START? YouTube answers directly (actualStartTime), and
+    // that is the only trustworthy source. Inferring it from our own observation
+    // history cannot work: "a stream just started" and "a stream has been live for
+    // weeks and we only just started polling it" look identical from here. Inferring
+    // it produced a real false positive — three long-running streams discovered in one
+    // search sweep each scored L1, totalling 15, and announced a chase that never
+    // happened. Measured on the same data: one source had been live 15,714 hours.
+    const startedAt = numOrNull(raw?.startedAt);
+    const newlyLive = live && (prev != null && prev.live === false);
     // Null until a transition is actually witnessed, so `sinceLive` stays Infinity for
     // a stream we simply found already running.
     const wentLiveAt = live ? (newlyLive ? at : numOrNull(prev?.wentLiveAt)) : null;
@@ -277,7 +273,12 @@ export function evaluateChase({ samples = [], articles = [], state = null, now =
     // it was dark while the org's separate news loop ran), and it goes up BECAUSE
     // something is happening. An org's class describes its usual stream; it must not
     // decide whether a real off->on transition counts.
-    const sinceLive = wentLiveAt == null ? Infinity : at - wentLiveAt;
+    // Prefer what YouTube says; fall back to a WITNESSED off->on transition of this
+    // same stream only when the broadcast time is unknown. The old inference — a new
+    // video id for an org we had seen before — is deliberately gone.
+    const sinceLive = startedAt != null
+      ? at - startedAt
+      : (wentLiveAt == null ? Infinity : at - wentLiveAt);
     const livenessScore = sinceLive >= 0 && sinceLive <= LIVENESS_WINDOW_MS ? w('L1', 5) : 0;
 
     if (viewers != null) readings.push([videoId, viewers]);

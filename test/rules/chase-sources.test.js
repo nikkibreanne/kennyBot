@@ -162,6 +162,7 @@ test('parseVideosListResponse maps a live stream onto its org and class', () => 
     live: true,
     title: 'LIVE: Pursuit in progress',
     viewers: 24310,
+    startedAt: null, // absent actualStartTime in this fixture
     at: NOW,
   }]);
 });
