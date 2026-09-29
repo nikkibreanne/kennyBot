@@ -266,7 +266,16 @@ export function evaluateChase({ samples = [], articles = [], state = null, now =
       else if (ratio >= spikeWeak) audienceScore = w('V2', 2);
     }
 
-    // NO class gate. It used to require `streamClass === 'episodic'`, on the theory
+    // GATED BY CLASS, but on the right set. See config.chase.livenessClasses: a
+    // newscast going live is a scheduled bulletin, not an event, and scoring it let two
+    // unrelated newsrooms announce a chase between them.
+    const livenessClasses = Array.isArray(cfg?.livenessClasses) ? cfg.livenessClasses : ['chopper', 'episodic'];
+    // ...or when the source SAYS why it went live. A newscast's going-live is routine
+    // and must not score on its own — but a newscast that cuts in AND titles it a
+    // pursuit has done two separate things, and losing that case costs a real chase.
+    // Two routine bulletins still score nothing, because neither says anything.
+    const livenessCounts = livenessClasses.includes(streamClass) || strong || weak;
+    // The ORIGINAL gate required `streamClass === 'episodic'`, on the theory
     // that an always-live stream is not a signal — but that is already true by
     // construction: a stream that never goes off never transitions, so `wentLiveAt`
     // stays null and this scores 0 anyway. The gate added nothing and cost the single
@@ -280,7 +289,7 @@ export function evaluateChase({ samples = [], articles = [], state = null, now =
     const sinceLive = startedAt != null
       ? at - startedAt
       : (wentLiveAt == null ? Infinity : at - wentLiveAt);
-    const livenessScore = sinceLive >= 0 && sinceLive <= LIVENESS_WINDOW_MS ? w('L1', 5) : 0;
+    const livenessScore = livenessCounts && sinceLive >= 0 && sinceLive <= LIVENESS_WINDOW_MS ? w('L1', 5) : 0;
 
     if (viewers != null) readings.push([videoId, viewers]);
     nextStreams[videoId] = {

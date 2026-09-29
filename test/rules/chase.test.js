@@ -312,13 +312,34 @@ test('L1 needs a WITNESSED off->on transition, not a stream class', () => {
   const stale = evalAt(NOW, [sample('org6')], { streams: knows('org6', { wentLiveAt: NOW - 11 * MIN }), baselines: {} });
   assert.equal(stale.groups.org6.channels.liveness, undefined, 'going live stops being news after 10 minutes');
 
-  // NOT gated on class. A chopper cam is not a 24/7 stream — it goes up BECAUSE
-  // something is happening — so a real transition has to count whatever the org's
-  // usual stream looks like. This is the highest-value signal in the system.
+  // A chopper cam is not a 24/7 stream — it goes up BECAUSE something is happening —
+  // so it MUST count. The original gate was `episodic` only and excluded exactly this.
   const chopper = evalAt(NOW, [sample('org1')], { streams: knows('org1', { live: false, wentLiveAt: null }), baselines: {} });
   assert.equal(chopper.groups.org1.channels.liveness, 5, 'a chopper going up is the whole point');
+
+  // A newscast going live is the 5pm bulletin, not an event. Scoring it is what let
+  // two unrelated newsrooms announce a chase between them — see the test below.
   const newscast = evalAt(NOW, [sample('org2')], { streams: knows('org2', { live: false, wentLiveAt: null }), baselines: {} });
-  assert.equal(newscast.groups.org2.channels.liveness, 5);
+  assert.equal(newscast.groups.org2?.channels?.liveness, undefined, 'a scheduled bulletin is not an event');
+});
+
+test('two newsrooms starting routine bulletins together do NOT announce a chase', () => {
+  // The false positive this gate exists to stop, at the REAL threshold. Both go live in
+  // the same minute with ordinary titles and no chase vocabulary anywhere. Before the
+  // gate this scored 5 + 5 = 10 and announced.
+  const bulletin = (org, title, at) => ({ ...sample(org), videoId: `${org}-news`, title, viewers: 900, startedAt: at, at });
+  let state = { streams: { 'org2-off': { title: '', live: false, wentLiveAt: null, seenAt: NOW, org: 'org2' },
+                           'org4-off': { title: '', live: false, wentLiveAt: null, seenAt: NOW, org: 'org4' } }, baselines: {} };
+  for (let i = 0; i < 6; i += 1) {
+    const at = NOW + i * MIN;
+    const r = evaluateChase({
+      samples: [bulletin('org2', 'Eyewitness News at 5', NOW), bulletin('org4', 'Evening Edition', NOW)],
+      articles: [], state, now: at, cfg,
+    });
+    state = r.state;
+    assert.equal(r.score, 0, `poll ${i}: a scheduled bulletin is not evidence of a chase`);
+    assert.equal(r.announce, null, `poll ${i}: must not announce`);
+  }
 });
 
 test('an always-live stream never scores L1, because it never transitions', () => {

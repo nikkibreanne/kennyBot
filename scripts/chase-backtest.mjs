@@ -274,7 +274,7 @@ async function youtubeBroadcasts(orgs, key, spend) {
       warnings.push(`${org.id}: completed-broadcast search failed — ${err.message}`);
       continue;
     }
-    perOrg.set(org.id, { returned: ids.length, truncated: ids.length >= MAX_IDS, kept: 0, noTimes: 0 });
+    perOrg.set(org.id, { returned: ids.length, capped: ids.length >= MAX_IDS, kept: 0, noTimes: 0, oldestFetched: null });
     if (!ids.length) continue;
 
     for (let i = 0; i < ids.length; i += MAX_IDS) {
@@ -298,7 +298,9 @@ async function youtubeBroadcasts(orgs, key, spend) {
             end,
             title: typeof item?.snippet?.title === 'string' ? item.snippet.title : '',
           });
-          perOrg.get(org.id).kept += 1;
+          const seen = perOrg.get(org.id);
+          seen.kept += 1;
+          seen.oldestFetched = seen.oldestFetched == null ? start : Math.min(seen.oldestFetched, start);
         }
       } catch (err) {
         warnings.push(`${org.id}: videos.list failed for ${chunk.length} id(s) — ${err.message}`);
@@ -368,13 +370,13 @@ async function twitchBroadcasts(orgs) {
   for (const user of users) {
     const org = byLogin.get(String(user?.login || '').toLowerCase());
     if (!org || !user?.id) continue;
-    perOrg.set(org.id, { returned: 0, truncated: false, kept: 0, noTimes: 0 });
+    perOrg.set(org.id, { returned: 0, capped: false, kept: 0, noTimes: 0, oldestFetched: null });
     try {
       const qs = new URLSearchParams({ user_id: String(user.id), type: 'archive', first: '100' });
       const json = await getJson(`${TWITCH_VIDEOS_URL}?${qs}`, { headers });
       const rows = Array.isArray(json?.data) ? json.data : [];
       perOrg.get(org.id).returned = rows.length;
-      perOrg.get(org.id).truncated = rows.length >= 100;
+      perOrg.get(org.id).capped = rows.length >= 100;
       for (const v of rows) {
         const start = Date.parse(v?.created_at || '');
         const ms = parseTwitchDuration(v?.duration);
@@ -386,7 +388,9 @@ async function twitchBroadcasts(orgs) {
           end: start + ms,
           title: typeof v?.title === 'string' ? v.title : '',
         });
-        perOrg.get(org.id).kept += 1;
+        const seen = perOrg.get(org.id);
+        seen.kept += 1;
+        seen.oldestFetched = seen.oldestFetched == null ? start : Math.min(seen.oldestFetched, start);
       }
     } catch (err) {
       warnings.push(`${org.id}: videos archive failed — ${err.message}`);
@@ -469,7 +473,7 @@ function replay(ticks, cfg) {
   let peak = 0;
   let peakGroups = null;
   let openedAt = null;
-  let openGroups = null;
+  let openScore = 0;
   let opens = 0;
   for (const tick of ticks) {
     const res = evaluateChase({ samples: tick.samples, articles: [], state, now: tick.at, cfg });
@@ -477,13 +481,17 @@ function replay(ticks, cfg) {
     if (res.score > peak) { peak = res.score; peakGroups = res.groups; }
     if (res.opened) {
       opens += 1;
-      if (openedAt == null) { openedAt = tick.at; openGroups = res.groups; }
+      if (openedAt == null) { openedAt = tick.at; openScore = round2(res.score); }
     }
   }
-  const groups = openGroups || peakGroups || {};
+  // The PEAK tick's breakdown, not the opening one: the question a cluster line has
+  // to answer is which newsrooms carried the event, and an incident opens on the
+  // third tick over the line — often before the second org has joined it.
+  const groups = peakGroups || {};
   return {
     peak: round2(peak),
     openedAt,
+    openScore,
     opens,
     contributors: Object.entries(groups)
       .filter(([, g]) => Number(g?.score) > 0)
@@ -612,25 +620,34 @@ async function main() {
       first: mine.length ? Math.min(...mine.map((b) => b.start)) : null,
       last: mine.length ? Math.max(...mine.map((b) => b.end)) : null,
       medianDurMs: durations.length ? durations[durations.length >> 1] : null,
-      archiveTruncated: Boolean(meta?.truncated),
-      returned: meta?.returned ?? 0,
+      listed: meta?.returned ?? 0,
+      oldestFetched: meta?.oldestFetched ?? null,
+      // A capped listing only LOSES data when its oldest entry is newer than the
+      // window start; a channel whose 50 archives already reach past it lost nothing.
+      archiveTruncated: Boolean(meta?.capped) && Number(meta?.oldestFetched) > windowFrom,
       droppedNoTimes: meta?.noTimes ?? 0,
     });
   }
-  say('  org        platform   class      n   loops   median   earliest     latest');
-  say(`  ${'─'.repeat(72)}`);
+  say('  org        platform   class     listed   in window   loops   median   earliest     latest');
+  say(`  ${'─'.repeat(88)}`);
   for (const r of rows) {
     say(`  ${r.org.padEnd(10)} ${r.platform.padEnd(9)} ${String(r.streamClass).padEnd(9)} `
-      + `${String(r.broadcasts).padStart(3)} ${String(r.loops).padStart(7)} `
+      + `${String(r.listed).padStart(6)} ${String(r.broadcasts).padStart(11)} ${String(r.loops).padStart(7)} `
       + `${(r.medianDurMs == null ? '—' : dur(r.medianDurMs)).padStart(8)}   ${day(r.first).padEnd(12)} ${day(r.last)}`);
   }
+  say('');
+  say('  listed = archive entries the platform returned · in window = those with a');
+  say(`  usable start/end pair inside the last ${DAYS} days.`);
   const truncated = rows.filter((r) => r.archiveTruncated);
   if (truncated.length) {
     say('');
-    say('  ARCHIVE TRUNCATED — the listing call returned its maximum page, so these');
-    say('  sources have older broadcasts that were NOT fetched (another page is another');
-    say(`  ${SEARCH_UNITS} units). Their earliest date below is a floor, not a start:`);
-    for (const r of truncated) say(`    ${r.org.padEnd(10)} listing capped at ${r.returned} · nothing before ${day(r.first)} was asked for`);
+    say('  ARCHIVE TRUNCATED — the listing returned a full page AND its oldest entry is');
+    say('  inside the window, so these sources have earlier broadcasts that were never');
+    say(`  fetched (another page is another ${SEARCH_UNITS} units). Events before the date below`);
+    say('  are missing for them, and every recall figure here is computed without them:');
+    for (const r of truncated) {
+      say(`    ${r.org.padEnd(10)} listing capped at ${r.listed} · nothing before ${day(r.oldestFetched)} was fetched`);
+    }
   }
   const noTimes = rows.filter((r) => r.droppedNoTimes);
   if (noTimes.length) {
@@ -710,6 +727,7 @@ async function main() {
       negativeTitled: negative,
       fired: main.openedAt != null,
       firedAfterMs: main.openedAt == null ? null : main.openedAt - cluster.start,
+      openScore: main.openScore,
       peak: main.peak,
       contributors: main.contributors,
       vetoed: main.vetoed,
@@ -719,7 +737,7 @@ async function main() {
     results.push(row);
 
     const mark = row.fired
-      ? (chaseTitled ? `FIRED ${row.firedAfterMs >= 0 ? '+' : ''}${Math.round(row.firedAfterMs / MIN_MS)}m` : `FIRED* ${Math.round(row.firedAfterMs / MIN_MS)}m`)
+      ? `FIRED${chaseTitled ? '' : '*'} +${Math.round(row.firedAfterMs / MIN_MS)}m`
       : chaseTitled ? 'MISS' : '—';
     const who = row.contributors.length
       ? row.contributors.map((c) => c.org).join(',')
@@ -755,7 +773,7 @@ async function main() {
   const vetoedMisses = titled.filter((r) => !r.fired && r.vetoed.length).length;
   const missedNoScore = titled.filter((r) => !r.fired && r.peak === 0).length;
   const missedShort = titled.filter((r) => !r.fired && r.peak > 0 && r.peak < CFG.threshold).length;
-  if (titled.length) {
+  if (titled.length > titledFired.length) {
     say('');
     say('  why the misses missed');
     say(`    scored nothing at all            ${missedNoScore}`);

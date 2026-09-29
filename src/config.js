@@ -396,7 +396,18 @@ export const config = {
     spikeStrong: 8, // x median → V1
     spikeWeak: 3, // x median → V2
 
-    // L1 is 5, not 3, and is NOT gated on stream class. A source going dark->live AND
+    // WHICH classes' going-live is itself an event. This gate was originally
+    // `episodic` only, which was wrong — it excluded a chopper cam, whose going up is
+    // the single earliest signal there is. Removing the gate entirely was wrong the
+    // OTHER way: a `newscast` goes live on a SCHEDULE, so L1 scored 5 for the 5pm
+    // bulletin, and two newsrooms starting within ten minutes of each other scored
+    // 5 + 5 = 10 and announced a chase with no chase vocabulary anywhere. Measured over
+    // 120 days of reconstructed broadcasts: a dedicated chase source's broadcasts were
+    // 10/11 chases; the newsrooms' were 7/115. Going live means something for one and
+    // nothing for the other, and the class is exactly that distinction.
+    livenessClasses: ['chopper', 'episodic'],
+
+    // L1 is 5, not 3. A source going dark->live AND
     // titling it a pursuit is two independent editorial acts, and it has to be able to
     // fire: a brand-new broadcast mints a NEW videoId, so `audience` has no baseline
     // and stays disabled for ~minSamples*pollMs (~20 min).
