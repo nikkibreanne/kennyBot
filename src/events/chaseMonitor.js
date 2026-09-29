@@ -75,6 +75,12 @@ export function startChaseMonitor({ send, logger = console }) {
       // MERGED per org, not replaced: an org whose feed failed is absent from the
       // result rather than empty, so merging keeps that org's last good ids
       // instead of forgetting a live stream because one request timed out.
+      // A sweep returning NOTHING means the free path is blind (YouTube's RSS edge
+      // throttles with a 404). That is when the paid search stops being a backstop and
+      // becomes the only way to notice a new broadcast, so the per-org cooldown is
+      // waived for this sweep. The daily unit cap still binds.
+      const rssBlind = !found || Object.keys(found).length === 0;
+      if (rssBlind) logger.warn?.('chase: RSS discovery blind this sweep — waiving the search cooldown');
       if (found && typeof found === 'object') knownVideoIds = { ...knownVideoIds, ...found };
 
       // Then the part RSS cannot do. Ask ONLY about orgs we have no live video for —
@@ -87,7 +93,7 @@ export function startChaseMonitor({ send, logger = console }) {
       const unitCap = Math.max(0, Number(settings.searchDailyUnitCap) || 5000);
       const affordable = Math.max(0, Math.floor((unitCap - searchUnitsToday) / SEARCH_UNITS));
       const askable = settings.orgs
-        .filter((o) => !liveVideoIds[o.id] && now - (lastSearchAt[o.id] || 0) >= cooldown)
+        .filter((o) => !liveVideoIds[o.id] && (rssBlind || now - (lastSearchAt[o.id] || 0) >= cooldown))
         .slice(0, affordable); // the day's budget is a hard stop, not a warning
       if (askable.length) {
         searchUnitsToday += askable.length * SEARCH_UNITS;

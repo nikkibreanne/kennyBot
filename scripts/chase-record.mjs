@@ -297,12 +297,20 @@ let liveByOrg = {};
 let lastSearchAt = {};
 let searchUnits = 0;
 let searchDay = null;
+/** True when the last RSS sweep returned nothing at all — see discover(). */
+let rssBlind = false;
 /** The quota day in Google's reset zone, not the host's local midnight. */
 const quotaDay = () => new Intl.DateTimeFormat('en-CA', { timeZone: 'America/Los_Angeles' }).format(new Date());
 
 async function discover() {
   try {
     const byOrg = await discoverVideoIds(orgs, log);
+    // A sweep that returned NOTHING means the free path is blind (YouTube's RSS edge
+    // throttles with a 404, observed for ~20 minutes). That is exactly when the paid
+    // search stops being a backstop and becomes the only way to notice a new
+    // broadcast, so the cooldown is waived for this sweep. The daily cap still binds.
+    rssBlind = !byOrg || Object.keys(byOrg).length === 0;
+    if (rssBlind) log.warn('chase: RSS discovery blind this sweep — waiving the search cooldown');
     if (byOrg && typeof byOrg === 'object') knownByOrg = { ...knownByOrg, ...byOrg };
     known = flatten({ ...knownByOrg, __live: Object.values(liveByOrg) });
     write({ kind: 'discovery', at: Date.now(), ids: byOrg });
@@ -319,7 +327,7 @@ async function discover() {
     if (searchDay !== today) { searchDay = today; searchUnits = 0; }
     const affordable = Math.max(0, Math.floor((chase.searchDailyUnitCap - searchUnits) / SEARCH_UNITS));
     const askable = orgs
-      .filter((o) => !liveByOrg[o.id] && now - (lastSearchAt[o.id] || 0) >= chase.searchCooldownMs)
+      .filter((o) => !liveByOrg[o.id] && (rssBlind || now - (lastSearchAt[o.id] || 0) >= chase.searchCooldownMs))
       .slice(0, affordable);
     if (askable.length) {
       for (const o of askable) lastSearchAt[o.id] = now;
