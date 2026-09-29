@@ -68,13 +68,20 @@ test('nothing from the private roster leaks into a tracked file', (t) => {
   const roster = JSON.parse(readFileSync(SOURCES_FILE, 'utf8'));
 
   // Every distinctive string the roster knows about: display names (and their
-  // word-pieces, so "Foo 11" is caught as "Foo"), channel ids, and feed hostnames.
+  // word-pieces, so "Foo 11" is caught as "Foo"), channel ids, TWITCH LOGINS, and
+  // feed hostnames. A login is a real channel name by another route — CLAUDE.md
+  // forbids it in a comment or a fixture exactly as it forbids a channel id — and it
+  // is not covered by the display name, because a login is usually the name squashed
+  // into one token.
   const secrets = new Set();
   for (const org of roster) {
     for (const piece of String(org.name ?? '').split(/[\s/]+/)) {
       if (piece.length >= 4 && !/^\d+$/.test(piece)) secrets.add(piece.toLowerCase());
     }
     if (org.channelId) secrets.add(String(org.channelId).toLowerCase());
+    // Guarded on length for the same reason the name pieces are: a three-letter login
+    // would match half the repo and make this test useless rather than strict.
+    if (String(org.login ?? '').length >= 4) secrets.add(String(org.login).toLowerCase());
     if (org.articleFeed) {
       try { secrets.add(new URL(org.articleFeed).hostname.toLowerCase()); } catch { /* not a url */ }
     }

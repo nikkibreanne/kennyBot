@@ -37,7 +37,12 @@ const MIN_MS = 60_000;
 const DAY_MS = 24 * 60 * MIN_MS;
 const CHANNELS = ['title', 'audience', 'liveness', 'editorial'];
 /** Real-world base rate of covered LA pursuits, design §1.1 — the yardstick for §4. */
-const BASE_RATE_PER_WEEK = [3, 5];
+// MEASURED, not assumed. 28 chases published to a broadcaster's dedicated chase feed
+// over 120 days = 1.6/week. The earlier 3-5 was an eyeball estimate from ~19 items in
+// ~1 month and it was too high, which matters because this constant drives the verdict
+// below: at 3-5 a correctly-behaving monitor gets told it is firing TOO RARELY.
+// Re-measure with `npm run chase:backtest`, which prints the rate it observes.
+const BASE_RATE_PER_WEEK = [1.5, 2.5];
 
 // ── arguments ────────────────────────────────────────────────────────────────
 

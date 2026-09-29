@@ -1,7 +1,13 @@
 // Chase-monitor sources — the only place this feature touches the network.
 //
-// Three sources, deliberately unequal (docs/chase-monitor-design.md §1, all of it
-// probed against the live internet on 2026-09-28):
+// TWO PLATFORMS. YouTube is the newsroom side (below); Twitch is a second, cheaper
+// and categorically STRONGER one, and it lives at the bottom of this file. The
+// difference is what the liveness of each actually means: a newsroom is live for
+// many reasons — a newscast, a weather hit, a 24/7 loop — so its going live is weak
+// evidence, while a dedicated chase channel goes live BECAUSE there is a chase.
+//
+// Four sources, deliberately unequal (docs/chase-monitor-design.md §1, the YouTube
+// three probed against the live internet on 2026-09-28, Twitch on 2026-09-29):
 //
 //   1. YouTube `videos.list` — the FAST path. `part=snippet,liveStreamingDetails`
 //      costs ONE quota unit for up to 50 video ids in a SINGLE call, and it is the
@@ -36,13 +42,20 @@ import { config } from '../config.js';
  * One observation of one stream at one instant.
  * @typedef {object} StreamSample
  * @property {string} org          - config.chase.orgs[].id, e.g. 'org1' (roster is private)
- * @property {string} videoId      - YouTube video id
+ * @property {string} videoId      - the platform's id for THIS broadcast: a YouTube
+ *                                   video id, or a Twitch stream id. For a Twitch
+ *                                   channel that is OFFLINE there is no stream id at
+ *                                   all, so a stable `tw:<login>` stands in — see
+ *                                   parseTwitchStreams.
  * @property {string} streamClass  - 'chopper' | 'newscast' | 'episodic'
  * @property {boolean} live
  * @property {string} title
  * @property {number|null} viewers - concurrent viewers; NULL when unknown
  *                                   (no API key -> audience channel disabled)
+ * @property {number|null} startedAt - ms epoch the BROADCAST began, per the platform
  * @property {number} at           - ms epoch
+ * @property {string} [url]        - only on platforms where the evaluator cannot
+ *                                   build the link from `videoId` alone (Twitch).
  */
 
 /**
@@ -55,10 +68,21 @@ import { config } from '../config.js';
 
 const VIDEOS_URL = 'https://www.googleapis.com/youtube/v3/videos';
 const CHANNEL_FEED = 'https://www.youtube.com/feeds/videos.xml';
+const TWITCH_TOKEN_URL = 'https://id.twitch.tv/oauth2/token';
+const TWITCH_STREAMS_URL = 'https://api.twitch.tv/helix/streams';
+const TWITCH_CHANNEL_URL = 'https://www.twitch.tv/';
 
 const HTTP_TIMEOUT_MS = 10_000;
 /** `videos.list` bills 1 unit per CALL, not per id — but only up to 50 ids. */
 const MAX_IDS = 50;
+/** `/helix/streams` takes 100 `user_login` values per call, for ONE point. */
+const MAX_LOGINS = 100;
+/**
+ * Re-mint an app token this long before it actually expires. It lasts ~60 days, so
+ * this is only about never handing a poll a token that dies mid-flight; a token
+ * revoked early is caught by the 401 retry instead, which is the real backstop.
+ */
+const TOKEN_SKEW_MS = 5 * 60_000;
 /**
  * Newest N entries per channel feed.
  *
@@ -90,6 +114,10 @@ const ARTICLE_MAX_AGE_MS = 30 * 60_000;
 let fakeFetch = null;
 /** The "running without a key" notice is worth saying once, not every minute. */
 let loggedNoKey = false;
+/** The same, for the Twitch half. */
+let loggedNoTwitch = false;
+/** Cached app access token: `{ token, expiresAt }`. ~60 days, so this is not a loop. */
+let twitchToken = null;
 /** feed url -> { etag, lastModified, articles } — powers conditional GET + 304. */
 const feedCache = new Map();
 
@@ -104,6 +132,8 @@ export function initChaseSourcesWith(fn) {
   fakeFetch = fn || null;
   feedCache.clear();
   loggedNoKey = false;
+  loggedNoTwitch = false;
+  twitchToken = null;
 }
 
 /**
@@ -115,10 +145,12 @@ export function chaseSourcesReady() {
   return Boolean(fakeFetch) || typeof fetch === 'function';
 }
 
-/** Whether the audience channel can work at all. The only env var this feature has. */
+/** Whether the audience channel can work at all. YouTube's only env var. */
 export function youtubeKeyPresent() {
   return Boolean((process.env.YOUTUBE_API_KEY || '').trim());
 }
+// (`twitchReady()` is the equivalent for the Twitch platform — see the bottom of
+// this file. It needs no NEW credential: the bot already holds both.)
 
 // ── pure parsers (exported so the whole parse layer is covered offline) ───────
 
@@ -275,8 +307,17 @@ const vocabRe = (terms) => new RegExp(`\\b(?:${(terms || []).map(escapeRe).join(
 const ARTICLE_RE = vocabRe(config.chase.strongVocab);
 const NEGATIVE_RE = vocabRe(config.chase.negativeVocab);
 
-/** Keys never reach a log line; the URL is the only thing that carries one. */
-const redact = (s) => String(s).replace(/key=[^&\s]+/gi, 'key=***');
+/**
+ * No credential ever reaches a log line. Undici puts the whole request URL into the
+ * error message it throws, and the Twitch token exchange puts the client secret in a
+ * request BODY that a transport error can echo back — so all four shapes are scrubbed
+ * here rather than trusted not to appear.
+ */
+const redact = (s) => String(s)
+  .replace(/key=[^&\s]+/gi, 'key=***')
+  .replace(/client_secret=[^&\s]+/gi, 'client_secret=***')
+  .replace(/access_token=[^&\s"]+/gi, 'access_token=***')
+  .replace(/\bBearer\s+[\w.+/=-]+/gi, 'Bearer ***');
 
 /** Collapse whatever shape the caller keeps its known ids in into a unique list. */
 function collectIds(known) {
@@ -486,4 +527,309 @@ export async function fetchArticles(orgs, logger = console, now = Date.now()) {
     logger?.warn?.('chase: article sweep failed', { err: String(err?.message || err) });
   }
   return out;
+}
+
+// ── Twitch ───────────────────────────────────────────────────────────────────
+//
+// The second source PLATFORM, and the strongest signal available to this monitor.
+// A newsroom is live for a dozen reasons; a dedicated chase channel goes live
+// BECAUSE of a chase, so its liveness is evidence in a way a newsroom's never is.
+//
+// It is also nearly free, which is why none of YouTube's rationing appears here.
+// `GET /helix/streams` takes up to 100 `user_login` values in ONE call and costs
+// ONE point against 800 points PER MINUTE — so every Twitch source is asked about
+// on every tick, with no discovery loop, no cooldown and no daily cap to schedule.
+// (Compare `search.list`: 100 units against 10,000 per DAY, which is the entire
+// reason the YouTube half above is built the way it is.)
+//
+// The credentials are the ones the bot already has. The token is an APP access
+// token (`grant_type=client_credentials`): it acts for no user, grants nothing but
+// public reads, lasts ~60 days, and is therefore cached in memory and re-minted
+// only when a request comes back 401.
+//
+// NOT USED, deliberately: the category query (`?game_id=…`). It returns whoever is
+// live in a category, and right now that includes a 24/7 REPLAY loop — an UNVETTED
+// channel is exactly the retrospective false positive the evaluator's negative
+// vocabulary exists to veto, so this module only ever asks about the vetted roster.
+
+/**
+ * Whether the Twitch platform can be polled at all. Both halves are required: a
+ * client id with no secret cannot mint an app token.
+ */
+export function twitchReady() {
+  return Boolean((process.env.TWITCH_CLIENT_ID || '').trim())
+    && Boolean((process.env.TWITCH_CLIENT_SECRET || '').trim());
+}
+
+/**
+ * Split a roster by PLATFORM.
+ *
+ * `platform` is OPTIONAL and absent means 'youtube', so every entry written before
+ * Twitch existed keeps working untouched. A youtube entry carries `channelId`; a
+ * twitch entry carries `login`. An entry missing its platform's identifier is
+ * dropped here rather than half-fetched downstream.
+ *
+ * @param {Array<object>} orgs
+ * @returns {{youtube: object[], twitch: object[]}}
+ */
+export function partitionSources(orgs) {
+  const youtube = [];
+  const twitch = [];
+  for (const org of Array.isArray(orgs) ? orgs : []) {
+    if (!org?.id) continue;
+    if (org.platform === 'twitch') {
+      if (typeof org.login === 'string' && org.login.trim()) twitch.push(org);
+    } else if (org.channelId) youtube.push(org);
+  }
+  return { youtube, twitch };
+}
+
+/**
+ * Chase vocabulary for TAGS — strong, weak AND negative together. The negative half
+ * is in here on purpose: see foldTwitchTags.
+ */
+const TAG_RE = vocabRe([
+  ...(config.chase.strongVocab || []),
+  ...(config.chase.weakVocab || []),
+  ...(config.chase.negativeVocab || []),
+]);
+
+/**
+ * `PoliceChase` → `Police Chase`, `LAPDPursuit` → `LAPD Pursuit`, `police_chase` →
+ * `police chase`. A Twitch tag is ONE token with no separators, so `\bchase\b` cannot
+ * see the word inside it — the vocabulary only matches once the token is split.
+ */
+function splitTagWords(tag) {
+  return String(tag ?? '')
+    .replace(/[_-]+/g, ' ')
+    .replace(/([a-z\d])([A-Z])/g, '$1 $2')
+    .replace(/([A-Z]+)([A-Z][a-z])/g, '$1 $2')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
+/**
+ * Fold a stream's matching TAGS into its title.
+ *
+ * Twitch tags are STRUCTURED where a title is prose — a channel carries `Pursuit` or
+ * `PoliceChase` as first-class metadata rather than hoping the operator typed the
+ * word. The evaluator reads `title` and nothing else, so the useful tags are folded
+ * into the title string HERE and the scoring model needs no change at all.
+ *
+ * Only tags that match the chase vocabulary are folded — including the NEGATIVE
+ * vocabulary, deliberately. A `Replay` / `Rerun` tag is precisely the veto the
+ * evaluator needs against the 24/7 replay loops that live in this category, and
+ * dropping it would discard the one structured marker that identifies them. Anything
+ * else (`LosAngeles`, `English`) is noise and is left out, so a recorded sample stays
+ * readable; a tag whose words the title already says is skipped rather than doubled.
+ *
+ * @param {string} title @param {unknown} tags @returns {string}
+ */
+export function foldTwitchTags(title, tags) {
+  const base = String(title ?? '').trim();
+  if (!Array.isArray(tags)) return base;
+  const seen = new Set();
+  const extra = [];
+  for (const tag of tags) {
+    const words = splitTagWords(tag);
+    if (!words || !TAG_RE.test(words)) continue;
+    const key = words.toLowerCase();
+    if (seen.has(key)) continue;
+    seen.add(key);
+    if (base.toLowerCase().includes(key)) continue; // the title already says it
+    extra.push(words);
+  }
+  // ' · ' and not ' ': a non-word separator cannot accidentally weld two words into
+  // one that the vocabulary would then fail (or falsely) match.
+  return [base, ...extra].filter(Boolean).join(' · ');
+}
+
+/**
+ * A `/helix/streams` response → StreamSample[].
+ *
+ * OFFLINE IS AN ABSENCE. Twitch answers with only the channels that are live, so a
+ * roster login missing from `data` is not live. It still yields a sample, with
+ * `live: false` — omitting it would mean the evaluator never sees a stream STOP, and
+ * a stream it never sees stop is one it never drops from its state. There is no
+ * stream id for an offline channel, so a stable `tw:<login>` stands in: a live
+ * broadcast is keyed by its real (and per-broadcast) Twitch stream id, and the two
+ * deliberately do not collide.
+ *
+ * That split costs nothing, because liveness here is keyed on `started_at` — what
+ * Twitch says about the BROADCAST — and not on a witnessed off→on transition of one
+ * id, exactly as the YouTube path keys on `actualStartTime`.
+ *
+ * A row for a login we do not track is dropped: an unattributable stream cannot
+ * score for any org.
+ *
+ * @param {any} json
+ * @param {Map<string, any>|Record<string, any>} orgByLogin - lowercased login -> org
+ * @param {number} [now] - stamped onto every sample; injectable for tests
+ * @returns {StreamSample[]}
+ */
+export function parseTwitchStreams(json, orgByLogin, now = Date.now()) {
+  const pairs = orgByLogin instanceof Map
+    ? [...orgByLogin.entries()]
+    : Object.entries(orgByLogin || {});
+  const byLogin = new Map(
+    pairs.filter(([, org]) => org).map(([login, org]) => [String(login).trim().toLowerCase(), org]),
+  );
+  const idOf = (org) => (typeof org === 'string' ? org : String(org?.id ?? ''));
+  const classOf = (org) => (typeof org === 'string' ? 'newscast' : org?.streamClass || 'newscast');
+
+  const rows = Array.isArray(json?.data) ? json.data : [];
+  const out = [];
+  const live = new Set();
+  for (const row of rows) {
+    const login = String(row?.user_login ?? '').trim().toLowerCase();
+    const org = byLogin.get(login);
+    const streamId = String(row?.id ?? '').trim();
+    if (!org || !streamId || live.has(login)) continue;
+    live.add(login);
+
+    const startedAt = Date.parse(String(row?.started_at ?? ''));
+    const viewers = Number.parseInt(row?.viewer_count, 10);
+    out.push({
+      org: idOf(org),
+      videoId: streamId,
+      streamClass: classOf(org),
+      live: true,
+      title: foldTwitchTags(row?.title, row?.tags),
+      // Twitch always reports a count, so `null` here means the field was missing or
+      // garbled — never 0, which would enter the trailing median as a real reading.
+      viewers: Number.isFinite(viewers) ? viewers : null,
+      startedAt: Number.isFinite(startedAt) ? startedAt : null,
+      at: now,
+      url: `${TWITCH_CHANNEL_URL}${login}`,
+    });
+  }
+
+  for (const [login, org] of byLogin) {
+    if (live.has(login)) continue;
+    out.push({
+      org: idOf(org),
+      videoId: `tw:${login}`,
+      streamClass: classOf(org),
+      live: false,
+      title: '',
+      viewers: null,
+      startedAt: null,
+      at: now,
+      url: `${TWITCH_CHANNEL_URL}${login}`,
+    });
+  }
+  return out;
+}
+
+/**
+ * The cached app access token, minted on demand. Returns `null` rather than throwing
+ * when the exchange fails — the caller then records nothing for this tick, which is
+ * the only honest thing to do: "we could not ask" is not "nobody is live".
+ */
+async function twitchAppToken(logger) {
+  const now = Date.now();
+  if (twitchToken && twitchToken.expiresAt - TOKEN_SKEW_MS > now) return twitchToken.token;
+
+  // The secret goes in the BODY, never the query string: a URL is what ends up in
+  // an undici error message, in a proxy log and in a redirect header.
+  const body = new URLSearchParams({
+    client_id: (process.env.TWITCH_CLIENT_ID || '').trim(),
+    client_secret: (process.env.TWITCH_CLIENT_SECRET || '').trim(),
+    grant_type: 'client_credentials',
+  }).toString();
+
+  const res = await http(TWITCH_TOKEN_URL, {
+    method: 'POST',
+    headers: { 'content-type': 'application/x-www-form-urlencoded', accept: 'application/json' },
+    body,
+    signal: AbortSignal.timeout(HTTP_TIMEOUT_MS),
+  });
+  if (!res?.ok) {
+    // A 400/403 here is bad credentials — an operator problem, and never chat's.
+    logger?.warn?.('chase: twitch app token rejected', { status: res?.status ?? 0 });
+    return null;
+  }
+  const json = await res.json();
+  const token = typeof json?.access_token === 'string' ? json.access_token.trim() : '';
+  if (!token) {
+    logger?.warn?.('chase: twitch app token response carried no token');
+    return null;
+  }
+  const ttl = Number(json?.expires_in);
+  twitchToken = {
+    token,
+    // A missing `expires_in` is treated as an HOUR, not as forever: the cost of
+    // re-minting too often is one extra request, and the cost of caching a dead
+    // token is a blind platform.
+    expiresAt: now + (Number.isFinite(ttl) && ttl > 0 ? ttl * 1000 : 60 * 60_000),
+  };
+  return token;
+}
+
+/**
+ * Every Twitch source's live state, in ONE call and for ONE point.
+ *
+ * Like everything else in this module it NEVER throws and never partially reports a
+ * failure as fact: a rejected call, a dead network or missing credentials all return
+ * `[]`, which the evaluator reads as "no observation", NOT as "not live". Only a
+ * response that actually came back produces the `live: false` samples that retire a
+ * stream (see parseTwitchStreams).
+ *
+ * @param {Array<{id: string, login: string, platform?: string, streamClass?: string}>} orgs
+ * @param {any} [logger]
+ * @param {number} [now]
+ * @returns {Promise<StreamSample[]>}
+ */
+export async function fetchTwitchSamples(orgs, logger = console, now = Date.now()) {
+  try {
+    let { twitch } = partitionSources(orgs);
+    if (!twitch.length) return []; // no Twitch sources -> no request, no token, no cost
+    if (!twitchReady()) {
+      if (!loggedNoTwitch) {
+        loggedNoTwitch = true;
+        logger?.info?.('chase: no TWITCH_CLIENT_ID/TWITCH_CLIENT_SECRET — the twitch sources are not polled');
+      }
+      return [];
+    }
+    if (twitch.length > MAX_LOGINS) {
+      // One call is the whole point. A roster this big is an upstream problem.
+      logger?.warn?.('chase: more twitch sources than one helix/streams call holds', { logins: twitch.length });
+      twitch = twitch.slice(0, MAX_LOGINS);
+    }
+
+    const byLogin = new Map(twitch.map((o) => [String(o.login).trim().toLowerCase(), o]));
+    const qs = new URLSearchParams();
+    for (const login of byLogin.keys()) qs.append('user_login', login);
+    const url = `${TWITCH_STREAMS_URL}?${qs}`;
+
+    // Exactly one retry, and only on 401. An app token lasts ~60 days, so the only
+    // way a cached one stops working is that it was revoked or rotated out from
+    // under us — which a fresh mint fixes, and which retrying on any other status
+    // would not.
+    for (let attempt = 0; attempt < 2; attempt += 1) {
+      const token = await twitchAppToken(logger);
+      if (!token) return [];
+      const res = await http(url, {
+        headers: {
+          'Client-Id': (process.env.TWITCH_CLIENT_ID || '').trim(),
+          Authorization: `Bearer ${token}`,
+          accept: 'application/json',
+        },
+        signal: AbortSignal.timeout(HTTP_TIMEOUT_MS),
+      });
+      if (res?.status === 401 && attempt === 0) {
+        twitchToken = null;
+        continue;
+      }
+      if (!res?.ok) {
+        logger?.warn?.('chase: helix/streams rejected', { status: res?.status ?? 0, logins: byLogin.size });
+        return [];
+      }
+      return parseTwitchStreams(await res.json(), byLogin, now);
+    }
+    return [];
+  } catch (err) {
+    logger?.warn?.('chase: helix/streams unreachable', { err: redact(err?.message || err) });
+    return [];
+  }
 }

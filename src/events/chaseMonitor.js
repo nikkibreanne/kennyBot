@@ -1,9 +1,18 @@
 // LA chase monitor tick (docs/chase-monitor-design.md §3). Two loops on two
-// clocks: a fast videos.list poll — 1 YouTube quota unit, and the actual
+// clocks: a fast poll — 1 YouTube quota unit plus 1 Twitch point, and the actual
 // detector — and a slow, free RSS sweep whose only job is noticing that a NEW
 // broadcast object exists. All of the judgement lives in the pure evaluator
 // (src/rules/chase.js); this file supplies the clock, the network, the writes
 // and the one call to chat.
+//
+// The roster spans TWO PLATFORMS and they are scheduled differently, because they
+// cost differently. YouTube is rationed — RSS discovery on the slow clock, a paid
+// search behind a cooldown and a daily cap, a sticky set so a stream found once is
+// never paid for again. Twitch needs none of that: one call covers every Twitch
+// source for one point against 800 per MINUTE, so it simply runs on every tick with
+// no discovery loop at all. Everything YouTube-shaped below therefore operates on
+// the YOUTUBE half of the roster only — the budget arithmetic is wrong otherwise,
+// since it would reserve units for orgs that are never searched.
 //
 // Four invariants, in the order they matter:
 //   * a tick NEVER throws — a monitor failure must not reach chat and must not
@@ -16,7 +25,10 @@
 //     the pure evaluator built; API errors, keys and quota state go to the log.
 import { config } from '../config.js';
 import { evaluateChase } from '../rules/chase.js';
-import { fetchLiveSamples, discoverVideoIds, findLiveVideos, fetchArticles, youtubeKeyPresent, SEARCH_UNITS } from '../integrations/chaseSources.js';
+import {
+  fetchLiveSamples, discoverVideoIds, findLiveVideos, fetchArticles, fetchTwitchSamples,
+  partitionSources, youtubeKeyPresent, twitchReady, SEARCH_UNITS,
+} from '../integrations/chaseSources.js';
 import { getChaseSettings, loadMonitorState, saveMonitorState, logShadowAnnouncement } from '../db/chaseMonitor.js';
 
 /**
@@ -71,7 +83,11 @@ export function startChaseMonitor({ send, logger = console }) {
       const settings = await getChaseSettings();
       if (!settings.enabled) return; // off means no traffic at all, free or not
       if (!settings.orgs?.length) return noSources();
-      const found = await discoverVideoIds(settings.orgs, logger);
+      // Discovery is a YOUTUBE problem. A Twitch source is polled by login on every
+      // tick, so it is never discovered, never searched and never sticky.
+      const { youtube: ytOrgs } = partitionSources(settings.orgs);
+      if (!ytOrgs.length) return;
+      const found = await discoverVideoIds(ytOrgs, logger);
       // MERGED per org, not replaced: an org whose feed failed is absent from the
       // result rather than empty, so merging keeps that org's last good ids
       // instead of forgetting a live stream because one request timed out.
@@ -92,7 +108,7 @@ export function startChaseMonitor({ send, logger = console }) {
       if (searchDay !== today) { searchDay = today; searchUnitsToday = 0; }
       const unitCap = Math.max(0, Number(settings.searchDailyUnitCap) || 5000);
       const affordable = Math.max(0, Math.floor((unitCap - searchUnitsToday) / SEARCH_UNITS));
-      const askable = settings.orgs
+      const askable = ytOrgs
         .filter((o) => !liveVideoIds[o.id] && (rssBlind || now - (lastSearchAt[o.id] || 0) >= cooldown))
         .slice(0, affordable); // the day's budget is a hard stop, not a warning
       if (askable.length) {
@@ -119,30 +135,40 @@ export function startChaseMonitor({ send, logger = console }) {
       if (!settings.enabled) return; // the kill switch, honoured BEFORE any spend
       if (!settings.orgs?.length) return noSources(); // no roster → nothing to ask about
 
-      // Articles are a second, independent newsroom system and a dead feed must
-      // not delay the detector, so both are in flight at once. Neither fetcher
-      // throws — they return partial results and log.
+      // Three independent systems, so all three are in flight at once and a dead one
+      // cannot delay the detector. None of the fetchers throws — they return partial
+      // results and log.
       // Sticky live ids FIRST — they are the only ids that can actually score — then
       // the RSS candidates fill whatever is left of the one billed call.
+      const { youtube: ytOrgs, twitch: twOrgs } = partitionSources(settings.orgs);
       const ids = [...new Set([...Object.values(liveVideoIds), ...Object.values(knownVideoIds).flat()])];
-      const [samples, articles] = await Promise.all([
-        fetchLiveSamples(settings.orgs, ids, logger),
+      const [ytSamples, twSamples, articles] = await Promise.all([
+        fetchLiveSamples(ytOrgs, ids, logger),
+        fetchTwitchSamples(twOrgs, logger),
         fetchArticles(settings.orgs, logger),
       ]);
 
+      // The sticky set is YOUTUBE-only state: it exists to avoid paying 100 units to
+      // re-find a stream. Twitch samples must stay out of it, or a Twitch stream id
+      // would be posted to videos.list and a Twitch org would consume a YouTube
+      // search slot it can never use.
       // A stream that stopped must leave the sticky set, or the next search for that
       // org never happens and a NEW broadcast is never found.
-      for (const s2 of samples || []) {
+      for (const s2 of ytSamples || []) {
         if (liveVideoIds[s2.org] === s2.videoId && !s2.live) {
           delete liveVideoIds[s2.org];
           logger.info?.('chase: live stream ended', { org: s2.org });
         }
       }
-      for (const s2 of samples || []) if (s2.live) liveVideoIds[s2.org] = s2.videoId;
+      for (const s2 of ytSamples || []) if (s2.live) liveVideoIds[s2.org] = s2.videoId;
+
+      // One flat list from here on: the evaluator scores a TICK, and which platform
+      // an observation came from is not something it needs to know.
+      const samples = [...(ytSamples || []), ...(twSamples || [])];
 
       const state = await loadMonitorState();
       const result = evaluateChase({
-        samples: samples || [],
+        samples,
         articles: articles || [],
         state,
         now: Date.now(),
@@ -190,7 +216,9 @@ export function startChaseMonitor({ send, logger = console }) {
 
   // A boolean, never the key. Which evidence channels are even possible depends
   // on this, so an operator reading the log should not have to guess.
-  logger.info?.('chase monitor started', { pollMs, discoveryMs, youtubeKey: youtubeKeyPresent() });
+  logger.info?.('chase monitor started', {
+    pollMs, discoveryMs, youtubeKey: youtubeKeyPresent(), twitch: twitchReady(),
+  });
 
   return () => {
     stopped = true;

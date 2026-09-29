@@ -53,19 +53,28 @@
 // rebuilding that state out of the file would be reconstructing the one guard the
 // evaluator has against cold-start false positives.
 //
-// WITHOUT A YOUTUBE KEY this still runs, but it only records DISCOVERY — no stream
-// samples at all, because RSS cannot say whether a video is live. There is no keyless
-// way to read concurrent viewers, so the fast loop records nothing, the audience
-// channel — the only detector that works on a permanently-titled `chopper`-class cam
-// — is simply absent, and every score is 0. The heartbeat says so on every line
-// rather than looking healthy while collecting a fixture that proves nothing.
+// WITHOUT A YOUTUBE KEY this still runs, but it only records DISCOVERY from the
+// YouTube half — no stream samples from it at all, because RSS cannot say whether a
+// video is live. There is no keyless way to read concurrent viewers, so that loop
+// records nothing, the audience channel — the only detector that works on a
+// permanently-titled `chopper`-class cam — is absent for those sources, and they
+// score 0. The heartbeat says so on every line rather than looking healthy while
+// collecting a fixture that proves nothing.
+//
+// The TWITCH half is independent of all that. It needs no YouTube key (it uses the
+// credentials the bot already has), it has no discovery loop, and one call covers
+// every Twitch source for one point against 800 per MINUTE — so it is polled on
+// every tick and its samples are appended to the same `poll` line. `session` and
+// `health` lines carry a `twitch` boolean so a reader can tell a run that had those
+// credentials from one that did not.
 import 'dotenv/config';
 import { createWriteStream, mkdirSync, readFileSync, statSync } from 'node:fs';
 import { dirname, extname, join, sep } from 'node:path';
 import { config } from '../src/config.js';
 import { evaluateChase } from '../src/rules/chase.js';
 import {
-  fetchLiveSamples, discoverVideoIds, findLiveVideos, fetchArticles, youtubeKeyPresent, SEARCH_UNITS,
+  fetchLiveSamples, discoverVideoIds, findLiveVideos, fetchArticles, fetchTwitchSamples,
+  partitionSources, youtubeKeyPresent, twitchReady, SEARCH_UNITS,
 } from '../src/integrations/chaseSources.js';
 
 if (process.argv.includes('--help') || process.argv.includes('-h')) {
@@ -135,7 +144,10 @@ function loadSources() {
   if (chase.orgs.length) return chase.orgs; // a caller that populated config wins
   try {
     const parsed = JSON.parse(readFileSync(SOURCES_FILE, 'utf8'));
-    return Array.isArray(parsed) ? parsed.filter((o) => o?.id && o?.channelId) : [];
+    // A youtube entry identifies itself with `channelId`, a twitch one with `login`.
+    // `platform` is optional and absent means youtube, so entries written before
+    // Twitch existed load unchanged.
+    return Array.isArray(parsed) ? parsed.filter((o) => o?.id && (o.channelId || o.login)) : [];
   } catch {
     return [];
   }
@@ -150,6 +162,14 @@ if (!orgs.length) {
 
 /** What the evaluator is given: the shipped settings, with the private roster layered on. */
 const cfg = { ...chase, orgs };
+
+/**
+ * Split once. Everything YouTube-shaped — RSS discovery, the paid search, the sticky
+ * set, the quota arithmetic — must see the YOUTUBE half only, or it reserves units
+ * for sources it can never spend them on. Twitch needs none of that machinery: one
+ * call, one point, every tick.
+ */
+const { youtube: ytOrgs, twitch: twOrgs } = partitionSources(orgs);
 
 /**
  * An org's DISPLAY NAME is the one roster field that reaches an announcement, and
@@ -303,8 +323,12 @@ let rssBlind = false;
 const quotaDay = () => new Intl.DateTimeFormat('en-CA', { timeZone: 'America/Los_Angeles' }).format(new Date());
 
 async function discover() {
+  if (!ytOrgs.length) { // a twitch-only roster has nothing to discover
+    try { articles = (await fetchArticles(orgs, log)) || []; } catch (err) { fetchFailures += 1; log.error('article sweep failed', { err: err?.message }); }
+    return;
+  }
   try {
-    const byOrg = await discoverVideoIds(orgs, log);
+    const byOrg = await discoverVideoIds(ytOrgs, log);
     // A sweep that returned NOTHING means the free path is blind (YouTube's RSS edge
     // throttles with a 404, observed for ~20 minutes). That is exactly when the paid
     // search stops being a backstop and becomes the only way to notice a new
@@ -326,7 +350,7 @@ async function discover() {
     const today = quotaDay();
     if (searchDay !== today) { searchDay = today; searchUnits = 0; }
     const affordable = Math.max(0, Math.floor((chase.searchDailyUnitCap - searchUnits) / SEARCH_UNITS));
-    const askable = orgs
+    const askable = ytOrgs
       .filter((o) => !liveByOrg[o.id] && (rssBlind || now - (lastSearchAt[o.id] || 0) >= chase.searchCooldownMs))
       .slice(0, affordable);
     if (askable.length) {
@@ -371,7 +395,8 @@ async function poll() {
   polling = true;
   tick += 1;
   const at = Date.now();
-  let samples = [];
+  let ytSamples = [];
+  let twSamples = [];
   let threw = false;
   pollTroubled = false;
 
@@ -380,8 +405,13 @@ async function poll() {
     // discovered yet, it spends no quota, so neither does this counter.
     const billed = youtubeKeyPresent() && known.length > 0;
     if (billed) quotaUnits += 1;
+    // Both platforms at once. Neither fetcher throws, so a failure of one degrades
+    // that platform's samples to [] and leaves the other's intact.
     try {
-      samples = (await fetchLiveSamples(orgs, known, pollLog)) || [];
+      [ytSamples, twSamples] = await Promise.all([
+        fetchLiveSamples(ytOrgs, known, pollLog).then((r) => r || []),
+        fetchTwitchSamples(twOrgs, pollLog).then((r) => r || []),
+      ]);
     } catch (err) {
       // A dead fetch is data too — record the empty tick so a gap in the timeline
       // is visible as a gap rather than as a quiet stretch.
@@ -390,14 +420,21 @@ async function poll() {
       pollLog.error('sample fetch failed', { err: err?.message });
     }
     // Keep the sticky set honest: a stream that ENDED must be dropped, or that org is
-    // never searched again and its next broadcast is never found.
-    for (const s of samples) {
+    // never searched again and its next broadcast is never found. YOUTUBE ONLY — the
+    // sticky set exists to avoid re-paying 100 units, and Twitch costs nothing to
+    // re-ask; putting a Twitch stream id in here would post it to videos.list and
+    // burn a search slot on an org that is never searched.
+    for (const s of ytSamples) {
       if (liveByOrg[s.org] === s.videoId && !s.live) {
         delete liveByOrg[s.org];
         console.log(`${clock()}  ${s.org} stream ended — will search again`);
       }
     }
-    for (const s of samples) if (s.live) liveByOrg[s.org] = s.videoId;
+    for (const s of ytSamples) if (s.live) liveByOrg[s.org] = s.videoId;
+
+    // One flat list from here on: the evaluator scores a TICK, and which platform an
+    // observation came from is not something it needs to know.
+    const samples = [...ytSamples, ...twSamples];
 
     // UNCHANGED, and first: this line is the evidence. Everything below it is an
     // opinion about the evidence, and opinions get re-derived from a replay.
@@ -466,7 +503,11 @@ async function poll() {
       .filter((s) => Number.isFinite(s.viewers))
       .map((s) => `${s.org} ${short(s.viewers)}`)
       .join(' · ');
-    const audience = youtubeKeyPresent() ? seen || 'no viewer counts' : 'NO KEY — discovery only, no samples';
+    // With no YouTube key there are no YouTube samples at all, which is worth saying
+    // out loud — but only while that is the whole story. A twitch source still
+    // reports viewers without it, so the notice yields to real readings.
+    const audience = seen
+      || (!youtubeKeyPresent() && ytOrgs.length ? 'NO YOUTUBE KEY — discovery only for those sources' : 'no viewer counts');
     console.log(
       `${clock()}  poll #${String(tick).padStart(4)}  ` +
       `${String(live.length).padStart(2)}/${String(samples.length).padStart(2)} live  ` +
@@ -488,6 +529,7 @@ function health() {
     fetchFailures,
     liveStreams,
     quotaUnits,
+    twitch: twitchReady(),
   });
   console.log(
     `${clock()}  health  ${tick} polls · ${emptyPolls} empty · ${fetchFailures} fetch failures · `
@@ -498,10 +540,13 @@ function health() {
 async function main() {
   console.log(`  recording to ${DIR_MODE ? `${join(TARGET, 'chase-<YYYY-MM-DD>.jsonl')} (rolls at local midnight)` : TARGET}`);
   const every = (ms) => (ms < 60_000 ? `${Math.round(ms / 1000)}s` : `${Math.round(ms / 60_000)}m`);
-  console.log(`  fast loop ${every(POLL_MS)} · discovery ${every(DISCOVERY_MS)} · health ${every(HEALTH_MS)} · ${orgs.length} orgs`);
-  if (!youtubeKeyPresent()) {
-    console.log('  ⚠ no YOUTUBE_API_KEY — DISCOVERY ONLY. No stream samples will be recorded at all:');
-    console.log('    RSS lists videos but never says which are live, so there is nothing to score.');
+  console.log(`  fast loop ${every(POLL_MS)} · discovery ${every(DISCOVERY_MS)} · health ${every(HEALTH_MS)} · ${orgs.length} orgs (${ytOrgs.length} youtube · ${twOrgs.length} twitch)`);
+  if (!youtubeKeyPresent() && ytOrgs.length) {
+    console.log('  ⚠ no YOUTUBE_API_KEY — DISCOVERY ONLY for the youtube sources. No stream samples');
+    console.log('    from them: RSS lists videos but never says which are live, so there is nothing to score.');
+  }
+  if (!twitchReady() && twOrgs.length) {
+    console.log('  ⚠ no TWITCH_CLIENT_ID/TWITCH_CLIENT_SECRET — the twitch sources will not be polled.');
   }
   console.log('  ctrl-c to stop. This scores but NEVER posts anywhere.\n');
 
@@ -514,7 +559,10 @@ async function main() {
     pollMs: POLL_MS,
     discoveryMs: DISCOVERY_MS,
     orgs: orgs.length,
+    youtubeOrgs: ytOrgs.length,
+    twitchOrgs: twOrgs.length,
     key: youtubeKeyPresent(), // a boolean, never the key
+    twitch: twitchReady(), // likewise — whether the credentials existed, never them
     pid: process.pid,
   });
 

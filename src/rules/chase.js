@@ -36,6 +36,7 @@ import { config } from '../config.js';
 
 const MIN_MS = 60_000;
 const HOUR_MS = 60 * MIN_MS;
+// Fallback only. A sample that knows its own url (any non-YouTube platform) wins.
 const WATCH_URL = 'https://www.youtube.com/watch?v=';
 
 // Windows the design fixes (§2.4) but config.js carries no knob for.
@@ -289,7 +290,11 @@ export function evaluateChase({ samples = [], articles = [], state = null, now =
       seenAt: at,
       org: orgId, // so a NEW stream can be told apart from a cold start (see newBroadcast)
     };
-    evidence.push({ orgId, videoId, title, live, negative, titleScore, audienceScore, livenessScore, viewers });
+    // A source carries its own watch url when its platform is not YouTube. Building
+    // one from the videoId only works for YouTube; for anything else it produces a
+    // DEAD LINK, and the link is the entire payload of the announcement.
+    const url = typeof raw?.url === 'string' && raw.url ? raw.url : '';
+    evidence.push({ orgId, videoId, url, title, live, negative, titleScore, audienceScore, livenessScore, viewers });
   }
 
   for (const [videoId, viewers] of readings) {
@@ -351,7 +356,7 @@ export function evaluateChase({ samples = [], articles = [], state = null, now =
     || a.videoId.localeCompare(b.videoId));
   const top = candidates[0] || null;
   const bestStream = top
-    ? { org: top.orgId, videoId: top.videoId, url: `${WATCH_URL}${top.videoId}`, title: top.title }
+    ? { org: top.orgId, videoId: top.videoId, url: top.url || `${WATCH_URL}${top.videoId}`, title: top.title }
     : null;
 
   // ── incident lifecycle ─────────────────────────────────────────────────────

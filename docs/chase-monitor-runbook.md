@@ -128,7 +128,7 @@ Six sections. What each is actually for:
 | **Coverage** | Did it actually run? | Anything under ~95% — find the gap and re-run. Nothing below is trustworthy until this is clean. |
 | **Source health** | Is every source pulling its weight? | A source never seen live, or never returning viewers, is a broken roster row — not a quiet source. |
 | **Score distribution** | Is it awake at all? | All-zero scores means detection never engaged; suspect the key or the roster before touching weights. |
-| **Incidents** | Would it have announced? | Compare against ~3–5 covered LA chases/week. Far more = false positives. Far fewer = misses. |
+| **Incidents** | Would it have announced? | Compare against the **measured** ~1.6 covered LA chases/week (`chase:backtest` prints it). Far more = false positives. Far fewer = misses. |
 | **Near misses** | Where is recall being lost? | Grouped by the missing evidence channel — the most actionable output in the report. |
 | **What-if sweep** | What should the settings be? | Re-runs the **real** evaluator over the recorded samples at a grid of thresholds and dwells. |
 
@@ -142,6 +142,14 @@ announced, and that text contains the source's on-air name — because the live 
 resolved it from the loaded roster when it recorded the line. The logs live under
 `.workspace/` and are gitignored for that reason. Don't paste raw report output into
 anything public; `--json` output has the same property.
+
+**Backtest first, it is same-day.** `npm run chase:backtest` reconstructs past
+broadcasts from both platforms' VOD metadata and replays them through the real
+evaluator, so a weight change can be judged immediately instead of after a fortnight.
+Its limits are real and printed in its own output — no historical viewer counts, so the
+`audience` channel is untested; VOD titles are often renamed after the fact, which
+inflates recall; and deleted VODs remove events entirely (coverage decays ~100% / 57% /
+28% across the last 30 / 60 / 120 days).
 
 **Ground truth.** The report can say how often it fired; it cannot say whether those
 were real chases. For that, check the incidents against a published chase feed over the

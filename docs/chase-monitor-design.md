@@ -88,7 +88,11 @@ Two things fall out of this:
 2. **The tense is retrospective** — "in custody after", "ends in". These articles
    land *after* the chase. This feed cannot trigger anything. Its real value is §5.
 
-~19 items over ~1 month ⇒ a base rate of roughly **3–5 covered chases per week**.
+~19 items over ~1 month suggested roughly 3–5 covered chases per week. **That estimate
+was too high.** Measured properly against 120 days of the same feed: **28 published
+chases = ~1.6 per week.** The number matters because it is the yardstick the report
+judges the firing rate against — at 3–5, a correctly-behaving monitor gets told it is
+firing too rarely. `npm run chase:backtest` re-measures it.
 That sets the expected announcement volume, and it is small enough that a few false
 positives per month would be very visible.
 

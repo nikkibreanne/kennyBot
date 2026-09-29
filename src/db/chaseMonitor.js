@@ -69,11 +69,18 @@ function normalizeOrg(raw) {
   if (!raw || typeof raw !== 'object') return null;
   const id = String(raw.id ?? '').trim();
   const channelId = String(raw.channelId ?? '').trim();
-  if (!id || !channelId) return null;
+  const login = String(raw.login ?? '').trim();
+  // Two platforms, two identifiers. YouTube is the default so every existing roster
+  // entry keeps working untouched; a twitch entry is keyed by login instead and has no
+  // channelId at all — requiring one silently dropped every twitch source on load.
+  const platform = raw.platform === 'twitch' ? 'twitch' : 'youtube';
+  if (!id || (platform === 'twitch' ? !login : !channelId)) return null;
   const streamClass = ['chopper', 'newscast', 'episodic'].includes(raw.streamClass)
     ? raw.streamClass
     : 'newscast'; // a missing class must LOSE a signal (L1), never invent one
-  const org = { id, name: String(raw.name ?? id), channelId, streamClass };
+  const org = platform === 'twitch'
+    ? { id, name: String(raw.name ?? id), platform, login, streamClass }
+    : { id, name: String(raw.name ?? id), channelId, streamClass };
   if (typeof raw.articleFeed === 'string' && raw.articleFeed) org.articleFeed = raw.articleFeed;
   if (Number.isFinite(Number(raw.groupCap))) org.groupCap = Number(raw.groupCap);
   return org;
@@ -85,7 +92,7 @@ function normalizeOrg(raw) {
  */
 export async function setChaseSources(orgs) {
   const clean = (Array.isArray(orgs) ? orgs : []).map(normalizeOrg).filter(Boolean);
-  if (!clean.length) throw new Error('no usable sources — each needs at least id and channelId');
+  if (!clean.length) throw new Error('no usable sources — each needs an id plus a channelId (youtube) or login (twitch)');
   const seen = new Set();
   for (const o of clean) {
     if (seen.has(o.id)) throw new Error(`duplicate source id: ${o.id}`);
