@@ -1,5 +1,39 @@
 # Changelog
 
+## [0.15.0](https://github.com/nikkibreanne/kennyBot/compare/kennybot-v0.14.0...kennybot-v0.15.0) (2026-08-26)
+
+
+### Features
+
+* **raid:** make a season rollover an actual prestige ([#80](https://github.com/nikkibreanne/kennyBot/issues/80)) ([08525d2](https://github.com/nikkibreanne/kennyBot/commit/08525d2e720be4860f6ca5a02d8eaf4b919a153c))
+
+## [0.14.0](https://github.com/nikkibreanne/kennyBot/compare/kennybot-v0.13.0...kennybot-v0.14.0) (2026-08-26)
+
+
+### Features
+
+* **raid:** !season next, and one home for the item catalog ([#78](https://github.com/nikkibreanne/kennyBot/issues/78)) ([707bd89](https://github.com/nikkibreanne/kennyBot/commit/707bd8962c4533136d733bd189a3d3c7f85969a8))
+
+## [0.13.0](https://github.com/nikkibreanne/kennyBot/compare/kennybot-v0.12.0...kennybot-v0.13.0) (2026-08-25)
+
+
+### Features
+
+* **items:** fill every season out to a full rarity pyramid (72 -&gt; 699 items) ([#75](https://github.com/nikkibreanne/kennyBot/issues/75)) ([b6d5088](https://github.com/nikkibreanne/kennyBot/commit/b6d5088e350394682bc09859da575cfb25a94548))
+* **raid:** role-lock gear, pay one reward per clear, and say what happened ([#76](https://github.com/nikkibreanne/kennyBot/issues/76)) ([578627d](https://github.com/nikkibreanne/kennyBot/commit/578627dd078403568a44a206e9b55e5a75fe905f))
+
+
+### Bug Fixes
+
+* **raid:** end seasons at the finale, earn prestige, and fix loot payout ([#74](https://github.com/nikkibreanne/kennyBot/issues/74)) ([50d5a0d](https://github.com/nikkibreanne/kennyBot/commit/50d5a0dc12988736e17ce374b086fb0eb73ba1e4))
+
+## [0.12.0](https://github.com/nikkibreanne/kennyBot/compare/kennybot-v0.11.2...kennybot-v0.12.0) (2026-08-15)
+
+
+### Features
+
+* subathon shadow ledger with an operator CLI ([#70](https://github.com/nikkibreanne/kennyBot/issues/70)) ([eeaaa8b](https://github.com/nikkibreanne/kennyBot/commit/eeaaa8b3c025c0111d9be4e11726c11f39e4114c))
+
 ## [0.11.2](https://github.com/nikkibreanne/kennyBot/compare/kennybot-v0.11.1...kennybot-v0.11.2) (2026-08-10)
 
 

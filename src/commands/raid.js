@@ -57,10 +57,13 @@ export default {
     await enlist({ seasonId, weekId, userId: user.id, player });
     const when = whenHtmlSafe(pointer.startsAt);
     const rec = boss.recommended ? ` ${boss.name} wants ~${boss.recommended} heroes —` : '';
+    // Say that enlistment lasts the SEASON. Players assumed it was weekly and
+    // silently dropped off the roster in their own heads (§5.3 — setupRaidWeek
+    // carries the roster forward; only a new season starts empty).
     reply(
       already
-        ? `@${user.displayName} your ${player.class} is mustered (updated).${rec} raid night in ${when} → ${config.siteUrl}/raid/`
-        : `@${user.displayName} ✅ mustered as ${player.class} (${player.role}, Lv ${player.level})!${rec} raid night in ${when} → ${config.siteUrl}/raid/`,
+        ? `@${user.displayName} your ${player.class} is already on the roster for the season (card updated).${rec} raid night in ${when} → ${config.siteUrl}/raid/`
+        : `@${user.displayName} ✅ enlisted as ${player.class} (${player.role}, Lv ${player.level}) — you're in for the WHOLE season, no need to re-muster each week.${rec} raid night in ${when} → ${config.siteUrl}/raid/`,
     );
   },
 };

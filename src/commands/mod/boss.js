@@ -1,8 +1,8 @@
 // !boss set <name> (mod) — schedule the next week's boss + muster (spec §5.8/§11).
 // Roster locks `lockLeadMs` before raid night; the battle then plays out
 // automatically (or force it early with !raidnight).
-import { setupRaidWeek, nextWeekId, computeNextRaidNight } from '../../db/raid.js';
-import { defaultBoss, seasonBoss } from '../../content/bosses.js';
+import { setupRaidWeek, nextWeekId, computeNextRaidNight, enlistmentGap } from '../../db/raid.js';
+import { defaultBoss, seasonBoss, weeksInSeason, SEASON_COUNT } from '../../content/bosses.js';
 import { getSeason, setSeason } from '../../db/configStore.js';
 import { SEASON_LOOT } from '../../content/items.js';
 import { config } from '../../config.js';
@@ -21,7 +21,14 @@ async function schedule(seasonId, weekId, boss, reply, lead) {
   await setupRaidWeek({ seasonId, weekId, boss, locksAt: startsAt - config.raid.lockLeadMs, startsAt });
   const when = new Date(startsAt).toLocaleString();
   const rec = boss.recommended ? ` · recommended ~${boss.recommended} heroes` : '';
-  reply(`📣 ${lead}: ${boss.name}${rec}. Raid night: ${when}. Players: !muster to join.`);
+  // Ride the announcement that already goes out rather than adding a recurring
+  // "hey muster" broadcast: turnout genuinely changes the outcome now (boss ATK
+  // scales with roster size), so it's worth one clause — and zero extra messages.
+  const gap = await enlistmentGap().catch(() => null);
+  const short = gap && gap.unenlisted > 0
+    ? ` ${gap.enlisted} enlisted, ${gap.unenlisted} hero${gap.unenlisted === 1 ? '' : 'es'} still out — a thin raid is a real chance of wiping.`
+    : '';
+  reply(`📣 ${lead}: ${boss.name}${rec}. Raid night: ${when}.${short} Players: !muster to join.`);
 }
 
 export default {
@@ -52,7 +59,24 @@ export default {
       }
       const weekId = await nextWeekId(season.id);
       const weekNum = parseInt(String(weekId).replace(/\D/g, ''), 10) || 1;
-      await schedule(season.id, weekId, seasonBoss(season.tier || 1, weekNum), reply, `Week ${weekNum}`);
+
+      // A season has a FIXED number of scripted bosses and ends on its finale.
+      // `seasonBoss` clamps an out-of-range week to that finale, so without this
+      // guard `!boss next` re-schedules the same finale every week forever — the
+      // season silently never ends. Stop and point at the rollover instead.
+      const tier = season.tier || 1;
+      const total = weeksInSeason(tier);
+      if (weekNum > total) {
+        const next = tier + 1;
+        const how = next <= SEASON_COUNT
+          ? 'Start the next tier: !season next'
+          : 'No further scripted tier exists — use !season start <id> or !boss set <name>.';
+        reply(`🏁 ${season.name || season.id} is complete — all ${total} bosses have been faced. ${how}`);
+        return;
+      }
+
+      const lead = weekNum === total ? `Week ${weekNum} FINALE` : `Week ${weekNum}`;
+      await schedule(season.id, weekId, seasonBoss(tier, weekNum), reply, lead);
       return;
     }
 

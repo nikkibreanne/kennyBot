@@ -32,6 +32,9 @@
     "polls": { ".read": true, ".write": true },
 
     "items": { ".read": true, ".write": false },
+    // Pending raid-reward notices, keyed by uid. Public-readable so the site can
+    // show "loot waiting" on a hero card; kennyBot alone writes and clears them.
+    "notices": { ".read": true, ".write": false },
     "drops": { ".read": true, ".write": false },
 
     // OKRA FACTS: approved facts are public-readable, Admin-write only (kennyBot
