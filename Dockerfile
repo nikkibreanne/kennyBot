@@ -36,6 +36,14 @@ COPY --from=build /app .
 # BEFORE dropping privileges, and default the store there. Mount it at runtime
 # (-v kennybot-tokens:/data) so refreshed tokens survive restarts.
 ENV TOKEN_STORE_DIR=/data
+# Where the chase monitor writes its own evidence (docs/chase-monitor-runbook.md). A
+# PATH, not a credential — same category as TOKEN_STORE_DIR above, and baked in here for
+# the same reason: /data is the only writable persistent path in this image (the
+# container runs --read-only as `node`, and /tmp is a tmpfs that evaporates on restart),
+# so there is exactly one correct value and nothing is gained by making an operator
+# retype it into an env file. Unset it at runtime (`-e CHASE_LOG_DIR=`) to turn file
+# logging off; the monitor itself is still gated behind config/chaseMonitor.
+ENV CHASE_LOG_DIR=/data/chase-logs
 RUN mkdir -p /data && chown node:node /data
 VOLUME /data
 
