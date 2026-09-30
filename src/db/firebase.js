@@ -101,6 +101,14 @@ export const PATHS = {
   reminders: () => 'config/reminders',
   reminder: (id) => `config/reminders/${id}`,
   reminderState: (id) => `config/reminders/${id}/state`,
+  // MEDIA SLOTS (`!media`): slot number → { input, scene?, action?, label? },
+  // the map from a number a mod types to a media source in OBS. Config, not a
+  // message channel — nothing is ever *sent* through here. It lives in RTDB for
+  // the same reason clipMode does: the names change whenever the streamer
+  // renames a source in OBS, and re-deploying a container to rename a sound is
+  // not a thing anyone does mid-stream.
+  mediaSlots: () => 'config/media',
+  mediaSlot: (n) => `config/media/${n}`,
   // SUBATHON: the clock (an absolute deadline, so a restart mid-event resumes
   // instead of losing hours) plus an APPEND-ONLY ledger of every credit. The
   // ledger is not bookkeeping decoration — it is how a long event gets
@@ -172,4 +180,18 @@ export const PATHS = {
   // CLIP SYNC (clapperboard): per-stream anchors for the okra-clip-archiver tool.
   clipSync: () => 'clipSync',
   clipSession: (id) => `clipSync/${id}`,
+  // LA CHASE MONITOR (docs/chase-monitor-design.md). The live-tunable knobs sit
+  // under config/ with the rest of the operator surface, seeded once from
+  // config.chase and thereafter owned by `!chasemon` — the clipMode precedent,
+  // and for the same reason: the threshold gets retuned against real data, and
+  // re-deploying to change a number is not a thing anyone does at 2am.
+  configChaseMonitor: () => 'config/chaseMonitor',
+  // The monitor's own subtree. `state` is the evaluator's carry-over — baselines
+  // plus the dwell/clear/cooldown counters that are the ONLY thing stopping a
+  // restart from re-announcing a chase already in progress. `shadow` is the
+  // would-be-announcement log that calibration reads (design §5); it is trimmed,
+  // because it outlives every incident it records.
+  chaseState: () => 'chaseMonitor/state',
+  chaseShadow: () => 'chaseMonitor/shadow',
+  chaseShadowEntry: (id) => `chaseMonitor/shadow/${id}`,
 };

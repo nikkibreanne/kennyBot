@@ -44,6 +44,7 @@ so a mod can change them **while the bot is running**. These are the
 | **Clip mode** — which of `!clip`'s outputs run | `!clipmode horizontal vertical twitch` · `!clipmode local\|all\|off` · `!clipmode status` | `config/clipMode` |
 | **Stream timer** — the one mod countdown | `!timer 10m [label]` · `!timer +5` · `!timer -2m` · `!timer pause` / `resume` · `!timer stop` | `config/timer` |
 | **Reminders** — schedules, text, on/off | `!reminder` · `!reminder at ghosty 08:00 17:00` · `!reminder every hydration 60` · `!reminder off <id>` | `config/reminders/<id>` |
+| **Media slots** — number → OBS media source | `!media inputs` · `!media set 3 <source>` · `!media scene 3 <scene>` · `!media action 3 stop` · `!media clear 3` | `config/media/<n>` |
 | **Live status** (set automatically by Twitch) | _(no command — EventSub / Helix poll set it)_ | `config/live` |
 | **Active season** | `!season start <id>` · `!season rollover <id>` | `config/season/current` |
 | **Active raid / boss / phase** | `!boss set <name>` · `!boss next` · `!raidnight` | `config/raid`, `bosses/...` |
@@ -238,6 +239,50 @@ missing.
 
 ---
 
+## `!media` — playing an OBS media source from chat
+
+**There is nothing to configure in `config.js`.** Media slots are runtime-only
+records at `config/media/<n>`, mapped from chat with `!media set` — and unlike the
+clip mode they ship **empty**, with no seed at all. A default slot would name an OBS
+source that exists on no particular machine, and a slot pointing at nothing fails
+live, in front of chat.
+
+| Field | Required | What it is |
+|---|---|---|
+| `inputs` | yes | one or more OBS **source names**, character for character as OBS spells them, fired together. OBS keeps a GIF and its sound as separate sources, so an alert is normally two entries. Max 5 |
+| `scene` | no | a scene to reveal that source in *before* playing — this is what makes a visual alert work; omit it for sounds that are always in the active scene |
+| `action` | no | `restart` (default) · `play` · `pause` · `stop` · `next` · `previous` |
+| `label` | no | a human name, so `!media` reads as more than numbers |
+
+Slot numbers run 1–20. `restart` is the default because it plays from the first
+frame whether the source is idle, mid-playback or already **finished** — and
+"finished" is the state an alert sits in almost all the time, where plain `play`
+does nothing at all.
+
+**Getting the names right is the whole job.** They must match OBS exactly, so use
+`!media inputs` (or `node scripts/obs-media.mjs`, which needs only the two `OBS_*`
+env vars and not a running bot) rather than typing them from memory. Renaming a
+source in OBS silently breaks any slot pointing at it — the next fire replies with
+the missing name, which is the intended failure.
+
+Two behaviours worth knowing:
+
+- **A successful play is silent in chat.** The sound is the feedback. Every failure
+  replies — so silence means OBS accepted the request, and if you heard nothing the
+  problem is on the OBS side.
+- **Hiding the source again is OBS's job**, via the Media Source property *Show
+  nothing when playback ends* (setting key `clear_on_media_end`, **on by default**).
+  kennyBot deliberately holds no "hide it later" timer. Because that default already
+  blanks a finished source, you can leave the scene item permanently visible and skip
+  the `scene` field entirely — which is the recommended setup.
+- **A muted or zero-volume source still reports success.** OBS gives no way to tell,
+  so that is the first thing to check when a slot fires and nobody hears anything.
+
+Connection comes from the same `OBS_WEBSOCKET_URL` / `OBS_WEBSOCKET_PASSWORD` the
+clip capture uses — one OBS, one place to configure it.
+
+---
+
 ## `reminders` — scheduled chat nudges (`!reminder`)
 
 The recurring pings: the Wallpaper Engine check, Ghosty's meal times, the hourly
@@ -297,6 +342,21 @@ restart can't make the bot repeat a "1 minute left" it already posted.
 | `graceMs` | `120000` (2 min) | How overdue an expired timer may be and still get its "time's up" announced. Past this it's cleared silently. | This only matters when the bot was down at the moment a timer expired. Raise it if you'd rather hear a late call than none; lower it to keep the bot from ever announcing stale news. |
 | `tickMs` | `1000` (1 s) | Countdown resolution. Each tick reads memory only — RTDB is touched just when the timer actually fires. | Higher = a "time's up" that can land that much late. Little reason to change. |
 | `maxLabelLen` | `60` | Longest timer label; longer ones are clipped with `…`. | Keeps a pasted paragraph out of every heads-up line. |
+
+## `spotify` — now playing (`!song` + the overlay)
+
+| Key | Default | What it controls |
+|---|---|---|
+| `cacheMs` | `5_000` | How long one Spotify answer is reused. `!song` is a pile-on command and the answer can't meaningfully change in a couple of seconds — twenty viewers asking at once must be one request, not twenty. |
+| `overlayPollMs` | `10_000` | How often the overlay re-checks. The write is skipped unless the line changed, so this is how quickly a track change appears on stream, not a write rate. |
+| `overlayPrefix` | `'Now Playing: '` | Prepended to the overlay only — never to the chat reply, and never to an empty line. |
+
+Environment: `SPOTIFY_CLIENT_ID`, `SPOTIFY_CLIENT_SECRET`, optionally
+`SPOTIFY_REFRESH_TOKEN` (otherwise the token store is used), and
+`SPOTIFY_OVERLAY_SOURCE` — the OBS text source to write. Unset means no overlay and
+no polling at all.
+
+---
 
 ---
 

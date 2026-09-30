@@ -34,6 +34,26 @@ export function websocketAvailable() {
 }
 
 /**
+ * Where OBS is and how to authenticate — `null` when the deployment has no OBS.
+ *
+ * Shared because there are now TWO consumers of one connection (capture.js saves
+ * replay buffers; obsMedia.js fires media actions) and they must never disagree
+ * about which machine that is. This resolves the TOPOLOGY only; what each feature
+ * does with the socket stays that feature's own config.
+ *
+ * @returns {{ url: string, password: string, timeoutMs: number } | null}
+ */
+export function obsConnectionFromEnv(env = process.env) {
+  const url = env.OBS_WEBSOCKET_URL ?? '';
+  if (!url) return null;
+  return {
+    url,
+    password: env.OBS_WEBSOCKET_PASSWORD ?? '',
+    timeoutMs: Number(env.OBS_TIMEOUT_MS || 8000),
+  };
+}
+
+/**
  * Open a session, run `fn(request)`, and always close. `request(type, data)`
  * resolves with responseData or rejects with the OBS failure comment.
  *

@@ -17,6 +17,13 @@ import { seedReminders, listReminders } from '../../src/db/reminders.js';
 import { getRaidPointer, getConfig, setLive, setClipMode } from '../../src/db/configStore.js';
 import { initClipsWith } from '../../src/twitch/clips.js';
 import { initCaptureWith } from '../../src/integrations/capture.js';
+import { initMediaWith } from '../../src/integrations/obsMedia.js';
+import { initObsControlWith } from '../../src/integrations/obsControl.js';
+import { initSpotifyWith } from '../../src/integrations/spotify.js';
+import { initChaseSourcesWith } from '../../src/integrations/chaseSources.js';
+import { setChaseSources, setChaseSettings, getChaseSettings } from '../../src/db/chaseMonitor.js';
+import { clearMediaSlot, listSlots } from '../../src/db/media.js';
+import { slotInputs } from '../../src/rules/media.js';
 import { defaultBoss } from '../../src/content/bosses.js';
 import { until } from './harness.js';
 
@@ -456,11 +463,247 @@ export const SCENARIOS = [
     },
   },
   {
+    command: 'media', title: 'a mod maps an OBS source to a number and fires it',
+    run: async ({ bot, u }) => {
+      const mod = u('e2e_media', { login: 'nikki', name: 'Nikki', mod: true });
+      const fired = [];
+      // Stands in for the whole obs-websocket round trip — what matters here is
+      // that the SLOT the command resolved is the one handed to OBS.
+      initMediaWith(async ({ slot }) => { fired.push(slot); return { played: true, shown: Boolean(slot.scene) }; });
+      try {
+        assert.match(await bot.send(mod, '!media'), /no media slots mapped/i);
+        assert.match(await bot.send(mod, '!media 1'), /slot 1 is not mapped/i);
+
+        // Source names are the rest of the line — real OBS sources have spaces.
+        assert.match(await bot.send(mod, '!media set 1 Airhorn SFX'), /"Airhorn SFX"/);
+        assert.deepEqual((await database().ref('config/media/1').get()).val().inputs, ['Airhorn SFX'], 'persisted');
+
+        // Firing is silent in chat by contract; the slot reaching OBS is the proof.
+        assert.equal(await bot.send(mod, '!media 1'), '', 'a successful play says nothing');
+        assert.equal(fired.length, 1);
+        assert.deepEqual(slotInputs(fired[0]), ['Airhorn SFX']);
+        assert.equal(fired[0].action ?? 'restart', 'restart', 'the alert-shaped default');
+
+        // A GIF and its sound are two sources in OBS and ONE alert in chat.
+        assert.match(await bot.send(mod, '!media set 2 Alert GIF | Alert SFX'), /"Alert GIF" \+ "Alert SFX"/);
+        await bot.send(mod, '!media 2');
+        assert.deepEqual(slotInputs(fired[1]), ['Alert GIF', 'Alert SFX'], 'both fired from one number');
+
+        // …and `add` grows a slot without retyping what is already there.
+        assert.match(await bot.send(mod, '!media add 2 Third Thing'), /\+ "Third Thing"/);
+        assert.deepEqual(listSlots().find((x) => x.n === 2).inputs, ['Alert GIF', 'Alert SFX', 'Third Thing']);
+
+        // Half an alert is worse than none: one empty part rejects the whole line.
+        assert.match(await bot.send(mod, '!media set 3 Good | '), /separate them with/);
+        assert.equal(listSlots().some((x) => x.n === 3), false, 'nothing was created');
+
+        // Mapping a scene and an action edits the same slot rather than replacing it.
+        assert.match(await bot.send(mod, '!media scene 1 Alerts'), /in "Alerts"/);
+        assert.match(await bot.send(mod, '!media action 1 stop'), /\(stop\)/);
+        await bot.send(mod, '!media 1');
+        // fired[2] — only three plays have happened; the edits in between don't fire.
+        assert.deepEqual(slotInputs(fired[2]), ['Airhorn SFX'], 'input survived both edits');
+        assert.equal(fired[2].scene, 'Alerts');
+        assert.equal(fired[2].action, 'stop');
+
+        // A typo'd action must not write a slot that throws at play time.
+        assert.match(await bot.send(mod, '!media action 1 restrat'), /action must be one of/);
+        assert.equal(listSlots().find((x) => x.n === 1).action, 'stop', 'the bad edit changed nothing');
+
+        assert.match(await bot.send(mod, '!media scene 1 none'), /"Airhorn SFX"/);
+        assert.equal(listSlots().find((x) => x.n === 1).scene ?? null, null, 'scene cleared, slot kept');
+
+        assert.match(await bot.send(mod, '!media'), /Airhorn SFX/);
+        assert.match(await bot.send(mod, '!media clear 1'), /cleared/i);
+        assert.equal(listSlots().some((x) => x.n === 1), false);
+      } finally {
+        // Scenarios share one emulator DB — leave no slots behind.
+        for (const n of [1, 2, 3]) await clearMediaSlot(n);
+        initMediaWith(null);
+      }
+    },
+  },
+  {
+    command: 'obs', title: 'a mod drives scenes, sources, filters and audio from chat',
+    run: async ({ bot, u }) => {
+      const mod = u('e2e_obs', { login: 'nikki', name: 'Nikki', mod: true });
+      const calls = [];
+      // The seam is the obs-websocket `request` itself, so what's asserted is the
+      // protocol call OBS would actually receive — not a mock of our own shape.
+      initObsControlWith(async (type, data) => {
+        calls.push({ type, data });
+        switch (type) {
+          case 'GetSceneList':
+            return { currentProgramSceneName: 'Live', scenes: [{ sceneName: 'BRB' }, { sceneName: 'Live' }] };
+          case 'GetSceneItemList':
+            return { sceneItems: [{ sourceName: 'overlay', sceneItemId: 2, sceneItemEnabled: false }] };
+          case 'GetSceneItemId': return { sceneItemId: 2 };
+          case 'GetSourceFilterList':
+            return { filters: [{ filterName: 'Chroma Key', filterKind: 'chroma_key_filter_v2', filterEnabled: true }] };
+          case 'GetInputList': return { inputs: [{ inputName: 'Mic' }] };
+          case 'GetInputMute': return { inputMuted: false };
+          case 'GetInputVolume': return { inputVolumeDb: -6 };
+          case 'GetStats':
+            return { cpuUsage: 9, activeFps: 60, renderSkippedFrames: 0, renderTotalFrames: 100,
+                     outputSkippedFrames: 0, outputTotalFrames: 100, availableDiskSpace: 10240 };
+          case 'GetStreamStatus': return { outputActive: false };
+          default: return {};
+        }
+      });
+      try {
+        assert.match(await bot.send(mod, '!obs scenes'), /Live/);
+        assert.match(await bot.send(mod, '!obs scene BRB'), /switched to "BRB"/);
+        assert.equal(calls.at(-1).data.sceneName, 'BRB', 'the scene name reached OBS unchanged');
+
+        assert.match(await bot.send(mod, '!obs sources'), /overlay/);
+        assert.match(await bot.send(mod, '!obs show overlay'), /now visible/);
+        assert.equal(calls.at(-1).type, 'SetSceneItemEnabled');
+        assert.equal(calls.at(-1).data.sceneItemEnabled, true);
+
+        assert.match(await bot.send(mod, '!obs filters cam'), /Chroma Key/);
+        // Source and filter are both OBS names and both may contain spaces, so
+        // `|` is the only unambiguous split — same separator as !media set.
+        assert.match(await bot.send(mod, '!obs filter off cam | Chroma Key'), /now off/);
+        assert.deepEqual(calls.at(-1).data, { sourceName: 'cam', filterName: 'Chroma Key', filterEnabled: false });
+        assert.match(await bot.send(mod, '!obs filter off cam'), /Usage: !obs filter/, 'needs both names');
+
+        // MULTIPLE filters in one go. The first part is the source; every part
+        // after it is a filter. Previously the extras were silently dropped —
+        // the command reported success having flipped only the first.
+        const multi = await bot.send(mod, '!obs filter on cam | Chroma Key | Blur');
+        assert.match(multi, /"Chroma Key" \+ "Blur"/, 'both are named back');
+        assert.deepEqual(calls.slice(-2).map((c) => c.data.filterName), ['Chroma Key', 'Blur']);
+        assert.ok(calls.slice(-2).every((c) => c.data.filterEnabled === true));
+
+        assert.match(await bot.send(mod, '!obs audio'), /Mic/);
+        assert.match(await bot.send(mod, '!obs mute Mic'), /muted/);
+        assert.equal(calls.at(-1).data.inputMuted, true);
+
+        assert.match(await bot.send(mod, '!obs stats'), /60fps/);
+        assert.match(await bot.send(mod, '!obs nonsense'), /Usage: !obs/);
+      } finally {
+        initObsControlWith(null);
+      }
+    },
+  },
+  {
+    command: 'song', title: 'a viewer asks what is playing on Spotify',
+    run: async ({ bot, u }) => {
+      const viewer = u('e2e_song', { login: 'carl', name: 'Carl' });
+      const other = u('e2e_song2', { login: 'dee', name: 'Dee' });   // !song is per-user cooldowned
+      let calls = 0;
+      // The seam is fetch itself, so the real token refresh + request path runs.
+      const spotify = (body, status = 200) => async (url) => {
+        if (String(url).includes('/api/token')) {
+          return { ok: true, status: 200, json: async () => ({ access_token: 'tok', expires_in: 3600 }) };
+        }
+        calls += 1;
+        return {
+          ok: status < 400, status,
+          headers: { get: () => null },
+          text: async () => (body == null ? '' : JSON.stringify(body)),
+        };
+      };
+
+      try {
+        initSpotifyWith(spotify({
+          is_playing: true, progress_ms: 83000, currently_playing_type: 'track',
+          item: {
+            name: 'Bohemian Rhapsody', duration_ms: 354000,
+            artists: [{ name: 'Queen' }],
+            external_urls: { spotify: 'https://open.spotify.com/track/abc' },
+          },
+        }));
+        const reply = await bot.send(viewer, '!song');
+        assert.match(reply, /Queen — Bohemian Rhapsody/);
+        assert.match(reply, /1:23\/5:54/);
+        assert.equal(calls, 1);
+
+        // A second viewer inside the cache window must not cost a second request:
+        // !song is exactly the command chat piles onto.
+        assert.match(await bot.send(other, '!song'), /Bohemian Rhapsody/);
+        assert.equal(calls, 1, 'served from cache');
+
+        // 204 is Spotify's "nothing playing" and has an EMPTY body — parsing it
+        // would throw and the viewer would get silence.
+        initSpotifyWith(spotify(null, 204));
+        assert.match(await bot.send(viewer, '!song'), /nothing is playing/);
+
+        // An episode carries no `artists`; reading it naively throws mid-command.
+        initSpotifyWith(spotify({
+          is_playing: true, currently_playing_type: 'episode',
+          item: { name: 'Episode 12', duration_ms: 3600000, show: { name: 'Some Podcast' } },
+        }));
+        assert.match(await bot.send(viewer, '!song'), /Some Podcast: Episode 12/);
+
+        // A failure answers with Spotify's own status rather than going quiet.
+        initSpotifyWith(spotify({}, 503));
+        assert.match(await bot.send(viewer, '!song'), /couldn't reach Spotify.*503/);
+
+        // Not connected at all is its own sentence, not an error.
+        initSpotifyWith(null);
+        assert.match(await bot.send(viewer, '!song'), /isn't connected/);
+      } finally {
+        initSpotifyWith(null);
+      }
+    },
+  },
+  {
     command: 'season', title: 'mod starts a new season',
     run: async ({ bot, u }) => {
       const reply = await bot.send(u('e2e_season', { login: 'mod', name: 'Mod', mod: true }), '!season start t2');
       assert.match(reply, /Season started/i);
       assert.match(reply, /t2/);
+    },
+  },
+  {
+    command: 'chase', title: 'anyone can ask, and gets a straight answer with nothing leaked',
+    run: async ({ bot, u }) => {
+      const viewer = u('e2e_chase_v', { login: 'carl', name: 'Carl' });
+      // Nothing detected: a plain answer, and no hint of the rig behind it.
+      const idle = await bot.send(viewer, '!chase');
+      assert.match(idle, /no chase/i);
+      assert.doesNotMatch(idle, /score|threshold|youtube|twitch|quota|org\d/i,
+        '!chase must never leak the detector internals or a source id');
+    },
+  },
+  {
+    command: 'chasemon', title: 'a mod drives the monitor, and it stays double-locked',
+    run: async ({ bot, u }) => {
+      const mod = u('e2e_chasemon', { login: 'nikki', name: 'Nikki', mod: true });
+      const viewer = u('e2e_chasemon_v', { login: 'carl', name: 'Carl' });
+
+      // Mod-only, and the dispatcher IGNORES a non-mod rather than explaining itself
+      // (src/events/chat.js) — so the correct observation is silence, not a refusal.
+      assert.equal(await bot.send(viewer, '!chasemon status'), '', 'a non-mod gets no reply at all');
+
+      // Ships OFF and in shadow — turning it on must NOT let it speak.
+      const before = await getChaseSettings();
+      assert.equal(before.enabled, false, 'ships disabled');
+      assert.equal(before.mode, 'shadow', 'and in shadow mode');
+
+      // No roster in the repo, so status has to say so rather than look healthy.
+      assert.match(await bot.send(mod, '!chasemon status'), /NO SOURCES LOADED|sources/i);
+
+      // The roster is private and loaded out of band; a twitch entry needs a login.
+      initChaseSourcesWith(async () => { throw new Error('no network in e2e'); });
+      await setChaseSources([
+        { id: 'org1', name: 'Org One', channelId: 'UC-org1', streamClass: 'chopper' },
+        { id: 'org2', name: 'Org Two', platform: 'twitch', login: 'orgtwo', streamClass: 'episodic' },
+      ]);
+      const loaded = await getChaseSettings();
+      assert.equal(loaded.orgs.length, 2, 'both platforms survive the round-trip');
+
+      assert.match(await bot.send(mod, '!chasemon on'), /on|enabled/i);
+      assert.equal((await getChaseSettings()).mode, 'shadow', 'on does NOT imply live');
+
+      // A bad argument is rejected whole, never half-applied.
+      const t0 = (await getChaseSettings()).threshold;
+      await bot.send(mod, '!chasemon threshold banana');
+      assert.equal((await getChaseSettings()).threshold, t0, 'invalid threshold changed nothing');
+
+      await bot.send(mod, '!chasemon off');
+      assert.equal((await getChaseSettings()).enabled, false, 'the kill switch works');
     },
   },
 ];
