@@ -30,6 +30,7 @@ import {
   partitionSources, youtubeKeyPresent, twitchReady, SEARCH_UNITS,
 } from '../integrations/chaseSources.js';
 import { getChaseSettings, loadMonitorState, saveMonitorState, logShadowAnnouncement } from '../db/chaseMonitor.js';
+import { createChaseLog } from '../integrations/chaseLog.js';
 
 /**
  * @param {{ send: { say: (t: string) => Promise<void> }, logger?: any }} deps
@@ -42,6 +43,16 @@ export function startChaseMonitor({ send, logger = console }) {
   // is [] in this repo. So it is read per tick from settings, not captured at start:
   // that also means `npm run chase:sources` takes effect without a restart.
   let warnedNoSources = false;
+  let tickNo = 0;
+  // Opt-in JSONL, in the SAME format scripts/chase-record.mjs writes, so
+  // `npm run chase:report` reads the bot's own evidence unchanged. Unset
+  // CHASE_LOG_DIR and nothing is written or created. In the container the only
+  // writable persistent path is the /data volume — see the module header.
+  const chaseLog = createChaseLog({
+    dir: process.env.CHASE_LOG_DIR,
+    retentionDays: config.chase.logRetentionDays,
+    logger,
+  });
   /** @type {Record<string, string[]>} orgId -> candidate video ids, from the RSS sweep */
   let knownVideoIds = {};
   /**
@@ -74,6 +85,11 @@ export function startChaseMonitor({ send, logger = console }) {
     }
   }
 
+  if (chaseLog.enabled) {
+    logger.info?.('chase: logging evidence to disk', { dir: process.env.CHASE_LOG_DIR });
+    chaseLog.write({ kind: 'session', at: Date.now(), event: 'start', source: 'bot', pid: process.pid });
+  }
+
   // The fast loop has nothing to ask about until discovery has named some video
   // ids, so the RSS sweep runs immediately rather than at its first interval.
   async function sweep() {
@@ -98,6 +114,7 @@ export function startChaseMonitor({ send, logger = console }) {
       const rssBlind = !found || Object.keys(found).length === 0;
       if (rssBlind) logger.warn?.('chase: RSS discovery blind this sweep — waiving the search cooldown');
       if (found && typeof found === 'object') knownVideoIds = { ...knownVideoIds, ...found };
+      chaseLog.write({ kind: 'discovery', at: Date.now(), ids: found || {} });
 
       // Then the part RSS cannot do. Ask ONLY about orgs we have no live video for —
       // a source already streaming is tracked for free by the fast loop, so the 100-unit
@@ -119,6 +136,7 @@ export function startChaseMonitor({ send, logger = console }) {
         searchUnitsToday += askable.length * SEARCH_UNITS;
         for (const o of askable) lastSearchAt[o.id] = now;
         const live = await findLiveVideos(askable, logger);
+        chaseLog.write({ kind: 'search', at: now, asked: askable.map((o) => o.id), found: Object.keys(live), units: askable.length * SEARCH_UNITS });
         for (const [orgId, videoId] of Object.entries(live)) {
           liveVideoIds[orgId] = videoId;
           logger.info?.('chase: found a live stream', { org: orgId });
@@ -171,13 +189,29 @@ export function startChaseMonitor({ send, logger = console }) {
       const samples = [...(ytSamples || []), ...(twSamples || [])];
 
       const state = await loadMonitorState();
+      const at = Date.now();
       const result = evaluateChase({
         samples,
         articles: articles || [],
         state,
-        now: Date.now(),
+        now: at,
         cfg: settings,
       });
+
+      // The RAW samples are what make the log replayable at other settings later, so
+      // they are written verbatim and BEFORE the score — the same order, and the same
+      // record shapes, that scripts/chase-record.mjs uses.
+      tickNo += 1;
+      chaseLog.write({ kind: 'poll', tick: tickNo, at, samples, articles: articles || [] });
+      const scoreLine = { kind: 'score', tick: tickNo, at, score: result.score, over: result.state.overCount, under: result.state.underCount, open: Boolean(result.state.incident) };
+      if (result.score > 0) scoreLine.groups = result.groups; // keep quiet ticks small
+      chaseLog.write(scoreLine);
+      if (result.opened && result.state.incident) {
+        const inc = result.state.incident;
+        chaseLog.write({ kind: 'incident', at, event: 'open', id: inc.id, org: inc.org, url: inc.url, score: result.score });
+      }
+      if (result.announce) chaseLog.write({ kind: 'announce', at, incidentId: result.announce.incident?.id, text: result.announce.text });
+      if (result.closed) chaseLog.write({ kind: 'incident', at, event: 'close', id: state?.incident?.id ?? null, durationMs: state?.incident?.openedAt ? at - state.incident.openedAt : null, peakScore: state?.incident?.peakScore ?? null });
 
       // BEFORE anything is said. The dwell, cooldown and per-hour guards are all
       // counts held in this record; losing it after speaking is what would make

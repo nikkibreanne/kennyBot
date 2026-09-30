@@ -395,6 +395,12 @@ export const config = {
     reopenCooldownMs: 20 * 60_000, // no NEW incident this soon after one closed
     maxPerHour: 3, // channel-wide announcement cap (never per-user)
 
+    // How many days of on-disk evidence the BOT keeps when CHASE_LOG_DIR is set.
+    // ~7 MB/day, so 14 days is ~100 MB — it shares the /data volume with the token
+    // store, which is the only writable persistent path in the container, so this
+    // cannot be unbounded.
+    logRetentionDays: 14,
+
     // Audience channel. A 30-minute TRAILING median, not a 24h one: viewership is
     // strongly diurnal, so a flat daily baseline reads every evening as a spike.
     baselineWindowMs: 30 * 60_000,

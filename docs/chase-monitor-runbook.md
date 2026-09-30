@@ -58,8 +58,40 @@ done and re-run it at different settings.
 
 ### Where to run it
 
-**Not in an interactive WSL shell.** WSL2 tears down when the terminal closes or the
-machine sleeps, which would silently end the run — and a two-week log with a five-day
+**The best answer is: in the bot.** Shadow mode exists for exactly this, and the bot
+already runs 24/7 in a container on a machine that does not sleep. Set
+`CHASE_LOG_DIR=/data/chase-logs` and it writes the same JSONL the standalone recorder
+does, which `chase:report` and `chase:sim` then read unchanged. The monitor ships
+`enabled:false` + `mode:'shadow'`, so the feature can be **deployed dark** and switched
+on later from chat with no redeploy — nothing reaches viewers until `!chasemon live`.
+
+`/data` is the only writable persistent path in the container: the image runs
+`--read-only` as the non-root `node` user and `/tmp` is a tmpfs that evaporates on
+restart. It is the same volume as the token store (`-v kennybot-tokens:/data`), which is
+why the log rotates daily and prunes past `logRetentionDays` (14 days ≈ 100 MB).
+
+```bash
+# add to the bot's --env-file
+CHASE_LOG_DIR=/data/chase-logs
+
+# then, as a mod, in chat:
+!chasemon on        # still shadow — it cannot speak
+!chasemon status    # expect: ON · mode shadow · N sources · key present
+```
+
+Pull the evidence back whenever you want a report:
+
+```bash
+docker cp kennybot:/data/chase-logs ./chase-logs
+npm run chase:report -- ./chase-logs --no-sweep
+```
+
+### Running it standalone instead
+
+**Not in an interactive WSL shell.** This is not theoretical — it was measured. A real
+overnight run lost **11.8 hours** in ~60-minute steps: the host kept suspending and
+waking, the process never died, and no session-stop record was written, so the log looked
+continuous. WSL2 freezes when Windows sleeps, which would silently gut the run — and a two-week log with a five-day
 hole in it is worse than no log, because the hole is easy to miss. Pick one:
 
 ```bash
