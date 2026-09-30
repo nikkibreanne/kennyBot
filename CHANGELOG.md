@@ -1,5 +1,21 @@
 # Changelog
 
+## [0.16.0](https://github.com/nikkibreanne/kennyBot/compare/kennybot-v0.15.0...kennybot-v0.16.0) (2026-09-30)
+
+
+### Features
+
+* LA chase monitor, plus the OBS, media, Spotify and subathon work from dev ([#99](https://github.com/nikkibreanne/kennyBot/issues/99)) ([5200c43](https://github.com/nikkibreanne/kennyBot/commit/5200c438420c9fffe22b6f2f30af503ac4fced2f))
+
+
+### Bug Fixes
+
+* **deps:** bump @grpc/grpc-js from 1.14.4 to 1.14.5 ([#100](https://github.com/nikkibreanne/kennyBot/issues/100)) ([e1f5169](https://github.com/nikkibreanne/kennyBot/commit/e1f5169fa5df0787587424c73fd6d212f5929b6f))
+* **deps:** bump dotenv from 17.4.2 to 18.0.2 in the production group ([#92](https://github.com/nikkibreanne/kennyBot/issues/92)) ([3f84799](https://github.com/nikkibreanne/kennyBot/commit/3f84799c115835def6c149da230e804d878591f1))
+* **deps:** bump firebase-admin ([#82](https://github.com/nikkibreanne/kennyBot/issues/82)) ([d5d2959](https://github.com/nikkibreanne/kennyBot/commit/d5d2959c8620b7977e2625d51f0051ff0bf72a31))
+* **deps:** bump the production group with 5 updates ([#90](https://github.com/nikkibreanne/kennyBot/issues/90)) ([559772b](https://github.com/nikkibreanne/kennyBot/commit/559772b5647cb31e18698e31a6f3de0ae3e78665))
+* **deps:** bump undici ([#95](https://github.com/nikkibreanne/kennyBot/issues/95)) ([e1c19a4](https://github.com/nikkibreanne/kennyBot/commit/e1c19a4991a202e0c8784301e9cad5b0abcd1526))
+
 ## [0.15.0](https://github.com/nikkibreanne/kennyBot/compare/kennybot-v0.14.0...kennybot-v0.15.0) (2026-08-26)
 
 
