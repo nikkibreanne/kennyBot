@@ -18,10 +18,29 @@ updates:
       prefix-development: "chore(deps-dev)"
     # One PR per ecosystem-wide bump run instead of one per package — the runtime
     # deps here are a handful of twurple/firebase trees that move together.
+    #
+    # `applies-to` is the load-bearing part. Without it these groups cover VERSION
+    # updates only, and Dependabot SECURITY updates bypass grouping entirely — which
+    # is why five separate security PRs were open at once (@grpc/grpc-js, undici,
+    # morgan, ip-address) while the grouped development PR sat beside them. They are
+    # all TRANSITIVE deps, so they are also the ones most likely to arrive in a burst.
+    #
+    # The security groups are split by dependency-type on purpose rather than being one
+    # `patterns: ["*"]` group: the prefix decides whether a release is cut, and a
+    # runtime security fix that landed as `chore` would sit on main without ever
+    # building an image — exactly the failure the header warns about.
     groups:
       production:
+        applies-to: version-updates
         dependency-type: production
       development:
+        applies-to: version-updates
+        dependency-type: development
+      production-security:
+        applies-to: security-updates
+        dependency-type: production
+      development-security:
+        applies-to: security-updates
         dependency-type: development
 
   # The workflows pin actions by major tag; keep them current too.
