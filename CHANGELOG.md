@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.16.1](https://github.com/nikkibreanne/kennyBot/compare/kennybot-v0.16.0...kennybot-v0.16.1) (2026-09-30)
+
+
+### Bug Fixes
+
+* **chase:** load .env in the sources loader, and bake CHASE_LOG_DIR into the image ([#103](https://github.com/nikkibreanne/kennyBot/issues/103)) ([e36be83](https://github.com/nikkibreanne/kennyBot/commit/e36be838f06289a70a2afb0d3d69ec464f7706cd))
+
 ## [0.16.0](https://github.com/nikkibreanne/kennyBot/compare/kennybot-v0.15.0...kennybot-v0.16.0) (2026-09-30)
 
 
