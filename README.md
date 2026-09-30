@@ -15,6 +15,9 @@ Firebase and OBS, and never listens on a port — and ships as a container.
 | Feature | Commands | Notes |
 |---|---|---|
 | **Clips** | `!clip` · `!clipmode` · `!start` | 16:9 + natively-framed 9:16 captured on the streamer's PC over obs-websocket / Aitum |
+| **Now playing** | `!song` | reads Spotify (account-scoped, so the bot needn't be on that machine) + an OBS text overlay |
+| **On-stream media** | `!media` | play a mapped OBS media source from chat — the same connection, pointed at a source instead of the buffer |
+| **OBS control** | `!obs` | scenes, source visibility, filters, audio mute and stream stats, from chat |
 | **Stream timer** | `!timer` | one countdown, heads-up marks, survives a restart |
 | **Reminders** | `!reminder` | schedules are RTDB records, not code — daily / after-live / interval |
 | **To-do board** | `!todo` | chat-controlled, rendered on [/todo/](https://okrafans.com/todo/) |
@@ -52,6 +55,8 @@ Implemented and verified — stream side:
 - **`!clip` capture**: horizontal 16:9 + natively-framed vertical 9:16 saved on the
   streamer's PC over obs-websocket / Aitum, with a runtime-switchable clip mode —
   see [Clip capture](#clip-capture)
+- **`!media`**: play a mapped OBS media source from chat (sounds, alert clips) over
+  that same obs-websocket connection — see [Playing media on stream](#playing-media-on-stream--media)
 - **`!timer`**: one mod-set countdown with heads-up marks, stored as a deadline so
   a restart resumes it
 - **`!reminder`**: scheduled nudges whose schedules are RTDB records, editable from
@@ -82,9 +87,9 @@ Underneath both:
 - **automated releases** from Conventional Commits (release-please), with `main`
   protected for everyone including admins
 
-Verified by `npm test` (174 offline unit tests), `npm run test:emulator` (76 — RTDB
+Verified by `npm test` (302 offline unit tests), `npm run test:emulator` (125 — RTDB
 rules + client-write rejection, and the stateful command paths), `npm run test:e2e`
-(31 — every registered command driven through the real dispatcher), and
+(36 — every registered command driven through the real dispatcher), and
 `npm run synthetic` (full muster→battle→victory run with UI-contract assertions).
 
 **Not yet done:** a full-session local recording (see
@@ -101,6 +106,7 @@ Twitch (chat WSS, Helix, EventSub WSS)  ──►  kennyBot (Node, twurple)  ─
                                                    │
                                                    ▼  obs-websocket, over the tailnet
                                      streamer's OBS + Aitum  ──►  16:9 + 9:16 files on their PC
+                                                                  media sources played on stream
 ```
 
 The bot is outbound-only in both directions: it *dials* Twitch, Firebase and OBS,
@@ -115,17 +121,23 @@ src/
   content/                your own data: classes.js (class→role), items.js (catalog +
                           starter gear), facts.js, reminders.js (default schedules)
   rules/                  PURE, RNG/clock-injected, unit-tested: leveling, rating, loot,
-                          combat, reminders (what's due now)
+                          combat, reminders (what's due now), media (slot parsing/validation),
+                          spotify (now-playing formatting)
   db/                     firebase, configStore (live mirror), players, raid, drops, wallet,
-                          market, timer, reminders, todo, facts, lock, tokenStore
+                          market, timer, reminders, media, todo, facts, lock, tokenStore
   twitch/                 auth (RefreshingAuthProvider), liveGate (Helix poll), eventsub (WS),
                           sender (Helix/IRC send + badge), clips (Helix Create Clip)
-  integrations/           obsWebsocket (v5 client + Aitum vendor requests), capture (facade + rate limit)
+  integrations/           obsWebsocket (v5 client + Aitum vendor requests), capture (facade +
+                          rate limit), obsMedia (media actions), obsControl (scenes,
+                          sources, filters, audio), spotify (now playing, token
+                          refresh) — the OBS three all on the same socket
   events/                 chat (gate→EXP→raid tick + dispatch), twitchEvents (sub/cheer/raid),
-                          dropScheduler · timerScheduler · reminderScheduler
+                          dropScheduler · timerScheduler · reminderScheduler ·
+                          spotifyScheduler (writes the now-playing overlay)
   commands/               one module per command + registry; mod/ subdir for mod commands
 test/                     rules/*.test.js (offline) · firebase-rules.test.js (emulator) · e2e/ (dispatcher)
 scripts/synthetic-chat.js no-stream harness that drives the whole loop
+scripts/obs-media.mjs     list/fire OBS media sources without the bot running
 ```
 
 ## Chat commands
@@ -139,6 +151,33 @@ scripts/synthetic-chat.js no-stream harness that drives the whole loop
 | `!clip` | everyone | capture the last ~60s — 16:9 + 9:16 local files by default; a Twitch clip only if the mode says so |
 | `!clipmode <targets>` | mod | pick which of `!clip`'s three outputs run — `horizontal` · `vertical` · `twitch`, combined freely (see below) |
 | `!start` / `!slate` | mod | set a stream sync point for the clip archiver |
+
+**On-stream media** — the same OBS connection, pointed at a media source instead
+of the replay buffer.
+
+| Command | Who | Effect |
+|---|---|---|
+| `!media <n>` | mod | play the OBS media source mapped to slot `n`. Silent in chat on success — the sound *is* the reply; every failure answers |
+| `!media` | mod | list what's mapped |
+| `!media inputs` | mod | ask OBS which Media Sources exist, spelled exactly as it spells them |
+| `!media set <n> <a> \| <b>` | mod | map a slot to one or more sources. Names are the rest of the line (spaces fine); `\|` separates them, because a GIF and its sound are two sources in OBS and one alert in chat |
+| `!media add <n> <source>` | mod | append a source to an existing slot |
+| `!media scene <n> <scene\|none>` | mod | reveal the source in that scene before playing (for a visual alert); `none` stops revealing it |
+| `!media action <n> <action>` | mod | `restart` (default) · `play` · `pause` · `stop` · `next` · `previous` |
+| `!media clear <n>` | mod | unmap |
+| `!obs` | mod | what's live: current scene, fps, skipped frames |
+| `!obs scenes` · `!obs scene <name>` | mod | list scenes · cut to one |
+| `!obs sources [scene]` | mod | what's in a scene, and what's visible |
+| `!obs show\|hide\|toggle <source>` | mod | flip a source's visibility in the live scene |
+| `!obs filters <source>` · `!obs filter on\|off <source> \| <filter>` | mod | list a source's filters · switch one |
+| `!obs audio` · `!obs mute\|unmute <input>` | mod | audio inputs with mute state and level · mute one. **Not** `!mute`, which silences the bot |
+| `!obs stats` | mod | dropped frames as a rate, CPU, free disk — for when chat says it's buffering |
+
+**Now playing**
+
+| Command | Who | Effect |
+|---|---|---|
+| `!song` / `!nowplaying` / `!np` | everyone | what's playing on the streamer's Spotify — track, artists, position, and a link |
 
 **Around the stream**
 
@@ -225,6 +264,26 @@ live session (a bot restart mid-stream doesn't repeat it), and an interval that
 came due during a long offline stretch is quietly re-armed instead of dumping a
 backlog. The defaults are seeded from `src/content/reminders.js` on first boot
 and **never** clobbered afterwards, so edited times survive every deploy.
+
+### Re-seeding `!media` slots locally
+
+The dev emulator DB is ephemeral — `dev:live` and `dev:all` each start an empty
+one — so the slot map has to go back in every session:
+
+```bash
+FIREBASE_DATABASE_EMULATOR_HOST=127.0.0.1:9000 npm run seed:media
+npm run seed:media -- --list      # what's mapped right now
+npm run seed:media -- --prod      # deliberately, against production
+```
+
+The map itself is **not in this repo** — it's the streamer's own OBS source
+names, and they have to match character for character. It lives in a gitignored
+file (`MEDIA_SLOTS_FILE`, default `.workspace/media-slots.json`); run the script
+without one and it prints the shape it wants. Get exact names from
+`node scripts/obs-media.mjs`.
+
+Writes go through the same `mapSlot()` as `!media set`, so a mapping this
+accepts is one the chat command would have accepted too.
 
 ## Local development
 
@@ -365,6 +424,144 @@ second place that can disagree with it.
 switch to a mode nothing is configured for warns immediately rather than leaving a
 viewer to discover it.
 
+### Playing media on stream — `!media`
+
+The same obs-websocket connection that saves replay buffers can also **play a media
+source**, which is all an on-stream alert actually is. `!media 3` restarts the OBS
+source mapped to slot 3; if that slot names a scene, the source is revealed there
+first, so a visual alert works the same way a sound does.
+
+```
+!media inputs                        what OBS actually has, spelled its way
+!media set 3 alert-gif | alert-mp3   slot 3 → both, fired together
+!media add 3 extra-sound             append to an existing slot
+!media scene 3 Alerts                reveal them in "Alerts" first (only if hidden)
+!media action 3 stop                 restart (default) · play · pause · stop · next · previous
+!media 3                             fire it
+```
+
+**One slot, several sources.** OBS keeps a GIF and its sound as separate Media
+Sources, so an alert is normally two of them. A slot fires up to five, and the
+triggers go out in a single batch rather than one await at a time — putting a
+round trip between the picture and the sound is audible. Every scene reveal
+happens before any trigger, for the same reason.
+
+**A successful play says nothing in chat.** The sound is the feedback, and an alert
+that also posts a line is clutter. Every *failure* replies — so silence means OBS
+accepted the request. Verified against a real OBS: a name that doesn't exist, a
+scene that doesn't exist, and a slot where only *one* of two names is wrong all
+throw and reach chat with the offending name in the message. The one failure OBS
+cannot report is a **muted or zero-volume source** — that answers success and is
+heard by nobody, so it's the first thing to check when a slot goes quiet.
+
+There is deliberately **no overlay page and no message bus**. That architecture is
+what a hosted alert service has to use, because it cannot reach your OBS — this bot
+can, and a web page plus a transport to reach it would be strictly more moving parts
+than the one request that already works. OBS keeps ownership of compositing, audio
+routing and *Show nothing when playback ends* (`clear_on_media_end`, on by default),
+which is also why nothing here holds a "hide it later" timer — and why a source can
+simply be left visible instead of needing a scene at all.
+
+Slots live in RTDB (`config/media/<n>`) for the same reason the clip mode does:
+these names change whenever a source is renamed in OBS, and re-deploying a container
+to rename a sound is not a thing anyone does mid-stream. They ship **empty** — a
+default slot would name a source that exists on no particular machine, and a slot
+pointing at nothing fails live, in front of chat. Map them from `!media inputs`, or
+from `node scripts/obs-media.mjs` before the bot is even deployed.
+
+Mod-only, and no cooldown: a soundboard's value is landing on the beat, sometimes
+twice. Unlike `!clip`'s local capture — hundreds of MB per trigger, hence its own
+rate limit — a media action costs OBS nothing. A connection is opened **per
+trigger**; ten fired at once completed in 197ms with none dropped, which is well
+past what a soundboard produces.
+
+**Re-firing does not stack, and that is why there is no queue.** A Media Source has
+a single playback instance, so `restart` on a source already playing resets it to
+frame one — measured against a real OBS, the cursor dropped from 470ms to 104ms on
+the second trigger. Ten rapid triggers of one slot are one audible play, not ten.
+Different slots *do* overlap, since they are different sources. A queue would only
+matter if alerts should wait their turn rather than interrupt, which for a mod
+soundboard is the wrong behaviour anyway.
+
+**Not yet wired to Twitch events.** Firing on cheers, subs or channel-point
+redemptions needs EventSub topics and broadcaster scopes this bot does not hold
+today (it subscribes to `stream.online`/`offline` only, and prod runs on a Helix
+poll because the broadcaster token isn't the channel owner's). The mechanism comes
+first; the trigger is separate work.
+
+### Driving OBS from chat — `!obs`
+
+The rest of the obs-websocket surface, on that same connection: scenes, source
+visibility, filters, audio, and the stream-health numbers.
+
+```
+!obs                          current scene, fps, skipped frames
+!obs scenes                   list · !obs scene Starting Soon   cut to one
+!obs sources                  what's in the live scene, and what's visible
+!obs show|hide|toggle <src>   flip a source
+!obs filters <source>         list · !obs filter off cam | Chroma Key
+!obs audio                    inputs with mute state and level
+!obs mute|unmute <input>      OBS audio — NOT !mute, which silences the bot
+!obs stats                    dropped frames as a RATE, CPU, free disk
+```
+
+One command with sub-verbs rather than eight top-level names: `!obs` alone is the
+discoverable index, and it keeps eight words out of a chat namespace shared with
+other bots. `!obs mute` sits here precisely *because* `!mute` already exists and
+means something entirely different — two mutes at top level is a mistake waiting
+for a stressful moment.
+
+Deliberately thin: each verb is one or two obs-websocket requests with no policy
+on top, and `!obs scene` accepts any scene name rather than an allowlist. This
+exists to learn what OBS exposes; a verb that proves worth keeping can earn its
+own command and its own guard rails then. Errors are OBS's own text, passed
+through — when a name is wrong, OBS says which one, and that beats anything we
+would write.
+
+`!obs stats` reports skipped frames as a **percentage**, because a raw count means
+nothing without the total: "312 dropped" reads as alarming and is fine out of two
+million.
+
+### Now playing — `!song` and the OBS overlay
+
+`!song` answers what the streamer's Spotify is playing. The Web API is
+**account-scoped, not device-scoped**, so this reads that account's playback on any
+device — the bot does not need to run on the machine Spotify is on, and nothing is
+installed there. You can only ever read your *own* account; there is no endpoint
+for "what is user X playing".
+
+**Setup** (once):
+
+1. Register an app at [developer.spotify.com](https://developer.spotify.com/dashboard);
+   put the client id + secret in `.env` as `SPOTIFY_CLIENT_ID` / `SPOTIFY_CLIENT_SECRET`.
+2. Add the redirect URI **`http://127.0.0.1:8888/callback`** to the app and save it.
+   Spotify explicitly rejects `localhost` — it must be the loopback IP literal.
+3. `node scripts/get-spotify-token.mjs` — approve in the browser. The refresh token
+   is written to the token store, and printed for `SPOTIFY_REFRESH_TOKEN`.
+
+Only `user-read-currently-playing` is requested. Podcast episodes may additionally
+need `user-read-playback-state`; set `SPOTIFY_SCOPES` and re-run the script.
+
+**The overlay.** Set `SPOTIFY_OVERLAY_SOURCE` to the name of an OBS text source and
+kennyBot keeps it current. `node scripts/obs-overlay-setup.mjs` creates one and adds
+it to every scene — deliberately **one source shown in several scenes**, not a copy
+per scene, so a single write updates them all and they cannot drift.
+
+It **writes only when the line changes**: a text source rewritten every poll
+re-renders in OBS for nothing. And it **clears** when playback stops or pauses,
+rather than freezing the last track — a stale song title is worse than none,
+because viewers believe it.
+
+`config.spotify` holds the poll interval, the cache window, and the overlay prefix
+(`Now Playing: `). The prefix is applied only to a non-empty line, so a pause
+leaves an empty source rather than a bare label.
+
+Spotify's payload has more shapes than "a song is playing", and each one reaches
+chat: nothing playing (a **204 with an empty body** — parsing it would throw),
+paused (still populated, `is_playing:false`), an **episode** (no `artists` field at
+all), an ad, and a local file with no URL. All five are covered in
+`test/rules/spotify.test.js` and were exercised against a real account.
+
 The one point of contact is `!start` (`src/db/clipSync.js`), which writes a per-stream
 sync anchor to RTDB — *data the archiver reads*, not a file handoff, and it works
 whether or not local capture is configured.
@@ -400,6 +597,64 @@ use invented numbers, and the ledger lives under `config/subathon`, which is not
 client-readable (see `database.rules.json`; read grants cascade in RTDB, so that
 key must never be added to a readable parent).
 
+## LA police-chase monitor (off by default, operator-only)
+
+Announces a live Los Angeles police pursuit in chat, with a link, from automated
+detection. It runs **whether or not the channel is live** — that is deliberate.
+Design: [`docs/chase-monitor-design.md`](docs/chase-monitor-design.md) · costs and
+next iterations: [`docs/chase-monitor-roadmap.md`](docs/chase-monitor-roadmap.md) ·
+**how to launch it and read the logs afterwards:**
+[`docs/chase-monitor-runbook.md`](docs/chase-monitor-runbook.md).
+
+**Detection in one paragraph.** Each source contributes at most one signal per
+*evidence channel* — `title` (a stream retitled to chase vocabulary), `audience`
+(concurrent viewers against a 30-minute trailing median), `liveness` (a normally-dark
+source going live), `editorial` (a fresh article) — so one measurement can never score
+twice under two names. A source's channels are summed with a discount on all but the
+strongest, because one newsroom covering a chase drives all of its systems at once;
+sources are then summed with no discount, because two newsrooms are two independent
+decisions. A single source *can* cross the threshold, but only with two genuinely
+different observations. The score must then hold for `dwell` consecutive polls, which
+is what actually removes false positives — a title glitch lasts one poll, a real
+pursuit lasts half an hour.
+
+**Double-locked off.** `config/chaseMonitor` seeds `enabled:false` **and**
+`mode:'shadow'`, so a fresh deploy polls nothing and says nothing until a mod turns it
+on twice (`!chasemon on`, then `!chasemon live`). Switched off it makes **zero**
+network calls — not "polls and discards". Shadow mode runs the full pipeline and writes
+every would-be announcement to RTDB without speaking, which is how the weights get
+calibrated before anything reaches chat.
+
+| Piece | What it is |
+| --- | --- |
+| `src/rules/chase.js` | Pure evaluator — channels, grouping, dwell, hysteresis, incident lifecycle. Offline-testable. |
+| `src/integrations/chaseSources.js` | Fetchers + parsers. Nothing here throws to its caller; one dead feed never stops the others. |
+| `src/db/chaseMonitor.js` | RTDB: settings, carry-over state, the bounded shadow log. |
+| `src/events/chaseMonitor.js` | The two clocks — a 1-quota-unit fast poll and a free discovery sweep. |
+| `scripts/chase-record.mjs` | Records raw samples to JSONL. Never scores, never posts, needs no Firebase. |
+| `scripts/chase-sim.mjs` | Replays a recorded or synthetic timeline through the **real** evaluator (`npm run test:chase`). |
+| `scripts/chase-sources-load.mjs` | Loads the private source roster into RTDB (`npm run chase:sources`). |
+
+**A YouTube Data API key is required** (`YOUTUBE_API_KEY` — free, 10,000 quota
+units/day, of which this spends ~1,440). Without it the monitor detects **nothing**:
+the keyless RSS feeds list a channel's videos but never say which one is *live*, and
+announcing something unconfirmed would break the premise rather than degrade it. It
+stands down cleanly and `!chasemon status` says so.
+
+**No source roster ships in this repository, by design** — which outlets are watched is
+the streamer's business, so `config.chase.orgs` is empty here and the table is loaded
+at runtime from outside the repo (`.workspace/chase-sources.json` → `npm run
+chase:sources` → `config/chaseMonitor/orgs`, which is not client-readable). Sources are
+referred to by *class* (`chopper` · `newscast` · `episodic`) or opaque id everywhere in
+this repo — including comments, test fixtures and sim data.
+`test/rules/chase-privacy.test.js` enforces that in CI, deriving its forbidden list
+from the private file so the list itself never enters the repo.
+
+| Command | Who | What |
+| --- | --- | --- |
+| `!chase` | anyone | Is a chase on right now? Links it, or reports the most recent. |
+| `!chasemon` | mods | `on` · `off` · `shadow` · `live` · `status` · `threshold <n>` · `dwell <n>` |
+
 ## Environment contract
 
 Names only — **never commit values** (`.env*` and `serviceAccount*.json` are
@@ -420,6 +675,8 @@ gitignored). Secrets arrive at runtime, never baked into the image.
 | `OBS_WEBSOCKET_URL` / `OBS_WEBSOCKET_PASSWORD` | the streamer's OBS (obs-websocket, over the tailnet) — required for the local capture |
 | `CAPTURE_VERTICAL_OUTPUT` | *optional* — Aitum Stream Suite Backtrack output name (e.g. `Vertical Backtrack`); also saves a natively-framed 9:16 clip. Unset = horizontal only |
 | `OBS_TIMEOUT_MS` / `CAPTURE_MIN_INTERVAL_MS` / `CAPTURE_BACKEND` | *optional* capture knobs — request deadline, channel-wide gap between local saves, backend |
+| `YOUTUBE_API_KEY` | YouTube Data API v3 key — **required for the chase monitor**, free (10k units/day, ~1,440 used). Without it the monitor detects nothing and says so |
+| `CHASE_SOURCES_FILE` | *optional* — where `chase-record.mjs` reads the private roster (default `.workspace/chase-sources.json`, gitignored) |
 | `INSTANCE_ID` / `LOG_LEVEL` / `HEARTBEAT_FILE` | optional runtime knobs |
 
 ## Production (containerized, outbound-only)

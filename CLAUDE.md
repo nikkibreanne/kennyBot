@@ -39,6 +39,20 @@ metadata for `/mnt/c`, which has already caused one wrong diagnosis).
 
 - **Public repo.** No real addresses, hostnames, or credentials — placeholders only
   (`ws://<obs-host>:4455`). Private notes go in `.workspace/` (gitignored).
+- **The chase monitor's SOURCE ROSTER is private.** Never write an actual outlet name,
+  YouTube channel id, handle, on-air personality or source feed URL anywhere in this
+  repo — that means **code comments, JSDoc, test fixtures, sim data, docs, commit
+  messages and PR titles**, not just config values. Refer to a source by its *class*
+  (`chopper` · `newscast` · `episodic`) or an opaque id (`org1`). The real roster lives
+  in `.workspace/chase-sources.json` and is loaded into RTDB by `npm run chase:sources`;
+  `src/config.js` ships `orgs: []`. The *methodology* stays public — only the roster is
+  secret. `test/rules/chase-privacy.test.js` enforces this in CI — it derives the
+  forbidden names from the gitignored roster (so the list never enters the repo) and
+  scans everything `git add -A` would stage. To check by hand:
+  `git ls-files -co --exclude-standard | xargs grep -nE '\bUC[A-Za-z0-9_-]{22}\b'`
+  — that must print nothing. Placeholders are kept deliberately SHORT (`UC-org1`) so
+  this stays one rule with no exemptions. (A name grep will false-positive on hex in
+  `package-lock.json`; the channel-id grep above does not.)
 - **Conventional Commits, enforced on PR titles** (`pr-title` check). Merges are
   squash-only, so the PR title becomes the commit release-please parses to pick the
   next version. See the README's "Releasing" section.

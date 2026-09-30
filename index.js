@@ -18,6 +18,10 @@ import { buildAuth } from './src/twitch/auth.js';
 import { createSender } from './src/twitch/sender.js';
 import { initClips } from './src/twitch/clips.js';
 import { initCapture, captureReady } from './src/integrations/capture.js';
+import { initMedia } from './src/integrations/obsMedia.js';
+import { initObsControl } from './src/integrations/obsControl.js';
+import { initSpotify } from './src/integrations/spotify.js';
+import { startSpotifyOverlay } from './src/events/spotifyScheduler.js';
 // Read once at boot purely to log what's in force; the live value is RTDB-backed.
 import { activeClipMode } from './src/commands/clip.js';
 import { startLivePoll } from './src/twitch/liveGate.js';
@@ -31,6 +35,7 @@ import { attachSubathonEvents } from './src/events/subathonEvents.js';
 import { startDropScheduler } from './src/events/dropScheduler.js';
 import { startTimerScheduler } from './src/events/timerScheduler.js';
 import { startReminderScheduler } from './src/events/reminderScheduler.js';
+import { startChaseMonitor } from './src/events/chaseMonitor.js';
 import { seedReminders } from './src/db/reminders.js';
 import { processDrops } from './src/db/drops.js';
 import { startNoticeMirror } from './src/db/notices.js';
@@ -288,6 +293,19 @@ async function main() {
   // tailnet), reached whenever !clip's mode includes the local half.
   initCapture({}, logger);
 
+  // Media actions on that SAME OBS — `!media <n>` plays a mapped source. Separate
+  // init because it is a separate feature with its own failure mode, but it
+  // deliberately resolves the same connection: two ideas of where OBS lives is
+  // one more than can ever be right.
+  initMedia({}, logger);
+
+  // Scenes / source visibility / filters / audio on that same OBS (`!obs`).
+  initObsControl({}, logger);
+  // Spotify "now playing" (`!song`). Account-scoped, so it reads whatever the
+  // streamer's Spotify is playing on ANY device — the bot does not need to be on
+  // the same machine, and nothing is installed there.
+  await initSpotify({}, logger);
+
   // What !clip actually does. Default 'local': trigger the streamer's OBS/Aitum
   // capture and post NO Twitch clip — a Twitch clip is capped at the stream
   // resolution, so the local recording is the copy worth keeping. 'twitch'
@@ -385,6 +403,16 @@ async function main() {
   // so this only supplies the clock and the channel — which is also what makes a
   // reminder channel-specific without any per-channel branch in the code.
   shutdownHooks.push(startReminderScheduler({ send, channel, logger }));
+
+  // LA police-chase monitor (docs/chase-monitor-design.md). Runs whether or not the
+  // channel is live — that is deliberate. It ships DOUBLE-LOCKED: config/chaseMonitor
+  // seeds `enabled:false` and `mode:'shadow'`, so it polls nothing and says nothing
+  // until a mod turns it on twice with !chasemon. Failures here can never reach chat.
+  shutdownHooks.push(startChaseMonitor({ send, logger }));
+
+  // Now-playing overlay: writes the current track into an OBS text source named
+  // by SPOTIFY_OVERLAY_SOURCE. No source name → no polling at all.
+  shutdownHooks.push(startSpotifyOverlay({ logger }));
 
   // ── Live gate: Helix poll (always) + EventSub (when broadcaster auth fits) ──
   const setLiveBound = (live, source) => {
