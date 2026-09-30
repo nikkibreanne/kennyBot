@@ -597,6 +597,64 @@ use invented numbers, and the ledger lives under `config/subathon`, which is not
 client-readable (see `database.rules.json`; read grants cascade in RTDB, so that
 key must never be added to a readable parent).
 
+## LA police-chase monitor (off by default, operator-only)
+
+Announces a live Los Angeles police pursuit in chat, with a link, from automated
+detection. It runs **whether or not the channel is live** — that is deliberate.
+Design: [`docs/chase-monitor-design.md`](docs/chase-monitor-design.md) · costs and
+next iterations: [`docs/chase-monitor-roadmap.md`](docs/chase-monitor-roadmap.md) ·
+**how to launch it and read the logs afterwards:**
+[`docs/chase-monitor-runbook.md`](docs/chase-monitor-runbook.md).
+
+**Detection in one paragraph.** Each source contributes at most one signal per
+*evidence channel* — `title` (a stream retitled to chase vocabulary), `audience`
+(concurrent viewers against a 30-minute trailing median), `liveness` (a normally-dark
+source going live), `editorial` (a fresh article) — so one measurement can never score
+twice under two names. A source's channels are summed with a discount on all but the
+strongest, because one newsroom covering a chase drives all of its systems at once;
+sources are then summed with no discount, because two newsrooms are two independent
+decisions. A single source *can* cross the threshold, but only with two genuinely
+different observations. The score must then hold for `dwell` consecutive polls, which
+is what actually removes false positives — a title glitch lasts one poll, a real
+pursuit lasts half an hour.
+
+**Double-locked off.** `config/chaseMonitor` seeds `enabled:false` **and**
+`mode:'shadow'`, so a fresh deploy polls nothing and says nothing until a mod turns it
+on twice (`!chasemon on`, then `!chasemon live`). Switched off it makes **zero**
+network calls — not "polls and discards". Shadow mode runs the full pipeline and writes
+every would-be announcement to RTDB without speaking, which is how the weights get
+calibrated before anything reaches chat.
+
+| Piece | What it is |
+| --- | --- |
+| `src/rules/chase.js` | Pure evaluator — channels, grouping, dwell, hysteresis, incident lifecycle. Offline-testable. |
+| `src/integrations/chaseSources.js` | Fetchers + parsers. Nothing here throws to its caller; one dead feed never stops the others. |
+| `src/db/chaseMonitor.js` | RTDB: settings, carry-over state, the bounded shadow log. |
+| `src/events/chaseMonitor.js` | The two clocks — a 1-quota-unit fast poll and a free discovery sweep. |
+| `scripts/chase-record.mjs` | Records raw samples to JSONL. Never scores, never posts, needs no Firebase. |
+| `scripts/chase-sim.mjs` | Replays a recorded or synthetic timeline through the **real** evaluator (`npm run test:chase`). |
+| `scripts/chase-sources-load.mjs` | Loads the private source roster into RTDB (`npm run chase:sources`). |
+
+**A YouTube Data API key is required** (`YOUTUBE_API_KEY` — free, 10,000 quota
+units/day, of which this spends ~1,440). Without it the monitor detects **nothing**:
+the keyless RSS feeds list a channel's videos but never say which one is *live*, and
+announcing something unconfirmed would break the premise rather than degrade it. It
+stands down cleanly and `!chasemon status` says so.
+
+**No source roster ships in this repository, by design** — which outlets are watched is
+the streamer's business, so `config.chase.orgs` is empty here and the table is loaded
+at runtime from outside the repo (`.workspace/chase-sources.json` → `npm run
+chase:sources` → `config/chaseMonitor/orgs`, which is not client-readable). Sources are
+referred to by *class* (`chopper` · `newscast` · `episodic`) or opaque id everywhere in
+this repo — including comments, test fixtures and sim data.
+`test/rules/chase-privacy.test.js` enforces that in CI, deriving its forbidden list
+from the private file so the list itself never enters the repo.
+
+| Command | Who | What |
+| --- | --- | --- |
+| `!chase` | anyone | Is a chase on right now? Links it, or reports the most recent. |
+| `!chasemon` | mods | `on` · `off` · `shadow` · `live` · `status` · `threshold <n>` · `dwell <n>` |
+
 ## Environment contract
 
 Names only — **never commit values** (`.env*` and `serviceAccount*.json` are
@@ -617,6 +675,8 @@ gitignored). Secrets arrive at runtime, never baked into the image.
 | `OBS_WEBSOCKET_URL` / `OBS_WEBSOCKET_PASSWORD` | the streamer's OBS (obs-websocket, over the tailnet) — required for the local capture |
 | `CAPTURE_VERTICAL_OUTPUT` | *optional* — Aitum Stream Suite Backtrack output name (e.g. `Vertical Backtrack`); also saves a natively-framed 9:16 clip. Unset = horizontal only |
 | `OBS_TIMEOUT_MS` / `CAPTURE_MIN_INTERVAL_MS` / `CAPTURE_BACKEND` | *optional* capture knobs — request deadline, channel-wide gap between local saves, backend |
+| `YOUTUBE_API_KEY` | YouTube Data API v3 key — **required for the chase monitor**, free (10k units/day, ~1,440 used). Without it the monitor detects nothing and says so |
+| `CHASE_SOURCES_FILE` | *optional* — where `chase-record.mjs` reads the private roster (default `.workspace/chase-sources.json`, gitignored) |
 | `INSTANCE_ID` / `LOG_LEVEL` / `HEARTBEAT_FILE` | optional runtime knobs |
 
 ## Production (containerized, outbound-only)

@@ -20,6 +20,8 @@ import { initCaptureWith } from '../../src/integrations/capture.js';
 import { initMediaWith } from '../../src/integrations/obsMedia.js';
 import { initObsControlWith } from '../../src/integrations/obsControl.js';
 import { initSpotifyWith } from '../../src/integrations/spotify.js';
+import { initChaseSourcesWith } from '../../src/integrations/chaseSources.js';
+import { setChaseSources, setChaseSettings, getChaseSettings } from '../../src/db/chaseMonitor.js';
 import { clearMediaSlot, listSlots } from '../../src/db/media.js';
 import { slotInputs } from '../../src/rules/media.js';
 import { defaultBoss } from '../../src/content/bosses.js';
@@ -652,6 +654,56 @@ export const SCENARIOS = [
       const reply = await bot.send(u('e2e_season', { login: 'mod', name: 'Mod', mod: true }), '!season start t2');
       assert.match(reply, /Season started/i);
       assert.match(reply, /t2/);
+    },
+  },
+  {
+    command: 'chase', title: 'anyone can ask, and gets a straight answer with nothing leaked',
+    run: async ({ bot, u }) => {
+      const viewer = u('e2e_chase_v', { login: 'carl', name: 'Carl' });
+      // Nothing detected: a plain answer, and no hint of the rig behind it.
+      const idle = await bot.send(viewer, '!chase');
+      assert.match(idle, /no chase/i);
+      assert.doesNotMatch(idle, /score|threshold|youtube|twitch|quota|org\d/i,
+        '!chase must never leak the detector internals or a source id');
+    },
+  },
+  {
+    command: 'chasemon', title: 'a mod drives the monitor, and it stays double-locked',
+    run: async ({ bot, u }) => {
+      const mod = u('e2e_chasemon', { login: 'nikki', name: 'Nikki', mod: true });
+      const viewer = u('e2e_chasemon_v', { login: 'carl', name: 'Carl' });
+
+      // Mod-only, and the dispatcher IGNORES a non-mod rather than explaining itself
+      // (src/events/chat.js) — so the correct observation is silence, not a refusal.
+      assert.equal(await bot.send(viewer, '!chasemon status'), '', 'a non-mod gets no reply at all');
+
+      // Ships OFF and in shadow — turning it on must NOT let it speak.
+      const before = await getChaseSettings();
+      assert.equal(before.enabled, false, 'ships disabled');
+      assert.equal(before.mode, 'shadow', 'and in shadow mode');
+
+      // No roster in the repo, so status has to say so rather than look healthy.
+      assert.match(await bot.send(mod, '!chasemon status'), /NO SOURCES LOADED|sources/i);
+
+      // The roster is private and loaded out of band; a twitch entry needs a login.
+      initChaseSourcesWith(async () => { throw new Error('no network in e2e'); });
+      await setChaseSources([
+        { id: 'org1', name: 'Org One', channelId: 'UC-org1', streamClass: 'chopper' },
+        { id: 'org2', name: 'Org Two', platform: 'twitch', login: 'orgtwo', streamClass: 'episodic' },
+      ]);
+      const loaded = await getChaseSettings();
+      assert.equal(loaded.orgs.length, 2, 'both platforms survive the round-trip');
+
+      assert.match(await bot.send(mod, '!chasemon on'), /on|enabled/i);
+      assert.equal((await getChaseSettings()).mode, 'shadow', 'on does NOT imply live');
+
+      // A bad argument is rejected whole, never half-applied.
+      const t0 = (await getChaseSettings()).threshold;
+      await bot.send(mod, '!chasemon threshold banana');
+      assert.equal((await getChaseSettings()).threshold, t0, 'invalid threshold changed nothing');
+
+      await bot.send(mod, '!chasemon off');
+      assert.equal((await getChaseSettings()).enabled, false, 'the kill switch works');
     },
   },
 ];

@@ -180,4 +180,18 @@ export const PATHS = {
   // CLIP SYNC (clapperboard): per-stream anchors for the okra-clip-archiver tool.
   clipSync: () => 'clipSync',
   clipSession: (id) => `clipSync/${id}`,
+  // LA CHASE MONITOR (docs/chase-monitor-design.md). The live-tunable knobs sit
+  // under config/ with the rest of the operator surface, seeded once from
+  // config.chase and thereafter owned by `!chasemon` — the clipMode precedent,
+  // and for the same reason: the threshold gets retuned against real data, and
+  // re-deploying to change a number is not a thing anyone does at 2am.
+  configChaseMonitor: () => 'config/chaseMonitor',
+  // The monitor's own subtree. `state` is the evaluator's carry-over — baselines
+  // plus the dwell/clear/cooldown counters that are the ONLY thing stopping a
+  // restart from re-announcing a chase already in progress. `shadow` is the
+  // would-be-announcement log that calibration reads (design §5); it is trimmed,
+  // because it outlives every incident it records.
+  chaseState: () => 'chaseMonitor/state',
+  chaseShadow: () => 'chaseMonitor/shadow',
+  chaseShadowEntry: (id) => `chaseMonitor/shadow/${id}`,
 };
