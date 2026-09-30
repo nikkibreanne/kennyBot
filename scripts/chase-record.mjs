@@ -262,7 +262,18 @@ let tick = 0;
 let emptyPolls = 0;
 let liveStreams = 0;
 /** `videos.list` bills 1 unit per CALL against a 10,000/day budget (design §3). */
-let quotaUnits = 0;
+// Quota is a DAILY budget that resets at midnight Pacific, so a lifetime counter
+// misreports it: after a two-day run this read 5699/10000 while that day's actual
+// spend was 1800. Tracked per quota-day, with the lifetime total kept alongside.
+let quotaUnits = 0; // today
+let quotaUnitsTotal = 0; // whole process, for the operator's own curiosity
+let quotaDayKey = null;
+function bill(units) {
+  const day = quotaDay();
+  if (quotaDayKey !== day) { quotaDayKey = day; quotaUnits = 0; }
+  quotaUnits += units;
+  quotaUnitsTotal += units;
+}
 let consecutiveFailures = 0;
 let skipsRemaining = 0;
 let polling = false;
@@ -351,12 +362,17 @@ async function discover() {
     if (searchDay !== today) { searchDay = today; searchUnits = 0; }
     const affordable = Math.max(0, Math.floor((chase.searchDailyUnitCap - searchUnits) / SEARCH_UNITS));
     const askable = ytOrgs
-      .filter((o) => !liveByOrg[o.id] && (rssBlind || now - (lastSearchAt[o.id] || 0) >= chase.searchCooldownMs))
+      .filter((o) => {
+        // Blind RSS SHORTENS the cooldown, it does not remove it. Removing it turned a
+        // flaky night into ~6,000 wasted units, 20 of 24 searches finding nothing.
+        const cd = rssBlind ? (chase.searchBlindCooldownMs ?? 60 * 60_000) : chase.searchCooldownMs;
+        return !liveByOrg[o.id] && now - (lastSearchAt[o.id] || 0) >= cd;
+      })
       .slice(0, affordable);
     if (askable.length) {
       for (const o of askable) lastSearchAt[o.id] = now;
       searchUnits += askable.length * SEARCH_UNITS;
-      quotaUnits += askable.length * SEARCH_UNITS;
+      bill(askable.length * SEARCH_UNITS);
       const live = await findLiveVideos(askable, log);
       for (const [orgId, videoId] of Object.entries(live)) liveByOrg[orgId] = videoId;
       known = flatten({ ...knownByOrg, __live: Object.values(liveByOrg) });
@@ -375,7 +391,19 @@ async function discover() {
   }
 }
 
+let lastPollAt = 0;
+
 async function poll() {
+  // A host suspend/resume can move the wall clock. Backwards time makes the log look
+  // corrupt and quietly disturbs any window arithmetic, so it is recorded rather than
+  // left to be puzzled over.
+  const nowMs = Date.now();
+  if (lastPollAt && nowMs < lastPollAt) {
+    const backMs = lastPollAt - nowMs;
+    console.log(`${clock()}  ⚠ clock went BACKWARDS ${Math.round(backMs / 1000)}s — host suspend/resume or an NTP step`);
+    write({ kind: 'clockjump', at: nowMs, backMs, previousAt: lastPollAt });
+  }
+  lastPollAt = nowMs;
   // A slow fetch must not overlap the next tick — the timers keep firing whatever
   // the network is doing, and two in-flight polls would double the quota spend.
   if (polling) {
@@ -404,7 +432,7 @@ async function poll() {
     // Mirrors fetchLiveSamples' own early returns: with no key, or nothing
     // discovered yet, it spends no quota, so neither does this counter.
     const billed = youtubeKeyPresent() && known.length > 0;
-    if (billed) quotaUnits += 1;
+    if (billed) bill(1);
     // Both platforms at once. Neither fetcher throws, so a failure of one degrades
     // that platform's samples to [] and leaves the other's intact.
     try {
@@ -529,11 +557,13 @@ function health() {
     fetchFailures,
     liveStreams,
     quotaUnits,
+    quotaUnitsTotal,
     twitch: twitchReady(),
   });
   console.log(
     `${clock()}  health  ${tick} polls · ${emptyPolls} empty · ${fetchFailures} fetch failures · `
-    + `${liveStreams} live · ${quotaUnits}/10000 quota units`,
+    + `${liveStreams} live · ${quotaUnits}/10000 quota units today`
+    + (quotaUnitsTotal > quotaUnits ? ` (${quotaUnitsTotal} since start)` : ''),
   );
 }
 

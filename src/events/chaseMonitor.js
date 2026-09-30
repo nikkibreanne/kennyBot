@@ -109,7 +109,11 @@ export function startChaseMonitor({ send, logger = console }) {
       const unitCap = Math.max(0, Number(settings.searchDailyUnitCap) || 5000);
       const affordable = Math.max(0, Math.floor((unitCap - searchUnitsToday) / SEARCH_UNITS));
       const askable = ytOrgs
-        .filter((o) => !liveVideoIds[o.id] && (rssBlind || now - (lastSearchAt[o.id] || 0) >= cooldown))
+        // Blind RSS SHORTENS the cooldown, it does not remove it (see config).
+        .filter((o) => {
+          const cd = rssBlind ? Math.max(0, Number(settings.searchBlindCooldownMs) || 60 * 60_000) : cooldown;
+          return !liveVideoIds[o.id] && now - (lastSearchAt[o.id] || 0) >= cd;
+        })
         .slice(0, affordable); // the day's budget is a hard stop, not a warning
       if (askable.length) {
         searchUnitsToday += askable.length * SEARCH_UNITS;

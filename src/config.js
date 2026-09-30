@@ -384,6 +384,13 @@ export const config = {
     // daily cap after ~8 hours, which silently ended searching for the rest of the
     // day — worse than searching less often.
     searchCooldownMs: 3 * 60 * 60_000, // min gap between searches for the SAME dark org
+    // When RSS discovery goes blind, the paid search becomes the ONLY way to notice a
+    // new broadcast, so the cooldown is shortened — but NOT removed, which is what it
+    // was. Measured over one flaky night: 19% of sweeps were blind, the waiver fired
+    // ~20 extra searches at 300 units each, and 20 of 24 searches found NOTHING. That
+    // is ~6,000 units bought for no information. The daily cap kept it from being
+    // catastrophic, but a floor is what makes it proportionate.
+    searchBlindCooldownMs: 60 * 60_000,
     searchDailyUnitCap: 5000, // hard ceiling; 1,440 (fast loop) + this stays under 10k
     reopenCooldownMs: 20 * 60_000, // no NEW incident this soon after one closed
     maxPerHour: 3, // channel-wide announcement cap (never per-user)
