@@ -64,3 +64,21 @@ export function roleForClass(className) {
   if (!entry) throw new Error(`unknown class: ${className}`);
   return entry.role;
 }
+
+/**
+ * The classes that can wear a given role's gear. Gear has a ROLE affinity, and a
+ * class fixes its role at `!create` — so "which classes can equip this?" is
+ * derived, never a second list to keep in sync.
+ * @param {Role} role
+ * @returns {string[]} class names, in catalog order
+ */
+export function classesForRole(role) {
+  return Object.entries(CLASSES).filter(([, c]) => c.role === role).map(([name]) => name);
+}
+
+/** Human list for chat/UI: "Berserker, Arcanist or Ranger". */
+export function classesForRoleLabel(role) {
+  const names = classesForRole(role);
+  if (names.length <= 1) return names[0] || role;
+  return `${names.slice(0, -1).join(', ')} or ${names[names.length - 1]}`;
+}

@@ -46,11 +46,30 @@ export const config = {
   rating: {
     classBase: { tank: 100, healer: 90, dps: 80 },
     perLevel: 10,
-    // Veteran reputation (spec §5.6): renown earned by clearing raids grants a
-    // small role-rating bonus that PERSISTS across seasons (gear resets, renown
-    // doesn't). renownBonus = min(renown, renownCap) * renownPerPoint.
+    // RENOWN — this season's standing. +1 per raid cleared, worth a little role
+    // rating, and RESET at rollover where it is converted into prestige. It is
+    // deliberately not permanent: that job belongs to prestige below.
     renownPerPoint: 2,
-    renownCap: 40, // max +80 rating — meaningful for vets, never dominant
+    renownCap: 40,
+    // PRESTIGE — the permanent half, and the point of the whole loop. Earned
+    // only by SACRIFICING a character at season rollover (level back to 1), so
+    // it is never just a participation counter. Two multipliers, because a
+    // prestige bonus that doesn't make the next run FASTER isn't prestige:
+    //   · rating — you hit harder at any given level
+    //   · exp    — you climb back up quicker than you did last time
+    // Multiplicative on purpose. A flat additive bonus (which is what renown
+    // was) gets swamped by levels and never compounds, so run 3 feels exactly
+    // like run 1.
+    prestigeRatingPct: 0.05, // +5% role rating per prestige point
+    prestigeExpPct: 0.12,    // +12% EXP per point — the visible "faster" part
+    prestigeCap: 20,         // ceiling: +100% rating, +240% exp
+    // MATCHED SET (rules/rating.js#setBonus): a percentage of gear rating once
+    // all three slots are filled with gear this hero can actually use, tiered by
+    // the WEAKEST piece worn. Gives the 25-item-per-slot pyramid a goal beyond
+    // "biggest number", and makes an empty trinket cost more than the trinket.
+    // Small on purpose — verified against the combat sim to move S1 finale win
+    // rate by only a few points at full legendary, which no real roster has.
+    setBonusPct: { common: 0.02, uncommon: 0.04, rare: 0.07, epic: 0.10, legendary: 0.15 },
   },
 
   // ── Engagement multipliers (spec §7) ─────────────────────────────────────
@@ -69,9 +88,34 @@ export const config = {
   loot: {
     // Chat drops: weighted rarity ladder (rarer = much less likely).
     rarityWeights: { common: 60, uncommon: 25, rare: 10, epic: 4, legendary: 1 },
-    // BOSS-battle rewards roll on a HIGHER-rarity table (clearing a raid should
-    // feel better than a chat drop — owner request).
+    // RAID REWARDS roll on a HIGHER-rarity table than chat drops (clearing a raid
+    // should feel better than catching a drop — owner request).
     bossRarityWeights: { common: 18, uncommon: 34, rare: 28, epic: 14, legendary: 6 },
+    // A cleared raid pays EVERY hero on the roster exactly ONE piece of gear,
+    // in their own role. How good it can be is the reward for how the fight went:
+    // surviving and taking MVP each raise the rarity FLOOR rather than handing
+    // out extra items. One roll each keeps it explainable in a sentence and stops
+    // bags filling with duplicates (the old participation + survivor + MVP stack
+    // paid a surviving MVP three items a week).
+    raidRewardFloors: { survivor: 'uncommon', mvp: 'rare' },
+    // BITS → a communal chat drop. `minBits` is the trigger (100 fired far too
+    // often); above it the cheer buys a rarity FLOOR, so a big cheer cannot roll
+    // a common. Bands are [minBits, floor] ascending — the highest one the cheer
+    // clears wins. The floor restricts the ladder and re-rolls on the remaining
+    // relative weights, so 5000 bits still reaches legendary, it just can't fall
+    // below epic. The drop is still a LOTTERY into general chat: the cheerer
+    // gets no edge (owner decision), they buy the item for the community.
+    cheer: {
+      minBits: 500,
+      /** @type {[number, 'common'|'uncommon'|'rare'|'epic'|'legendary'][]} */
+      floors: [
+        [500, 'common'],
+        [1000, 'uncommon'],
+        [2500, 'rare'],
+        [5000, 'epic'],
+        [10000, 'legendary'],
+      ],
+    },
     // Claim is a LOTTERY over a window (spec §5.2): every !grab in the window
     // ENTERS the viewer; at window close ONE winner is drawn for the ONE item, so
     // a drop never mints duplicates. TIER-FAIR — every entrant has equal odds in
@@ -81,14 +125,37 @@ export const config = {
     // resolves in turn, one windowMs apart. At most maxQueue drops can be lined
     // up at once (the open one + those waiting); drops past that are ignored.
     maxQueue: 10, // ~10 min of back-to-back drops at a 60s window
+    // SALVAGE (!salvage): turn gear you can't use into credits. Exists because
+    // role-locked loot has a floor problem — a trade needs someone who WANTS the
+    // item, and 52 dead pieces were sitting in prod bags with no buyer. Values
+    // are deliberately below what the piece is worth to the right hero, so
+    // trading it to a raider always beats melting it.
+    salvage: { common: 8, uncommon: 20, rare: 50, epic: 120, legendary: 300 },
+    // Melting an epic or better by fat-fingering a bag number is unrecoverable,
+    // so those need `!salvage <#> confirm`.
+    salvageConfirmFrom: 'epic',
     // Auto chat-drop scheduler while live; mod-tunable at runtime via the
     // config/drops/scheduler RTDB path (see !drops command).
     scheduler: { enabled: false, intervalSec: 15 * 60, jitter: 0.3 }, // ~15 min ±30%
   },
 
+  // Pending "tell them next time they chat" notices (src/db/notices.js).
+  notices: {
+    // Minimum gap between notice lines so a post-raid rush can't burst a dozen
+    // messages at once. Anyone skipped gets theirs on their next message.
+    minGapMs: 4_000,
+  },
+
   // ── Weekly raid: muster → raid night → automated battle (spec §5.8) ───────
   raid: {
     seasonWeeks: 6, // a season = 6 weekly bosses + a prestige finale (§5.6)
+    // PRESTIGE payout at rollover. This season's RENOWN is what converts:
+    // renown is +1 per raid the patch clears, so every boss you help kill this
+    // season becomes permanent power in the next one. Renown itself resets.
+    prestige: {
+      perRenown: 1,     // 1 renown earned this season → 1 permanent prestige
+      maxPerSeason: 12, // bound a single season's payout
+    },
     // Roster locks this long before raid night; gear/level after lock don't
     // affect this battle (determinism + fairness, IMPLEMENTATION §L.1).
     lockLeadMs: 15 * 60 * 1000,
@@ -238,6 +305,38 @@ export const config = {
     minBet: 1, // smallest wager
     daily: { amount: 200, cooldownMs: 20 * 60 * 60 * 1000 }, // ~once/day claim
     maxOpenMarkets: 8, // how many OKRAMARKET predictions can run concurrently
+  },
+
+  // ── Respec (!respec): change class, and therefore role ────────────────────
+  // Class was permanent, so a season short on healers had no way to fix itself —
+  // the role-readiness thresholds were a diagnosis with no treatment. Costs
+  // credits (≈2.5 daily claims) so it's a real decision, and re-rolls starter
+  // gear for the new role since the old role's gear no longer works.
+  respec: { cost: 500 },
+
+  // ── "You made a hero and never joined the season" reminder ────────────────
+  // NOT a recurring broadcast and NOT fired the moment someone speaks — a bot
+  // that answers your first message with a nag reads as lying in wait. A
+  // background pass picks ONE hero who has been chatting anyway and invites them
+  // once (src/db/enlistReminder.js). Enlistment lasts a whole season, so there
+  // is nothing to repeat.
+  enlistReminder: {
+    enabled: true,
+    graceMs: 7 * 24 * 60 * 60 * 1000, // a full week after !create before we ever mention it
+    minGapMs: 45 * 60 * 1000,         // never two reminders close together
+    presentWithinMs: 20 * 60 * 1000,  // only @ someone who has chatted recently
+    checkMs: 10 * 60 * 1000,          // how often the background pass looks
+  },
+
+  // ── "no raid week is open" prompt ─────────────────────────────────────────
+  // Weeks are scheduled by hand on purpose (the muster window should open when
+  // the stream is actually live, not on a timer firing into an empty channel).
+  // The cost is a SILENT stall if nobody runs `!boss next` — this makes it
+  // visible. Aimed at whoever can act on it, so it is rare and says what to type.
+  schedulePrompt: {
+    enabled: true,
+    minGapMs: 2 * 60 * 60 * 1000, // at most once every ~2h of live time
+    checkMs: 15 * 60 * 1000,
   },
 
   // ── Site link surfaced by !muster / !char ──────────────────────────────────

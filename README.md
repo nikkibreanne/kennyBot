@@ -87,9 +87,9 @@ Underneath both:
 - **automated releases** from Conventional Commits (release-please), with `main`
   protected for everyone including admins
 
-Verified by `npm test` (231 offline unit tests), `npm run test:emulator` (76 — RTDB
+Verified by `npm test` (302 offline unit tests), `npm run test:emulator` (125 — RTDB
 rules + client-write rejection, and the stateful command paths), `npm run test:e2e`
-(34 — every registered command driven through the real dispatcher), and
+(36 — every registered command driven through the real dispatcher), and
 `npm run synthetic` (full muster→battle→victory run with UI-contract assertions).
 
 **Not yet done:** a full-session local recording (see
@@ -227,7 +227,7 @@ of the replay buffer.
 | `!drops on\|off\|every <min>\|status` | mod | auto chat-drop scheduler (rarity-weighted, while live) |
 | `!boss set <name>` / `!boss next` | mod | custom boss / advance to the next scripted season boss |
 | `!raidnight` | mod | lock the roster and run the battle now |
-| `!season start <id>` / `!season rollover <id>` | mod | start a tier / roll to the next (gear reset, renown kept) |
+| `!season next` | mod | **prestige into the next tier** — everyone resets to level 1 with starter gear and banks this season's renown as permanent prestige. `!season start <id>` / `!season rollover <id>` remain for custom tiers. |
 
 \* Viewing raid status is open to everyone, but **mustering** (signing up with
 `!muster`) needs an active sub — same as `!create` and `!grab`. A lapsed sub keeps
@@ -708,6 +708,8 @@ No command links the source repo — chat replies point at okrafans.com only.
 **Content:** 72 items / 18 bosses (3 seasons) / per-class + boss ability kits live
 in `src/content/`; boss HP scales to the mustered roster (`scaleBossHp`).
 Sub-tier boosts combat power + EXP; victory loot rewards participants + survivors
-+ MVP; veteran **renown** persists across `!season rollover`. Design rationale and
++ MVP. A season rollover is a **PRESTIGE**: level, EXP and gear all reset, and
+this season's renown converts into permanent `prestige`, which multiplies both
+combat power and EXP gain so each run is faster than the last. Design rationale and
 the future backlog (set bonuses, affixes, DoT/shields/taunt, multi-phase finales,
 big-raid log compaction) are in [`docs/design/`](docs/design/).

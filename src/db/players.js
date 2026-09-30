@@ -7,8 +7,9 @@ import { database, increment, PATHS } from './firebase.js';
 import { roleForClass, CLASSES } from '../content/classes.js';
 import { rollStarterEquipped, itemObject, getItem, SLOTS } from '../content/items.js';
 import { applyChatExp } from '../rules/leveling.js';
-import { engagementMultiplier, roleRating, contribution } from '../rules/rating.js';
+import { engagementMultiplier, roleRating, contribution, prestigeExpMultiplier } from '../rules/rating.js';
 import { config } from '../config.js';
+import { clearAllNotices } from './notices.js';
 
 /** Read a player record (or null). */
 export async function getPlayer(userId) {
@@ -40,7 +41,8 @@ export async function createPlayer({ userId, login, displayName, className, isSu
     levelPressure: 0,
     subTier: isSubscriber ? 1 : 0, // exact 2/3 refined by sub events / Helix lookup
     subMonths: 0,
-    renown: 0, // veteran reputation (persists across seasons; §5.6)
+    renown: 0, // THIS season's standing (+1 per raid cleared); spent at rollover
+    prestige: 0, // permanent, earned by giving up a run at rollover
     lastExpAt: 0,
     equipped: rollStarterEquipped(role),
     inventory: [],
@@ -89,7 +91,7 @@ export async function applyChatTick(userId, { rng = Math.random, isSubscriber } 
     const mult = engagementMultiplier({ ...curr, subTier }, config);
     const rolled = applyChatExp(
       { level: curr.level, exp: curr.exp, levelPressure: curr.levelPressure },
-      { engagementMult: mult, rng, config },
+      { engagementMult: mult, prestigeMult: prestigeExpMultiplier(curr, config), rng, config },
     );
     result = {
       leveledUp: rolled.leveledUp,
@@ -129,6 +131,16 @@ export async function equipItem(userId, itemId) {
 
   const res = await ref.transaction((curr) => {
     if (curr == null) { outcome = { ok: false, reason: 'no-character' }; return null; }
+    // ROLE LOCK. Gear pays out only through bonuses[wearer.role], so off-role
+    // gear was always worth exactly 0 — but nothing said so, and players wore it
+    // anyway (9 pieces were equipped off-role in prod, one hero in all three
+    // slots, running on zero gear rating without knowing). Refusing the equip
+    // turns a silent dead end into a reason to trade the piece to someone it
+    // helps. `item.role` is the item's affinity; a class fixes its wearer's role.
+    if (curr.role && typeof item.bonuses?.[curr.role] !== 'number') {
+      outcome = { ok: false, reason: 'wrong-role', item, wearerRole: curr.role };
+      return; // abort
+    }
     const inventory = Array.isArray(curr.inventory) ? [...curr.inventory] : [];
     const idx = inventory.indexOf(itemId);
     if (idx === -1) { outcome = { ok: false, reason: 'not-owned' }; return; } // abort
@@ -200,27 +212,135 @@ export async function addLoot(userId, itemId) {
 }
 
 /**
- * Season rollover (spec §5.6): reset every hero's GEAR (re-roll starter, clear
- * the bag) so a new tier starts fresh and newcomers aren't behind — but KEEP
- * level + renown, and award prestige renown for the season cleared. Returns the
- * number of heroes rolled over.
- * @param {{ prestigeRenown?: number }} [opts]
+ * Prestige earned by ending a season: this season's RENOWN converts into
+ * permanent prestige. Renown is +1 per raid the patch clears, so every boss you
+ * helped kill becomes power you keep after the reset. Bounded. Pure.
+ * @param {number} renownThisSeason
+ * @param {object} [cfg]
+ * @returns {number} 0 when nothing was earned this season
  */
-export async function rolloverAllPlayers({ prestigeRenown = 3 } = {}) {
+export function prestigeFor(renownThisSeason, cfg = config) {
+  const n = Math.max(0, Math.floor(renownThisSeason || 0));
+  if (n === 0) return 0;
+  return Math.min(n * cfg.raid.prestige.perRenown, cfg.raid.prestige.maxPerSeason);
+}
+
+/**
+ * SEASON ROLLOVER = PRESTIGE.
+ *
+ * THE SACRIFICE — the run is given up:
+ *   level back to 1, EXP and level pressure to 0,
+ *   gear back to a fresh starter set, bag emptied,
+ *   this season's renown spent.
+ * THE REWARD — kept forever:
+ *   `prestige`, converted from that renown, which MULTIPLIES both role rating
+ *   and EXP gain (rules/rating.js) — so the next run hits harder AND climbs the
+ *   levels back faster than this one did. That compounding is the whole point.
+ *
+ * The CHARACTER survives — same class, same role. Changing role is `!respec`,
+ * deliberately a separate decision from prestiging.
+ *
+ * An earlier version reset only GEAR and left levels untouched, so nothing was
+ * ever actually surrendered: the bonus compensated for nothing, and a level-24
+ * veteran simply stayed a level-24 veteran. Resetting the levels is what makes
+ * the permanent bonus mean anything at all.
+ *
+ * @param {{ seasonId?: string|null, cfg?: object }} [opts]
+ * @returns {Promise<{reset: number, prestiged: number, granted: number, best: number}>}
+ */
+export async function rolloverAllPlayers({ seasonId = null, cfg = config } = {}) {
+  // Last season's undelivered "you got X" lines name gear this wipe removes.
+  await clearAllNotices();
   const snap = await database().ref('players').get();
   const players = snap.val() || {};
-  let count = 0;
+  let reset = 0;
+  let prestiged = 0;
+  let granted = 0;
+  let best = 0;
   for (const [uid, p] of Object.entries(players)) {
     if (!p?.role) continue;
+    const earned = prestigeFor(p.renown, cfg);
     await database().ref(PATHS.player(uid)).update({
+      // ── the sacrifice ──
+      level: 1,
+      exp: 0,
+      levelPressure: 0,
       equipped: rollStarterEquipped(p.role),
       inventory: [],
-      renown: (p.renown || 0) + prestigeRenown,
+      renown: 0,
+      // ── what you keep ──
+      prestige: (p.prestige || 0) + earned,
       'stats/seasonsPlayed': (p.stats?.seasonsPlayed || 0) + 1,
+      'stats/highestLevel': Math.max(p.stats?.highestLevel || 0, p.level || 1),
     });
-    count += 1;
+    reset += 1;
+    if (earned > 0) { prestiged += 1; granted += earned; best = Math.max(best, earned); }
   }
-  return count;
+  return { reset, prestiged, granted, best };
+}
+
+/**
+ * Remove items from a player's bag, atomically. Returns what actually left —
+ * a racing `!equip` or `!trade` on the same item must not let it be sold twice.
+ * @param {string} userId
+ * @param {string[]} itemIds
+ * @returns {Promise<string[]>} the ids genuinely removed
+ */
+export async function removeFromBag(userId, itemIds) {
+  const wanted = [...itemIds];
+  let removed = [];
+  await database().ref(PATHS.player(userId)).transaction((curr) => {
+    if (curr == null) return null;
+    const inventory = Array.isArray(curr.inventory) ? [...curr.inventory] : [];
+    removed = [];
+    for (const id of wanted) {
+      const idx = inventory.indexOf(id);
+      if (idx !== -1) { inventory.splice(idx, 1); removed.push(id); }
+    }
+    if (!removed.length) return; // abort — nothing to do
+    return { ...curr, inventory };
+  });
+  return removed;
+}
+
+/**
+ * Change a player's class, and with it their ROLE (spec §5.6). Keeps level, EXP
+ * and renown; re-rolls starter gear because the old role's gear cannot be worn
+ * any more. The bag is left ALONE on purpose — those items are now off-role and
+ * become trade or `!salvage` fodder rather than being destroyed for them.
+ * @param {string} userId
+ * @param {string} className
+ * @returns {Promise<{ok:true,from:object,to:object}|{ok:false,reason:string}>}
+ */
+export async function respecPlayer(userId, className) {
+  const role = roleForClass(className);
+  if (!role) return { ok: false, reason: 'unknown-class' };
+
+  let outcome = { ok: false, reason: 'unknown' };
+  const res = await database().ref(PATHS.player(userId)).transaction((curr) => {
+    if (curr == null) { outcome = { ok: false, reason: 'no-character' }; return null; }
+    if (curr.class === className) { outcome = { ok: false, reason: 'same-class' }; return; }
+    const equipped = curr.equipped || {};
+    // Anything currently worn goes back to the bag rather than evaporating.
+    const returned = Object.values(equipped)
+      .filter(Boolean)
+      .map((v) => (typeof v === 'string' ? v : v.id))
+      .filter(Boolean);
+    outcome = {
+      ok: true,
+      from: { class: curr.class, role: curr.role },
+      to: { class: className, role },
+      returned: returned.length,
+    };
+    return {
+      ...curr,
+      class: className,
+      role,
+      equipped: rollStarterEquipped(role),
+      inventory: [...(Array.isArray(curr.inventory) ? curr.inventory : []), ...returned],
+    };
+  });
+  return outcome.ok && res.committed ? outcome : outcome;
 }
 
 /**

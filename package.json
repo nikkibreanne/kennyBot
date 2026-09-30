@@ -1,6 +1,6 @@
 {
   "name": "kennybot",
-  "version": "0.11.2",
+  "version": "0.15.0",
   "description": "Customizable Twitch helper bot for nikkibreanne (https://twitch.tv/nikkibreanne) — clips, stream timer, scheduled reminders, to-do board, fun facts, a credits economy, and a chat raid game. State in Firebase RTDB; outbound-only.",
   "type": "module",
   "main": "index.js",
@@ -12,7 +12,7 @@
     "dev": "node --watch index.js",
     "dev:live": "bash scripts/dev-live.sh",
     "test": "node --test \"test/rules/**/*.test.js\"",
-    "test:emulator": "firebase emulators:exec --only database --project okrafans \"node --test --test-concurrency=1 test/firebase-rules.test.js test/mute.test.js test/roster-refresh.test.js test/market.test.js test/todo.test.js test/duel.test.js test/catalog.test.js test/trade.test.js test/timer.test.js test/reminders.test.js test/cooldown.test.js\"",
+    "test:emulator": "firebase emulators:exec --only database --project okrafans \"node --test --test-concurrency=1 test/firebase-rules.test.js test/mute.test.js test/roster-refresh.test.js test/market.test.js test/todo.test.js test/duel.test.js test/catalog.test.js test/trade.test.js test/timer.test.js test/reminders.test.js test/cooldown.test.js test/season-rollover.test.js test/raid-payout.test.js test/equip-role-lock.test.js test/raid-notices.test.js test/salvage-respec.test.js\"",
     "test:e2e": "firebase emulators:exec --only database --project okrafans \"node --test test/e2e/commands.e2e.test.js\"",
     "synthetic": "firebase emulators:exec --only database --project okrafans \"node scripts/synthetic-chat.js\"",
     "dev:console": "firebase emulators:exec --only database --project okrafans \"node scripts/dev-console.js\"",
@@ -30,15 +30,15 @@
   },
   "homepage": "https://github.com/nikkibreanne/kennyBot#readme",
   "dependencies": {
-    "@twurple/api": "^8.1.4",
-    "@twurple/auth": "^8.1.4",
-    "@twurple/chat": "^8.1.4",
-    "@twurple/eventsub-ws": "^8.1.4",
+    "@twurple/api": "^8.2.0",
+    "@twurple/auth": "^8.2.0",
+    "@twurple/chat": "^8.2.0",
+    "@twurple/eventsub-ws": "^8.2.0",
     "dotenv": "^17.4.2",
-    "firebase-admin": "^14.2.0"
+    "firebase-admin": "^14.4.0"
   },
   "devDependencies": {
-    "firebase-tools": "^15.25.1"
+    "firebase-tools": "^15.30.1"
   },
   "overrides": {
     "uuid": "^11.1.1",

@@ -5,7 +5,7 @@
 // levers (per-sub EXP boosts, channel points via EventSub) are later phases.
 import { setSubStatus } from '../db/players.js';
 import { setDrop } from '../db/drops.js';
-import { pickDrop } from '../rules/loot.js';
+import { pickDrop, cheerRarityFloor } from '../rules/loot.js';
 import { getItem, DEFAULT_LOOT_TABLE } from '../content/items.js';
 import { getSeason, isChatMuted } from '../db/configStore.js';
 import { config } from '../config.js';
@@ -85,15 +85,21 @@ export function attachTwitchEvents({ chat, sender, logger }) {
   attach('onMessage', async (_ch, _user, _text, msg) => {
     try {
       const bits = msg?.bits || 0;
-      if (bits < 100) return;
-      const itemId = pickDrop(lootTable(), getItem, Math.random, config);
+      // The size of the cheer sets a rarity FLOOR (config.loot.cheer). Below the
+      // trigger nothing drops at all — 100 bits fired far too often.
+      const minRarity = cheerRarityFloor(bits, config);
+      if (!minRarity) return;
+      const itemId = pickDrop(lootTable(), getItem, Math.random, config, null, { minRarity });
       if (!itemId) return;
       const drop = await setDrop(itemId);
       if (drop.status === 'full') return;
+      // Only shout about the floor when the cheer actually bought one above the
+      // base tier, so a 500-bit cheer doesn't brag about guaranteeing a common.
+      const bought = minRarity === 'common' ? '' : ` (${bits} bits guarantees ${minRarity}+!)`;
       const line =
         drop.status === 'open'
-          ? `${bits} bits! A ${drop.rarity} ${drop.name} dropped — !grab to enter the draw!`
-          : `${bits} bits! A ${drop.rarity} ${drop.name} is queued — !grab when it opens!`;
+          ? `${bits} bits! A ${drop.rarity} ${drop.name} dropped${bought} — !grab to enter the draw!`
+          : `${bits} bits! A ${drop.rarity} ${drop.name} is queued${bought} — !grab when it opens!`;
       say(line);
     } catch (err) {
       logger.error('cheer handler failed', { err: String(err) });

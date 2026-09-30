@@ -15,7 +15,9 @@ The **implemented** content lives in `src/content/` (`items.js`, `abilities.js`,
   so fights stay ~12–20 turns from 8 to 40 heroes. Boss **attack stays absolute**,
   so an undermanned/underleveled raid can genuinely fail the harder bosses (the
   intended "chance to fail" — a recommended hero count is surfaced at muster).
-- **Veteran renown**, **sub-tier combat power**, **survivor-bonus loot**, and the
+- **Prestige** (a season rollover resets level + gear and banks permanent,
+  compounding power and EXP multipliers), **sub-tier combat power**,
+  **survivor-bonus loot**, and the
   **auto chat-drop scheduler** (see the main README).
 
 ## Backlog (designed, not yet wired) — see the per-area docs
