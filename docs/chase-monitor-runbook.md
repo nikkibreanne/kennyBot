@@ -70,11 +70,13 @@ on later from chat with no redeploy — nothing reaches viewers until `!chasemon
 restart. It is the same volume as the token store (`-v kennybot-tokens:/data`), which is
 why the log rotates daily and prunes past `logRetentionDays` (14 days ≈ 100 MB).
 
-```bash
-# add to the bot's --env-file
-CHASE_LOG_DIR=/data/chase-logs
+`CHASE_LOG_DIR=/data/chase-logs` is **already baked into the image** — it is a path, not
+a credential, and `/data` is the only writable persistent path in the container, so there
+is one correct value and nothing to configure. The only env var you must supply is
+`YOUTUBE_API_KEY`.
 
-# then, as a mod, in chat:
+```bash
+# as a mod, in chat:
 !chasemon on        # still shadow — it cannot speak
 !chasemon status    # expect: ON · mode shadow · N sources · key present
 ```

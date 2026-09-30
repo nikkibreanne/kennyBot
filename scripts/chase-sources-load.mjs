@@ -32,6 +32,12 @@
 //   newscast — always live, title tracks the current show
 //   episodic — dark until something happens, so GOING LIVE is itself the signal
 // `groupCap` below the threshold makes a source a corroborator that can never fire alone.
+// FIRST, like every other operator script here (subathon.mjs, seed-media.mjs,
+// get-token.mjs, list-clips.mjs, db-cleanup.js): this runs on a workstation against the
+// REAL project, so FIREBASE_DATABASE_URL and GOOGLE_APPLICATION_CREDENTIALS come from
+// .env. Without it initFirebase fails with "FIREBASE_DATABASE_URL is required in
+// production" even though .env has it.
+import 'dotenv/config';
 import { readFileSync } from 'node:fs';
 import { initFirebase, closeFirebase } from '../src/db/firebase.js';
 import { setChaseSources, getChaseSettings } from '../src/db/chaseMonitor.js';
