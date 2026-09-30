@@ -334,7 +334,7 @@ function sourceHealth(byKind) {
   const polls = byKind.poll;
   const orgs = new Map();
   const org = (id) => {
-    if (!orgs.has(id)) orgs.set(id, { org: id, seen: 0, live: 0, viewers: [], nullViewers: 0, discovered: 0, videoIds: new Set() });
+    if (!orgs.has(id)) orgs.set(id, { org: id, seen: 0, live: 0, viewers: [], nullViewers: 0, discovered: 0, videoIds: new Set(), streamClass: '' });
     return orgs.get(id);
   };
 
@@ -351,14 +351,19 @@ function sourceHealth(byKind) {
 
   for (const p of polls) {
     const here = new Set();
+    const liveHere = new Set();
     for (const s of Array.isArray(p.samples) ? p.samples : []) {
       const id = String(s?.org ?? '');
       if (!id) continue;
       const o = org(id);
       if (!here.has(id)) { o.seen += 1; here.add(id); }
       if (s?.videoId) o.videoIds.add(String(s.videoId));
+      if (!o.streamClass && s?.streamClass) o.streamClass = String(s.streamClass);
       if (s?.live) {
-        o.live += 1;
+        // Count POLLS the org was live in, not live samples: an org can run two
+        // concurrent streams (a 24/7 loop plus a chopper cam), which was reporting
+        // 101.3% live and reading as a bug in the recorder rather than in this sum.
+        if (!liveHere.has(id)) { o.live += 1; liveHere.add(id); }
         const v = Number(s?.viewers);
         if (s?.viewers == null || !Number.isFinite(v)) o.nullViewers += 1;
         else o.viewers.push(v);
@@ -371,7 +376,14 @@ function sourceHealth(byKind) {
     const liveObs = o.live;
     const flags = [];
     if (!o.seen) flags.push('NEVER SAMPLED — discovered but never returned by the fast loop');
-    else if (!o.live) flags.push('NEVER LIVE — likely a wrong channel id, or a source that does not stream');
+    // An `episodic` source is dark until something happens — that is the entire point
+    // of the class, and a dedicated chase source goes live ~1.5x/week. Calling that a
+    // misconfiguration trains the reader to ignore this section.
+    else if (!o.live) {
+      flags.push(o.streamClass === 'episodic'
+        ? 'never live in this window — EXPECTED for an episodic source; only a concern over many weeks'
+        : 'NEVER LIVE — likely a wrong channel id, or a source that does not stream');
+    }
     if (o.live && !o.viewers.length) flags.push('NEVER RETURNED VIEWERS — the audience channel is dead for this org');
     else if (liveObs && o.nullViewers / liveObs > 0.5) flags.push('viewers null on most live polls — audience channel mostly disabled');
     return {
@@ -414,7 +426,9 @@ function sourceHealth(byKind) {
   const flagged = rows.filter((r) => r.flags.length);
   if (flagged.length) {
     say('');
-    say('  LIKELY MISCONFIGURATION');
+    // Not all of these are faults — an episodic source being dark is expected — so the
+    // heading cannot assert a misconfiguration or the reader learns to skip the section.
+    say('  WORTH A LOOK');
     for (const r of flagged) for (const f of r.flags) say(`    ${r.org.padEnd(10)} ${f}`);
   }
   say('');
