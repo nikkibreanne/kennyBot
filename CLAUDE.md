@@ -59,3 +59,9 @@ metadata for `/mnt/c`, which has already caused one wrong diagnosis).
 - **`main` is protected for everyone including admins.** No direct pushes; everything
   goes through a PR that passed `ci / test`.
 - Tests: `npm test` (offline) · `npm run test:emulator` · `npm run test:e2e`.
+- **Checking the chase monitor in production: `npm run chase:doctor` FIRST.** It reads
+  the monitor's own RTDB state and needs no host access. A score of 0 is the expected
+  result (real chases are ~1.7/week), and "1 sample per poll" means discovery has not run
+  yet rather than that nothing is happening. Host access, the gotchas that have already
+  cost someone time, and how to pull the on-disk evidence are in
+  [`docs/chase-monitor-runbook.md`](docs/chase-monitor-runbook.md) § Checking on it.
