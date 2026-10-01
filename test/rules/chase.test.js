@@ -692,3 +692,68 @@ test('a cold start never scores L1, however many streams are already running', (
     assert.equal(r.groups[o]?.channels?.liveness, undefined, `${o}: found running is not a transition`);
   }
 });
+
+// ── a show name is not evidence about this broadcast ──────────────────────────
+//
+// Measured on the live roster: one source used 3 distinct titles across 12 broadcasts,
+// 11 of them containing chase vocabulary. So its title scored 5 on EVERY broadcast —
+// a constant, not an observation. Scored next to liveness it counted one fact (they
+// went live) twice, which is precisely what §2.1 exists to prevent, and it reached the
+// threshold on a single measurement while the model believed it had two channels.
+
+test('titleIsShowName suppresses the title channel entirely', () => {
+  const org = { id: 'org9', name: 'Nine', streamClass: 'episodic', titleIsShowName: true };
+  const c = { ...cfg, orgs: [org] };
+  const off = (at) => ({ org: 'org9', videoId: 'off', streamClass: 'episodic', live: false, title: '', viewers: null, startedAt: null, at });
+  let state = null;
+  for (let i = 0; i < 3; i += 1) state = evaluateChase({ samples: [off(NOW + i * MIN)], state, now: NOW + i * MIN, cfg: c }).state;
+
+  const r = evaluateChase({
+    samples: [{ org: 'org9', videoId: 'live1', streamClass: 'episodic', live: true, title: 'MY SHOW: Live Police Chase', viewers: 12, startedAt: NOW + 3 * MIN, at: NOW + 3 * MIN }],
+    state, now: NOW + 3 * MIN, cfg: c,
+  });
+  assert.equal(r.groups.org9.channels.title, undefined, 'a show name scores nothing, however much vocabulary it carries');
+  assert.equal(r.groups.org9.channels.liveness, 5, 'liveness is unaffected');
+});
+
+test('livenessWeight lets a dedicated source fire alone, by design not by accident', () => {
+  const org = { id: 'org9', name: 'Nine', streamClass: 'episodic', titleIsShowName: true, livenessWeight: cfg.threshold };
+  const c = { ...cfg, orgs: [org] };
+  const off = (at) => ({ org: 'org9', videoId: 'off', streamClass: 'episodic', live: false, title: '', viewers: null, startedAt: null, at });
+  let state = null;
+  for (let i = 0; i < 3; i += 1) state = evaluateChase({ samples: [off(NOW + i * MIN)], state, now: NOW + i * MIN, cfg: c }).state;
+
+  let fired = false;
+  let channels = null;
+  for (let i = 3; i < 9; i += 1) {
+    const at = NOW + i * MIN;
+    const r = evaluateChase({
+      samples: [{ org: 'org9', videoId: 'live1', streamClass: 'episodic', live: true, title: 'MY SHOW: Live Police Chase', viewers: 12, startedAt: NOW + 3 * MIN, at }],
+      state, now: at, cfg: c,
+    });
+    state = r.state; channels = r.groups.org9.channels;
+    if (r.announce) fired = true;
+  }
+  assert.deepEqual(channels, { liveness: cfg.threshold }, 'ONE channel carries it — no phantom second observation');
+  assert.ok(fired, 'and it does fire, which is the point');
+});
+
+test('the negative veto still guards a source that fires on liveness alone', () => {
+  // The only remaining guard once a single observation can reach the threshold.
+  const org = { id: 'org9', name: 'Nine', streamClass: 'episodic', titleIsShowName: true, livenessWeight: cfg.threshold };
+  const c = { ...cfg, orgs: [org] };
+  const off = (at) => ({ org: 'org9', videoId: 'off', streamClass: 'episodic', live: false, title: '', viewers: null, startedAt: null, at });
+  let state = null;
+  for (let i = 0; i < 3; i += 1) state = evaluateChase({ samples: [off(NOW + i * MIN)], state, now: NOW + i * MIN, cfg: c }).state;
+
+  for (let i = 3; i < 9; i += 1) {
+    const at = NOW + i * MIN;
+    const r = evaluateChase({
+      samples: [{ org: 'org9', videoId: 'live1', streamClass: 'episodic', live: true, title: 'A statement on yesterday’s events', viewers: 12, startedAt: NOW + 3 * MIN, at }],
+      state, now: at, cfg: c,
+    });
+    state = r.state;
+    assert.equal(r.score, 0, `poll ${i}: a vetoed title zeroes the org even on liveness alone`);
+    assert.equal(r.announce, null);
+  }
+});

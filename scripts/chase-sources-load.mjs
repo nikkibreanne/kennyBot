@@ -76,10 +76,15 @@ async function main() {
   // setChaseSources is all-or-nothing: a bad entry throws and nothing is written,
   // so a typo can never leave a half-loaded roster that looks configured.
   const n = await setChaseSources(parsed);
-  const { orgs } = await getChaseSettings();
+  const settings = await getChaseSettings();
+  const { orgs } = settings;
   console.log(`\n  loaded ${n} source(s) into config/chaseMonitor/orgs:`);
   for (const o of orgs) console.log(`    · ${redact(o)}`);
-  console.log('\n  the monitor is still OFF and in shadow mode — !chasemon on / !chasemon live\n');
+  // READ it, do not assert it: this line claimed "still OFF and in shadow mode" while
+  // the monitor was actually enabled and LIVE, which is the opposite of reassuring.
+  const mode = settings.enabled ? `ON, mode ${settings.mode}` : `OFF (mode ${settings.mode})`;
+  const warn = settings.enabled && settings.mode === 'live' ? '  ⚠ it WILL post to chat' : '';
+  console.log(`\n  monitor is ${mode}${warn} — !chasemon on | shadow | live | off\n`);
 }
 
 main()

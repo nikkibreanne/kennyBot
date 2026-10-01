@@ -251,8 +251,13 @@ export function evaluateChase({ samples = [], articles = [], state = null, now =
     const weak = matchesAny(title, cfg?.weakVocab);
     const negative = matchesAny(title, cfg?.negativeVocab);
     const changed = title !== restingTitle;
+    // A source that streams under a fixed SHOW NAME is not describing this broadcast,
+    // so its title is a constant and carries no evidence about the event. Scoring it
+    // next to liveness counted one observation (they went live) twice.
+    const titleIsShowName = Boolean(orgCfg?.titleIsShowName);
     let titleScore = 0;
-    if (live && changed && strong) titleScore = w('T1', 5);
+    if (titleIsShowName) titleScore = 0;
+    else if (live && changed && strong) titleScore = w('T1', 5);
     else if (live && changed && weak) titleScore = w('T2', 2);
 
     // One signal per channel: V1 wins outright, V2 is the same measurement at a
@@ -289,7 +294,11 @@ export function evaluateChase({ samples = [], articles = [], state = null, now =
     const sinceLive = startedAt != null
       ? at - startedAt
       : (wentLiveAt == null ? Infinity : at - wentLiveAt);
-    const livenessScore = livenessCounts && sinceLive >= 0 && sinceLive <= LIVENESS_WINDOW_MS ? w('L1', 5) : 0;
+    // Per-org override: for a source whose premise IS the event, going live is the
+    // evidence and is allowed to fire alone — explicitly, not as a side effect of its
+    // title matching a regex. The negative-marker veto still guards it.
+    const l1 = Number.isFinite(Number(orgCfg?.livenessWeight)) ? Number(orgCfg.livenessWeight) : w('L1', 5);
+    const livenessScore = livenessCounts && sinceLive >= 0 && sinceLive <= LIVENESS_WINDOW_MS ? l1 : 0;
 
     if (viewers != null) readings.push([videoId, viewers]);
     nextStreams[videoId] = {
