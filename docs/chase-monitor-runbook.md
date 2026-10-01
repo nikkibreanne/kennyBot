@@ -232,6 +232,70 @@ discard. `!chasemon shadow` is the softer step: keep detecting, stop speaking.
 
 ---
 
+## Checking on it — start here
+
+```bash
+npm run chase:doctor
+```
+
+Reads the monitor's own state out of RTDB and says whether it is alive, what it can see,
+and what is wrong if anything. **You do not need host access to answer "is it working".**
+It is the first thing to run, and it exists because answering that question ad-hoc took
+several attempts and the failure modes are not guessable.
+
+A healthy deployment looks like this — note that **a score of 0 is the expected result**,
+since real chases are ~1.7/week:
+
+```
+  OK    enabled, mode "shadow"
+  OK    6 source(s) loaded
+  OK    ticking — last observation 0 min ago
+  OK    39 stream(s) tracked, 2 live right now
+        2 stream(s) have a usable viewer baseline (needs 20 samples)
+  Healthy.
+```
+
+### Getting onto the host
+
+Only needed for the on-disk evidence. There is **no `faraday` entry in `~/.ssh/config`**,
+the user is **`root`**, and the key is a dedicated passphrase-free one:
+
+```bash
+ssh -o BatchMode=yes -i ~/.ssh/faraday_ed25519 root@faraday
+```
+
+`BatchMode=yes` matters: without it a wrong key or user leaves ssh waiting on a prompt
+that never arrives, and the command hangs rather than failing. There is **no `docker` or
+`tailscale` CLI inside WSL** — Docker Desktop integration is off — so drive Docker over
+SSH instead of looking for a local binary:
+
+```bash
+docker -H ssh://root@faraday ps
+docker -H ssh://root@faraday cp kennybot:/data/chase-logs ./chase-logs
+npm run chase:report -- ./chase-logs --no-sweep
+```
+
+The container is `kennybot`, the image is `ghcr.io/nikkibreanne/kennybot`, and the
+evidence is `/data/chase-logs/chase-YYYY-MM-DD.jsonl` inside it.
+
+### Five things that have already misled someone
+
+1. **"1 sample per poll" looks healthy and is not.** A Twitch source is polled by login
+   and never discovered, so before the first discovery sweep the monitor reports one
+   sample and zero live — which reads as a quiet city rather than a blind detector. If
+   `chase:doctor` says only one stream is tracked, discovery has not run.
+2. **`:latest` is not necessarily the newest tag.** Compare digests before concluding a
+   fix is deployed:
+   `docker -H ssh://root@faraday image inspect <image>:latest --format '{{.Id}}'`
+3. **Every operator script needs `import 'dotenv/config'`.** Without it `initFirebase`
+   fails with "FIREBASE_DATABASE_URL is required in production" even though `.env` has
+   it. One script shipped without it and the symptom was exactly that.
+4. **A scratch script in `/tmp` cannot resolve `node_modules`.** Write it inside the repo
+   and delete it afterwards, or the import of `dotenv` fails with ERR_MODULE_NOT_FOUND.
+5. **Never put a source identity in the repo while debugging.** Outlet names, channel ids
+   and logins are private (CLAUDE.md). Print org ids and classes; the privacy test will
+   catch a slip, but only once it is staged.
+
 ## When something looks wrong
 
 | Symptom | Almost always |
