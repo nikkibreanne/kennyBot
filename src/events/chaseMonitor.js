@@ -44,6 +44,14 @@ export function startChaseMonitor({ send, logger = console }) {
   // that also means `npm run chase:sources` takes effect without a restart.
   let warnedNoSources = false;
   let tickNo = 0;
+  // Was the monitor enabled last time we looked? The discovery sweep is primed at
+  // startup, but if the monitor is OFF then (which is how it ships) that primed sweep
+  // returns having done nothing, and `!chasemon on` then waits up to a full
+  // discoveryMs — ten minutes — before any YouTube video id is known. Observed in
+  // production: enabled at ~00:00, first useful poll at 00:06. Twitch sources are
+  // unaffected (polled by login, never discovered), which is exactly why the symptom
+  // was "1 sample per poll" rather than nothing at all.
+  let wasEnabled = false;
   // Opt-in JSONL, in the SAME format scripts/chase-record.mjs writes, so
   // `npm run chase:report` reads the bot's own evidence unchanged. Unset
   // CHASE_LOG_DIR and nothing is written or created. In the container the only
@@ -154,7 +162,13 @@ export function startChaseMonitor({ send, logger = console }) {
     polling = true;
     try {
       const settings = await getChaseSettings();
-      if (!settings.enabled) return; // the kill switch, honoured BEFORE any spend
+      if (!settings.enabled) { wasEnabled = false; return; } // the kill switch, honoured BEFORE any spend
+      // Just switched on: discover NOW rather than at the next ten-minute boundary.
+      if (!wasEnabled) {
+        wasEnabled = true;
+        logger.info?.('chase: enabled — priming discovery rather than waiting for the next sweep');
+        sweep().catch(() => {}); // deliberately not awaited: a slow sweep must not delay this tick
+      }
       if (!settings.orgs?.length) return noSources(); // no roster → nothing to ask about
 
       // Three independent systems, so all three are in flight at once and a dead one
