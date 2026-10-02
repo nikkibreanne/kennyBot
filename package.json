@@ -39,8 +39,8 @@
     "@twurple/auth": "^8.2.0",
     "@twurple/chat": "^8.2.0",
     "@twurple/eventsub-ws": "^8.2.0",
-    "dotenv": "^18.0.2",
-    "firebase-admin": "^14.4.0"
+    "dotenv": "^18.0.4",
+    "firebase-admin": "^14.5.0"
   },
   "devDependencies": {
     "firebase-tools": "^15.31.0"
