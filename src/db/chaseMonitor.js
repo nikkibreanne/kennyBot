@@ -83,6 +83,10 @@ function normalizeOrg(raw) {
     : { id, name: String(raw.name ?? id), channelId, streamClass };
   if (typeof raw.articleFeed === 'string' && raw.articleFeed) org.articleFeed = raw.articleFeed;
   if (Number.isFinite(Number(raw.groupCap))) org.groupCap = Number(raw.groupCap);
+  // Dropping either of these here would silently restore the double-counting the
+  // evaluator just stopped doing — the same class of bug as the `lastIncident` drop.
+  if (raw.titleIsShowName === true) org.titleIsShowName = true;
+  if (Number.isFinite(Number(raw.livenessWeight))) org.livenessWeight = Number(raw.livenessWeight);
   return org;
 }
 

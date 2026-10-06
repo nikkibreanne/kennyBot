@@ -457,6 +457,25 @@ export const config = {
     //     streamClass: 'chopper' | 'newscast' | 'episodic',
     //     articleFeed: 'https://<host>/<path>?rss=y',  // optional
     //     groupCap: 7 }                                 // optional, per-org override
+    // Optional PER-ORG overrides a roster entry may carry, beyond id/name/channelId
+    // or login, streamClass and groupCap:
+    //
+    //   titleIsShowName: true
+    //     The source streams under a fixed SHOW NAME rather than describing each
+    //     broadcast. Measured on the live roster: one source used 3 distinct titles
+    //     across 12 broadcasts, 11 of which contained chase vocabulary — so its title
+    //     scored 5 on every single broadcast. That is not evidence about THIS event, it
+    //     is a constant, and scoring it alongside liveness counted ONE observation
+    //     (they went live) twice — the exact failure §2.1 of the design exists to stop.
+    //     Setting this suppresses the title channel for that source.
+    //
+    //   livenessWeight: <number>
+    //     What a WITNESSED off->on transition is worth for this source, replacing the
+    //     shared L1. For a source whose entire premise is the event, going live IS the
+    //     evidence, and it should be allowed to fire on that alone BY DESIGN rather than
+    //     by accident of its show name matching a regex. Use the source's measured
+    //     precision to justify the number, and keep it honest: this is one observation
+    //     firing an announcement, and the negative-marker veto is what still guards it.
     orgs: [],
   },
 
