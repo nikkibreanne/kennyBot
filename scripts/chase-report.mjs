@@ -608,6 +608,67 @@ function wrap(text, width) {
 // ── 5. near misses ───────────────────────────────────────────────────────────
 
 /**
+ * The `search.list` sweeps — the only part of this monitor that spends real YouTube
+ * quota (100 units a call against 10,000/day, vs 1 unit for a whole poll).
+ *
+ * Reported because the burn rate has already gone wrong once in production: a
+ * waiver that skipped the sweep cooldown spent ~6,000 units in a day and 20 of its
+ * 24 sweeps found nothing at all. The fix was a separate, shorter cooldown — but
+ * the evidence for it was only ever visible by hand-grepping the JSONL, because
+ * the report discarded `search` records as an unknown kind and said nothing.
+ *
+ * A high `found nothing` share is the signature of that failure returning.
+ */
+function searchSweeps(byKind) {
+  const sweeps = byKind.search;
+  section(8, 'SEARCH SWEEPS — the only thing that spends real quota');
+  say('');
+  if (!sweeps.length) {
+    say('  no sweeps. Either nothing ever went blind (RSS answered every time), or');
+    say('  the cooldown held the whole run. Both are the cheap, healthy outcome.');
+    say('');
+    return { sweeps: 0, units: 0 };
+  }
+
+  const units = sweeps.reduce((n, r) => n + (Number(r.units) || 0), 0);
+  const asked = sweeps.reduce((n, r) => n + (Array.isArray(r.asked) ? r.asked.length : 0), 0);
+  const blind = sweeps.filter((r) => !(Array.isArray(r.found) ? r.found.length : 0));
+
+  // Per quota-day (midnight Pacific is what YouTube bills on, but the log is UTC
+  // and a calendar day is close enough to spot a runaway).
+  const byDay = {};
+  for (const r of sweeps) {
+    const day = new Date(r.at).toISOString().slice(0, 10);
+    byDay[day] = (byDay[day] || 0) + (Number(r.units) || 0);
+  }
+  const worst = Object.entries(byDay).sort((a, b) => b[1] - a[1])[0];
+  const cap = Number(config.chase.searchDailyUnitCap) || 0;
+
+  say(`  sweeps          ${sweeps.length} · ${asked} channel(s) asked · ${units} units total`);
+  say(`  found nothing   ${blind.length} of ${sweeps.length} (${pct(blind.length, sweeps.length)})`);
+  say(`  busiest day     ${worst[0]} · ${worst[1]} units${cap ? ` of a ${cap} cap (${pct(worst[1], cap)})` : ''}`);
+  say('');
+  if (blind.length / sweeps.length > 0.5) {
+    say('  MORE THAN HALF the sweeps found nothing. That is the signature of the burn');
+    say('  this cooldown exists to prevent — check searchBlindCooldownMs before the');
+    say('  daily cap starts clipping real discoveries.');
+    say('');
+  } else if (cap && worst[1] > cap * 0.8) {
+    say('  The busiest day came within 20% of the cap. A capped-out day is a BLIND day:');
+    say('  discovery stops and the monitor only sees streams it already knew about.');
+    say('');
+  }
+  return {
+    sweeps: sweeps.length,
+    asked,
+    units,
+    foundNothing: blind.length,
+    busiestDay: worst[0],
+    busiestDayUnits: worst[1],
+  };
+}
+
+/**
  * The aircraft channel, as a CALIBRATION report rather than a detection one.
  *
  * The weight (3) is a guess. What it should be depends on a number nobody has
@@ -920,6 +981,7 @@ function main() {
   if (NO_SWEEP) { section(6, 'WHAT-IF SWEEP'); say(''); say('  skipped (--no-sweep)'); say(''); }
   // Last, and after the sweep, so the sections print in their numbered order.
   const air = aircraftReport(byKind);
+  const searches = searchSweeps(byKind);
 
   if (JSON_OUT) {
     console.log(JSON.stringify({
@@ -941,6 +1003,7 @@ function main() {
       incidents: inc,
       nearMisses: miss,
       aircraft: air,
+      searchSweeps: searches,
       sweep: swept,
     }, null, 2));
   }
