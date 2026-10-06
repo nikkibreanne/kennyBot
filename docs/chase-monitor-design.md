@@ -156,9 +156,14 @@ when they are genuinely different observations of the world.
 | `audience` | Concurrent viewers vs. trailing baseline | Audience behaviour — nobody chose it |
 | `liveness` | A stream we watched go **not-live → live** | A scheduling/ops act, distinct from titling |
 | `editorial` | The org's article RSS carries a present-tense chase item | A second newsroom system, published separately |
+| `aircraft` | 2+ aircraft **orbiting** one spot, from public ADS-B | Nobody's editorial decision at all — physics, not a newsroom (§2.10) |
 
 `V1`/`V2` are the same measurement at two thresholds, so only the higher scores —
 and likewise `T1`/`T2`. That is what "one signal per channel" means concretely.
+
+Four of the five are observations **of a newsroom**. `aircraft` is the only one that
+is not, which is what makes it worth having — and also why it is the only one that
+cannot speak on its own (§2.10).
 
 ### 2.3 Grouping and scoring
 
@@ -176,6 +181,10 @@ cover a chase drives all of its systems at once — real corroboration, but part
 correlated. Across orgs there is no discount, because two newsrooms are two
 independent decisions.
 
+`aircraft` belongs to no org, so it forms its own single-channel group and is added
+without a discount — it is independent of every newsroom by construction. It is also
+**gated**: see §2.10.
+
 This also answers "the stream **and** a tweet": same org, so same group, discounted
 rather than counted as two independent confirmations — and X is rejected on cost
 regardless (§2.9). The article-RSS `editorial` channel is the free stand-in.
@@ -190,6 +199,7 @@ regardless (§2.9). The article-RSS `editorial` channel is the free stand-in.
 | **V2** | `audience` | Viewers ≥ **3×** the 30-min trailing median **and** ≥ `minViewers` | 2 |
 | **L1** | `liveness` | A **witnessed** off→on transition within 10 min (any class) | 5 |
 | **A1** | `editorial` | Org's article RSS has a present-tense chase item < 15 min old | 2 |
+| **C1** | `aircraft` | 2+ aircraft orbiting one spot — **only once something else names a chase** (§2.10) | 3 |
 | **N1** | — | Negative marker in title (§2.5) | **org → 0** |
 
 **Title signals score against the stream's *resting* title, not against the last
@@ -220,6 +230,8 @@ Worked cases:
 | An `episodic` org on a **brand-new broadcast** (no baseline) | 5 + 0.6·5 = **8** | **yes** | ✅ the realistic case — see below |
 | One org retitles to "pursuit"; a second org spikes 8× | 5 + 5 = **10** | **yes** | ✅ two orgs |
 | A `chopper` org spikes 60×, title unchanged | **5** | no | ✅ a spike alone is a fire, a protest, *or* a chase |
+| The same 60× spike **with 2 aircraft orbiting** | **5** | no | ✅ both signals are fire-compatible — §2.10 |
+| A `newscast` retitles to "pursuit", no spike, **aircraft overhead** | 5 + 3 = **8** | **yes** | ✅ this is what §2.10 buys |
 | A `newscast` org retitles to "pursuit", viewers only 3× | 5 + 0.6·2 = **6.2** | no | ⚠️ see below |
 | A `chopper` org live + "chopper" in static title + 3× | **2** | no | ✅ the §2.1 stacking attack, defused |
 | An `episodic` org live, titled "Raw video: chase ends in crash" | N1 → **0** | no | ✅ retrospective clip |
@@ -241,10 +253,13 @@ is empty and the `audience` channel is disabled for `minSamples × pollMs` ≈ 2
 The `episodic` class's realistic opening score was therefore 6.8 — below threshold,
 for the whole class, permanently. That was a structural miss, not a taste call.
 
-Row 5 is now the strictest remaining case: a newsroom deliberately writing "pursuit"
+Row 5 is the strictest remaining case: a newsroom deliberately writing "pursuit"
 but without an audience move. It is left below threshold because titles get reused,
 pre-scheduled and mistyped, and `dwell` cannot catch a *persistent* wrong title.
-Shadow data (§5) decides whether `T1` deserves 6.
+Shadow data (§5) decides whether `T1` deserves 6 — **or** `aircraft` resolves it
+without touching `T1` at all, which is the better answer and the last row above:
+the question "is this title describing something happening right now" is exactly what
+a second, non-editorial observation can answer.
 
 ### 2.5 Negative markers (zero the group)
 
@@ -300,6 +315,64 @@ Per §2.2 this costs less than it appears: a station's tweet was never going to 
 independent of that station's stream anyway. The free stand-in is **A1**, the org's
 own article RSS — lagging, so it mostly helps *sustain* and *close* an incident
 rather than open one.
+
+### 2.10 Aircraft corroboration (ADS-B) — the only non-editorial channel
+
+Public ADS-B (OpenSky, free, no auth, ~400 calls/day anonymous) gives aircraft
+positions over the LA basin. A news or police helicopter covering a pursuit **orbits**
+it, and an orbit is mechanically distinguishable from transit:
+
+```
+net displacement / path length < 0.4    # went nowhere despite flying far
+cumulative heading change     > 60°     # and kept turning
+low and slow                            # below cruise altitude and speed
+cluster = 2+ orbiting aircraft within 5 km of each other
+```
+
+An orbit cannot be seen in one snapshot, so a reading is **3 passes ~70 s apart**,
+tracked by `icao24` — ~140 s wall clock, longer than a 60 s tick. It is therefore
+sampled asynchronously **on suspicion** (`suspicionFloor: 5`, the same
+cheap-earns-expensive rule as the `search.list` sweep in §3) and read by a later
+tick, never awaited. 18 LA-basin airports are excluded at an 8 km radius, or every
+holding pattern at LAX would read as a chase.
+
+**The weight is 3, below the threshold of 8, and that is structural.** A cluster can
+never fire an announcement. It cannot even nominate one: an announcement needs a
+stream to link to, and this source has none.
+
+**It is also gated — a cluster scores 0 until something else has named a chase.**
+This is not belt-and-braces; it is the §2.1 error in a subtler form, and it was
+caught only by testing it:
+
+| | score | |
+|---|---|---|
+| Fire-titled stream, 60× spike, **no** aircraft reading | 5 | silent |
+| Fire-titled stream, 60× spike, **2 aircraft orbiting** | **8** | **announced a police chase over a wildfire** |
+
+A 60× audience spike and a helicopter cluster are *both* fire-compatible — news
+choppers converge on a brush fire exactly as they do on a pursuit, and the live
+shadow logs contain precisely that audience shape from a named fire on 2026-10-03.
+Summing two non-specific observations produced a confident, specific, wrong answer.
+Neither observation was faulty; the arithmetic was.
+
+So `aircraft` only scores once some channel has supplied chase **vocabulary** — a
+title match, weak or strong, or a source whose going-live *is* the statement
+(`titleIsShowName`). Aircraft then answers the question editorial evidence cannot:
+*is this happening right now?* Measured against the worked cases in §2.4, the gate
+costs **no** recall — every genuine-chase row still fires, and the strictest
+near-miss (row 5, a bare retitle) now reaches 8 and fires where it previously
+could not.
+
+What remains unmeasured is the **background rate**: how often 2+ aircraft orbit one
+spot in LA with no pursuit at all. `npm run chase:report` prints that as a
+calibration section (§7) rather than asserting a number nobody has yet collected.
+Until it is collected, the weight does not rise.
+
+Operationally this channel is the only one with a chat kill switch —
+`!chasemon aircraft off` — because it depends on a third party that can begin
+answering nonsense without warning, and the alternative would be a redeploy. Its
+weight and floor are **not** tunable from chat: those are calibration, and calibration
+belongs in a reviewed commit.
 
 ---
 

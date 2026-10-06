@@ -477,6 +477,71 @@ export const config = {
     //     precision to justify the number, and keep it honest: this is one observation
     //     firing an announcement, and the negative-marker veto is what still guards it.
     orgs: [],
+
+    // ── AIRCRAFT OVERHEAD — corroboration only (src/integrations/aircraft.js) ──
+    //
+    // "Birds in the air" is scanner slang for aircraft overhead, and it is the one
+    // genuinely INDEPENDENT evidence class in this design. Every other source is a
+    // newsroom, so every other source is ultimately one editorial decision seen from
+    // several angles (§2.1). This is ADS-B transponder data — aircraft reporting
+    // their own positions, with no newsroom in the loop — and a pursuit converges
+    // news helicopters and police aircraft onto one location.
+    //
+    // MEASURED against the live OpenSky API on 2026-10-06, three 70s-spaced samples
+    // over the box below with nothing happening: ~98 airborne, ~38 low and slow, ~22
+    // after the airport exclusions, 4-7 ORBITING — and ZERO pairs of orbiting
+    // aircraft within 15 km of each other. The background rate of a CLUSTER is zero,
+    // which is the whole reason this is usable as a signal. The count of orbiters is
+    // not the signal; their mutual proximity is.
+    //
+    // It scores in its OWN pseudo-org group (`aircraft`), because aircraft overhead
+    // are not a property of any newsroom — putting them inside an org's group would
+    // both misattribute them and spend that org's one-signal-per-channel budget.
+    aircraft: {
+      enabled: true,
+      // The cheap path earns the expensive one, exactly as the search.list sweep does
+      // (§3, loop 3): a reading costs `samples` calls against a ~400/day anonymous
+      // budget, so it is only taken once the tick already scores this much on its own.
+      suspicionFloor: 5,
+      // BELOW `threshold` (8) on purpose, and that is the structural guarantee of
+      // "corroboration only": a cluster can never fire an announcement by itself. It
+      // also cannot nominate one — an announcement needs a stream to link to, and this
+      // source has none. Raising this to >= threshold would make aircraft a primary
+      // detector, which the measured data does not support (a cluster's background rate
+      // is zero, but its PRECISION for "police pursuit" specifically is unmeasured; a
+      // fire, a manhunt or a presidential motorcade also converge aircraft).
+      weight: 3,
+
+      // Sampling. N passes spaced ~70s, tracked by icao24 — an orbit cannot be seen in
+      // one snapshot, which is why this source is slow and cached rather than polled.
+      samples: 3,
+      sampleGapMs: 70_000,
+      // How old a reading may be and still score. Sampling takes ~140 s, longer than a
+      // 60 s tick, so a reading is ALWAYS used by a later tick than the one that asked
+      // for it — but a reading from twenty minutes ago is about a different sky.
+      maxAgeMs: 10 * 60_000,
+      // Bounds on the spend, both needed: the cooldown stops a 40-minute incident
+      // sampling on every tick, and the daily cap stops a bad week exhausting the
+      // anonymous budget (reported in `x-rate-limit-remaining`, which is logged).
+      cooldownMs: 15 * 60_000,
+      dailyCallCap: 120, // CALLS, not readings — 40 readings/day at samples=3
+
+      // Orbit detection (all measured; see src/integrations/aircraft.js for the test).
+      altMaxM: 1200, // mean altitude ceiling — above this it is an airliner
+      spdMaxMs: 60, // mean speed ceiling — above this it is going somewhere
+      loiterMax: 0.4, // net/path: 1 is a straight line, ~0 is a closed circle
+      turnMinDeg: 60, // summed |heading change| — what separates circling from dawdling
+      // Traffic patterns are the largest false-positive source: an aircraft in the
+      // pattern is low, slow and turning, i.e. a textbook orbit. 8 km around the 18
+      // basin airports took ~38 candidates to ~22.
+      airportExclusionKm: 8,
+      clusterKm: 5, // single-linkage radius between orbit centroids
+      minCluster: 2, // a lone orbiter is the background; two is the signal
+
+      // The LA basin. Larger than the chases we care about, deliberately — a pursuit
+      // that starts in the basin can end well outside it.
+      bbox: { lamin: 33.6, lomin: -118.8, lamax: 34.4, lomax: -117.4 },
+    },
   },
 
   // ── Site link surfaced by !muster / !char ──────────────────────────────────

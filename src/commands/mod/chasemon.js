@@ -26,7 +26,7 @@ import {
 import { youtubeKeyPresent } from '../../integrations/chaseSources.js';
 import { config } from '../../config.js';
 
-const USAGE = 'Usage: !chasemon on | off | shadow | live | status | threshold <n> | dwell <n>';
+const USAGE = 'Usage: !chasemon on | off | shadow | live | status | threshold <n> | dwell <n> | aircraft on|off';
 
 /** A dwell longer than this is a typo, not a policy — 20 polls is 20 minutes. */
 const MAX_DWELL = 20;
@@ -36,8 +36,19 @@ const MAX_DWELL = 20;
  * threshold above it is not "strict", it is "off" — and that is a very quiet way
  * to break the feature, so it is rejected rather than accepted.
  */
-function ceilingScore(settings) {
-  return config.chase.orgs.reduce((n, o) => n + (o.groupCap ?? settings.groupCap ?? 0), 0);
+export function ceilingScore(settings) {
+  // `settings.orgs`, NOT `config.chase.orgs`. The roster is private and ships
+  // EMPTY in the repo (it is loaded into RTDB out-of-band), so reducing over the
+  // config list returned 0 on every real deployment — and since the floor is
+  // `clearScore` (6), `n > 0` rejected every threshold a mod could type. The
+  // command was unconditionally broken in production and silent about it.
+  const orgs = Array.isArray(settings?.orgs) ? settings.orgs : [];
+  const fromOrgs = orgs.reduce((n, o) => n + (o.groupCap ?? settings.groupCap ?? 0), 0);
+  // The aircraft channel scores in its OWN group (§2.10), outside any org, so it
+  // raises the attainable ceiling too — but only while it is switched on.
+  const ac = settings?.aircraft;
+  const fromAircraft = ac && ac.enabled !== false ? Number(ac.weight) || 0 : 0;
+  return fromOrgs + fromAircraft;
 }
 
 /** "14m" / "1h 02m" — an incident's age, for the status line. */
@@ -52,7 +63,7 @@ function since(ms) {
  * is it running, will it speak, what is it tuned to, can it see, what does it
  * see right now.
  */
-function statusLine(settings, state) {
+export function statusLine(settings, state) {
   const bits = [
     `🚔 chase monitor: ${settings.enabled ? 'ON' : 'OFF'}`,
     `mode ${settings.mode}`,
@@ -68,6 +79,10 @@ function statusLine(settings, state) {
     settings.orgs?.length
       ? `${settings.orgs.length} sources`
       : '⚠ NO SOURCES LOADED — monitor is inert',
+    // Corroboration only, and worth saying out loud because it is the one
+    // channel an operator can switch off without a deploy — so "is it on?"
+    // has to be answerable the same way.
+    `aircraft ${settings.aircraft?.enabled === false ? 'off' : 'on'}`,
   ];
 
   const incident = state?.incident || null;
@@ -98,7 +113,7 @@ export default {
   names: ['chasemon'],
   mod: true,
   cooldownMs: 0,
-  help: '!chasemon on|off|shadow|live|status|threshold <n>|dwell <n> — chase monitor control, mod-only',
+  help: '!chasemon on|off|shadow|live|status|threshold <n>|dwell <n>|aircraft on|off — chase monitor control, mod-only',
   async run({ args, reply, logger }) {
     const [first, ...rest] = args;
     const verb = String(first || 'status').toLowerCase();
@@ -138,6 +153,24 @@ export default {
           ? 'LIVE — detections now go to chat'
           : 'SHADOW — detections are logged, never spoken';
         reply(`🚔 chase monitor mode: ${what}${off}`);
+        return;
+      }
+
+      if (verb === 'aircraft') {
+        const which = String(rest[0] ?? '').trim().toLowerCase();
+        if (rest.length !== 1 || (which !== 'on' && which !== 'off')) {
+          reply(`aircraft takes on or off — nothing changed · ${USAGE}`);
+          return;
+        }
+        const saved = await setChaseSettings({ aircraftEnabled: which === 'on' });
+        if (saved.aircraft?.enabled === false) {
+          reply('🚔 aircraft corroboration OFF — no ADS-B calls, and scoring falls back to the news channels alone.');
+          return;
+        }
+        // Deliberately restates the ceiling rather than just confirming: this
+        // channel cannot detect anything by itself, and an operator switching it
+        // on should not come away thinking they added a detector.
+        reply(`🚔 aircraft corroboration ON — adds up to ${Number(saved.aircraft?.weight) || 0} to an incident something else already named, never enough to announce on its own.`);
         return;
       }
 

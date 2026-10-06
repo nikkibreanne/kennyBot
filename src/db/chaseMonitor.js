@@ -57,6 +57,13 @@ import { config } from '../config.js';
 const TUNABLE = [
   'enabled', 'mode', 'threshold', 'groupCap', 'dwell',
   'clearScore', 'clearPolls', 'reopenCooldownMs', 'maxPerHour',
+  // The aircraft channel's KILL SWITCH, and only that. Its weight, suspicion
+  // floor and caps are calibration and stay code by the rule above — but
+  // "enabled" is not a model change, it is the same operational question as
+  // `enabled` and `mode`: this channel depends on a free third-party feed
+  // (§2.10) that can start answering nonsense without warning, and the
+  // alternative to a chat switch is a redeploy.
+  'aircraftEnabled',
 ];
 
 /**
@@ -128,6 +135,34 @@ export function emptyState() {
 let seeding = null;
 
 /**
+ * The seed record: every tunable's shipped default, flat, as RTDB stores them.
+ *
+ * Two things here are defensive, both learned the hard way by this function
+ * rejecting its own transaction:
+ *
+ * - `aircraftEnabled` has no `config.chase.aircraftEnabled` to read — it is a
+ *   flat NAME for a nested value (`aircraft.enabled`), so it needs an explicit
+ *   mapping. Without one it seeded `undefined`.
+ * - `undefined` is not a storable RTDB value; one of them rejects the whole
+ *   transaction. That does not merely skip the seed, it throws out of
+ *   `ensureSeeded()` and so out of *every* settings read — which took `!chase`
+ *   and `!chasemon` down together, for a key that is only a kill switch. Any
+ *   future tunable added without a default now simply goes unseeded and picks
+ *   its value up from `config.chase` at merge time, which is already the
+ *   contract for a key absent from RTDB.
+ */
+export function seedRecord() {
+  const explicit = { aircraftEnabled: config.chase.aircraft?.enabled !== false };
+  const seed = {};
+  for (const key of TUNABLE) {
+    const value = key in explicit ? explicit[key] : config.chase[key];
+    if (value === undefined) continue;
+    seed[key] = value;
+  }
+  return seed;
+}
+
+/**
  * Create config/chaseMonitor if it is absent, once per process. Returning
  * undefined ABORTS the transaction, so an existing record is not even rewritten
  * — the same never-clobber contract seedReminders() follows, and the reason a
@@ -135,7 +170,7 @@ let seeding = null;
  */
 async function ensureSeeded() {
   if (!seeding) {
-    const seed = Object.fromEntries(TUNABLE.map((k) => [k, config.chase[k]]));
+    const seed = seedRecord();
     seeding = database().ref(PATHS.configChaseMonitor())
       .transaction((cur) => (cur == null ? seed : undefined))
       // A failed seed must be retryable: keeping the rejected promise cached
@@ -163,14 +198,22 @@ export async function getChaseSettings() {
 }
 
 /** @param {unknown} stored @returns {typeof config.chase} */
-function mergeSettings(stored) {
+export function mergeSettings(stored) {
   const merged = { ...config.chase };
+  // The spread above is SHALLOW, so `merged.aircraft` is still the very object
+  // `config.chase.aircraft` — writing `enabled` onto it would change the
+  // module-level default for every later reader in the process. Clone it.
+  merged.aircraft = { ...(config.chase.aircraft || {}) };
   const raw = stored && typeof stored === 'object' ? stored : {};
   for (const key of TUNABLE) {
     const value = raw[key];
     if (value == null) continue;
     if (key === 'enabled') merged.enabled = value === true;
     else if (key === 'mode') merged.mode = value === 'live' ? 'live' : 'shadow';
+    // Stored flat (a sibling of `threshold`) and applied nested, because the
+    // monitor asks `settings.aircraft.enabled`. One name in RTDB, one place to
+    // read it in the code.
+    else if (key === 'aircraftEnabled') merged.aircraft.enabled = value === true;
     else if (Number.isFinite(Number(value))) merged[key] = Number(value);
   }
   // The roster lives only in RTDB — `config.chase.orgs` is [] in the public repo, so
@@ -186,7 +229,7 @@ function mergeSettings(stored) {
  * precedent: an invalid value throws and nothing is written, because a
  * half-applied patch leaves a monitor that looks configured and behaves
  * otherwise. Callers surface the throw as a usage line.
- * @param {Partial<{enabled: boolean, mode: string, threshold: number, groupCap: number,
+ * @param {Partial<{enabled: boolean, mode: string, aircraftEnabled: boolean, threshold: number, groupCap: number,
  *   dwell: number, clearScore: number, clearPolls: number, reopenCooldownMs: number,
  *   maxPerHour: number}>} patch
  * @returns {Promise<typeof config.chase>} the settings as they now read
@@ -206,9 +249,9 @@ export async function setChaseSettings(patch) {
   return getChaseSettings();
 }
 
-function validateSetting(key, value) {
-  if (key === 'enabled') {
-    if (typeof value !== 'boolean') throw new Error('enabled must be true or false');
+export function validateSetting(key, value) {
+  if (key === 'enabled' || key === 'aircraftEnabled') {
+    if (typeof value !== 'boolean') throw new Error(`${key} must be true or false`);
     return value;
   }
   if (key === 'mode') {

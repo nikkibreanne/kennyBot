@@ -702,6 +702,24 @@ export const SCENARIOS = [
       await bot.send(mod, '!chasemon threshold banana');
       assert.equal((await getChaseSettings()).threshold, t0, 'invalid threshold changed nothing');
 
+      // ...and a GOOD one is accepted. Worth asserting against real RTDB because
+      // the ceiling was computed from the repo's roster, which ships EMPTY — so
+      // every threshold was rejected in production while the unit tests, which
+      // never loaded a roster, agreed with the bug.
+      const said = await bot.send(mod, `!chasemon threshold ${t0}`);
+      assert.match(said, new RegExp(`threshold set to ${t0}`), `a valid threshold must apply, got: ${said}`);
+      assert.equal((await getChaseSettings()).threshold, t0);
+
+      // The aircraft kill switch round-trips through the flat stored key.
+      await bot.send(mod, '!chasemon aircraft off');
+      assert.equal((await getChaseSettings()).aircraft.enabled, false, 'aircraft off persists');
+      assert.match(await bot.send(mod, '!chasemon status'), /aircraft off/, 'and status says so');
+      await bot.send(mod, '!chasemon aircraft on');
+      assert.equal((await getChaseSettings()).aircraft.enabled, true);
+      // Nonsense changes nothing, same all-or-nothing contract as threshold.
+      await bot.send(mod, '!chasemon aircraft maybe');
+      assert.equal((await getChaseSettings()).aircraft.enabled, true, 'invalid arg changed nothing');
+
       await bot.send(mod, '!chasemon off');
       assert.equal((await getChaseSettings()).enabled, false, 'the kill switch works');
     },

@@ -23,12 +23,21 @@
 //     YouTube quota spent, not "polled and discarded";
 //   * nothing from a source ever reaches chat. The only string sent is the one
 //     the pure evaluator built; API errors, keys and quota state go to the log.
+//
+// A THIRD, SLOWER THING now hangs off the fast loop: the AIRCRAFT reading. It is
+// sampled only ON SUSPICION — once a tick already scores `aircraft.suspicionFloor`
+// from the cheap sources — exactly as the paid search.list sweep is. It is also the
+// only fetch here that CANNOT be awaited inside a tick: it takes 3 passes 70 s apart,
+// ~140 s, which is longer than the tick interval. So it is kicked off, its result is
+// cached with the timestamp it finished at, and the NEXT tick scores it; the evaluator
+// rejects a reading older than `aircraft.maxAgeMs` rather than scoring a stale sky.
 import { config } from '../config.js';
 import { evaluateChase } from '../rules/chase.js';
 import {
   fetchLiveSamples, discoverVideoIds, findLiveVideos, fetchArticles, fetchTwitchSamples,
   partitionSources, youtubeKeyPresent, twitchReady, SEARCH_UNITS,
 } from '../integrations/chaseSources.js';
+import { sampleAircraft, aircraftReady } from '../integrations/aircraft.js';
 import { getChaseSettings, loadMonitorState, saveMonitorState, logShadowAnnouncement } from '../db/chaseMonitor.js';
 import { createChaseLog } from '../integrations/chaseLog.js';
 
@@ -74,6 +83,21 @@ export function startChaseMonitor({ send, logger = console }) {
    * @type {Record<string, string>}
    */
   let liveVideoIds = {};
+  /**
+   * The last AIRCRAFT reading, and the bookkeeping that bounds what it costs.
+   *
+   * `reading` is deliberately one tick (or more) behind: sampling takes ~140 s, so
+   * the tick that pays for it is never the tick that scores it. That is fine and it
+   * is why the reading carries its own `at` — the evaluator drops one that has gone
+   * stale, so a cached reading can never outlive the sky it measured.
+   */
+  let aircraftReading = null;
+  let aircraftSampling = false;
+  /** When the last run STARTED — the cooldown anchor, so a long incident pays once. */
+  let aircraftStartedAt = 0;
+  let aircraftCallsToday = 0;
+  let aircraftDay = null;
+  let warnedAircraftCap = false;
   /** When each org was last searched, so a persistently-dark org is not hammered. */
   let lastSearchAt = {};
   /** Search units spent today, and which day that is. Quota resets midnight Pacific. */
@@ -157,6 +181,79 @@ export function startChaseMonitor({ send, logger = console }) {
     }
   }
 
+  /**
+   * Take an AIRCRAFT reading, if this tick earned one.
+   *
+   * NOT AWAITED by the caller, and it must stay that way: 3 passes 70 s apart is
+   * ~140 s against a 60 s tick. The resolved reading lands in `aircraftReading` and
+   * the NEXT tick scores it.
+   *
+   * Four gates, in the order they are cheapest to check:
+   *   * `enabled`, so this can be switched off without a deploy;
+   *   * nothing already in flight, or a 40-minute incident would stack runs;
+   *   * the tick must ALREADY score `suspicionFloor` from the cheap sources — the
+   *     cheap path earning the expensive one, exactly as the search sweep does;
+   *   * a cooldown, then a per-day CALL cap. The anonymous budget is ~400 calls/day
+   *     and one reading spends `samples` of them, so both bounds are needed: the
+   *     cooldown stops one long incident re-sampling every minute, and the cap stops
+   *     a bad week going dark on the API entirely.
+   *
+   * The reading is logged WHATEVER it says, including an empty one. That record is
+   * how `minCluster` and the orbit thresholds get calibrated from real chases later,
+   * and a log that only kept the positives could never measure a false-positive rate.
+   */
+  function maybeSampleAircraft(settings, score, at) {
+    const ac = settings?.aircraft;
+    if (!ac || ac.enabled === false || !aircraftReady()) return;
+    if (aircraftSampling) return;
+    const floor = Number.isFinite(Number(ac.suspicionFloor)) ? Number(ac.suspicionFloor) : 5;
+    if (!(score >= floor)) return;
+    const cooldownMs = Math.max(0, Number(ac.cooldownMs) || 0);
+    if (at - aircraftStartedAt < cooldownMs) return;
+
+    const day = quotaDay();
+    if (aircraftDay !== day) { aircraftDay = day; aircraftCallsToday = 0; warnedAircraftCap = false; }
+    const calls = Math.max(2, Math.round(Number(ac.samples) || 3));
+    const cap = Math.max(0, Number(ac.dailyCallCap) || 0);
+    if (cap && aircraftCallsToday + calls > cap) {
+      // Once a day, not once a minute: a cap that logs on every tick is its own outage.
+      if (!warnedAircraftCap) {
+        warnedAircraftCap = true;
+        logger.warn?.('chase: aircraft daily call cap reached — no more readings today', { calls: aircraftCallsToday, cap });
+      }
+      return;
+    }
+
+    aircraftSampling = true;
+    aircraftStartedAt = at;
+    aircraftCallsToday += calls; // charged on DISPATCH, so a failed run still costs its budget
+    sampleAircraft(ac, logger)
+      .then((reading) => {
+        if (stopped) return;
+        aircraftReading = reading;
+        chaseLog.write({
+          kind: 'aircraft',
+          at: reading.at,
+          triggeredAt: at,
+          triggerScore: score,
+          samples: reading.samples,
+          rateRemaining: reading.rateRemaining,
+          tookMs: reading.tookMs,
+          orbiting: reading.orbiting, // verbatim: this IS the calibration dataset
+          clusters: reading.clusters,
+        });
+        logger.info?.('chase: aircraft reading', {
+          orbiting: reading.orbiting.length,
+          clusters: reading.clusters.map((c) => c.size),
+          samples: reading.samples,
+          rateRemaining: reading.rateRemaining,
+        });
+      })
+      // sampleAircraft never throws, so this is belt and braces around the chase log.
+      .catch((err) => logger.warn?.('chase: aircraft reading failed', { err: String(err?.message || err) }))
+      .finally(() => { aircraftSampling = false; });
+  }
+
   async function tick() {
     if (stopped || polling) return; // a slow fetch must not overlap the next tick
     polling = true;
@@ -207,6 +304,9 @@ export function startChaseMonitor({ send, logger = console }) {
       const result = evaluateChase({
         samples,
         articles: articles || [],
+        // One tick behind by construction (see maybeSampleAircraft). Stale or absent
+        // scores 0 — the evaluator decides that, not this file.
+        aircraft: aircraftReading,
         state,
         now: at,
         cfg: settings,
@@ -226,6 +326,12 @@ export function startChaseMonitor({ send, logger = console }) {
       }
       if (result.announce) chaseLog.write({ kind: 'announce', at, incidentId: result.announce.incident?.id, text: result.announce.text });
       if (result.closed) chaseLog.write({ kind: 'incident', at, event: 'close', id: state?.incident?.id ?? null, durationMs: state?.incident?.openedAt ? at - state.incident.openedAt : null, peakScore: state?.incident?.peakScore ?? null });
+
+      // AFTER the score, because the score is the trigger. Deliberately NOT awaited:
+      // a reading takes ~140 s and this tick must finish in well under a minute, so
+      // the reading it produces is scored by a later tick. It runs in `shadow` mode
+      // too — shadow IS the calibration run, and the readings are the point of it.
+      maybeSampleAircraft(settings, result.score, at);
 
       // BEFORE anything is said. The dwell, cooldown and per-hour guards are all
       // counts held in this record; losing it after speaking is what would make
@@ -270,6 +376,7 @@ export function startChaseMonitor({ send, logger = console }) {
   // on this, so an operator reading the log should not have to guess.
   logger.info?.('chase monitor started', {
     pollMs, discoveryMs, youtubeKey: youtubeKeyPresent(), twitch: twitchReady(),
+    aircraft: config.chase.aircraft?.enabled !== false && aircraftReady(),
   });
 
   return () => {
