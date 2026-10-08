@@ -15,6 +15,15 @@
 //   audience   concurrent viewers moved against their own 30-minute median
 //   liveness   an `episodic` channel went not-live -> live
 //   editorial  the org's article feed carries a present-tense chase item
+//   aircraft   aircraft are ORBITING one patch of ground (ADS-B, no newsroom)
+//
+// `aircraft` is the odd one out and deliberately so. It is not a property of any
+// newsroom, so it cannot live inside an org's group — it scores in its OWN
+// pseudo-org group (`aircraft`), which is both conceptually right (it is an
+// independent evidence CLASS) and leaves every real org's one-signal-per-channel
+// budget untouched. Its weight sits BELOW the threshold, so it can never fire
+// alone; it also can never nominate an announcement, because an announcement needs
+// a stream to link to and this source has none. Corroboration only, structurally.
 //
 // An org's channels are summed with `withinOrgDiscount` on everything but its
 // strongest — one newsroom deciding to cover a chase drives all of its systems
@@ -47,6 +56,15 @@ const ARTICLE_MAX_AGE_MS = 15 * MIN_MS; // A1: a present-tense item < 15 min old
 const MAX_BASELINE_ENTRIES = 200;
 const MAX_TRACKED_STREAMS = 200;
 const MAX_ANNOUNCE_STAMPS = 24;
+
+/**
+ * The pseudo-org the `aircraft` channel scores under. Not a news organization — a
+ * group of one independent channel, so the arithmetic below needs no special case.
+ * A roster org that somehow used this id would keep the group and the aircraft
+ * reading would be dropped; opaque ids (`org1`, `source2`) are the convention, so
+ * that collision is a misconfiguration rather than something to design around.
+ */
+const AIRCRAFT_GROUP = 'aircraft';
 
 const num = (v, fallback) => (Number.isFinite(Number(v)) ? Number(v) : fallback);
 const numOrNull = (v) => (v == null || !Number.isFinite(Number(v)) ? null : Number(v));
@@ -102,6 +120,19 @@ export function median(values) {
  * @property {string} org
  * @property {string} title
  * @property {number} publishedAt  - ms epoch
+ */
+
+/**
+ * One AIRCRAFT READING, as `sampleAircraft()` returns it. The evaluator treats this
+ * as an INPUT like any sample — it never fetches, so a reading that was never taken
+ * (null) and one that has gone stale both score 0 rather than being guessed at.
+ * @typedef {object} AircraftReading
+ * @property {Array<{size: number, lat: number, lon: number, spreadKm: number}>} clusters
+ *           groups of aircraft orbiting the same place; `size` is how many
+ * @property {Array<object>} orbiting - the individual orbiters, for the log
+ * @property {number} samples - how many passes actually came back (< 2 means no measurement)
+ * @property {number|null} rateRemaining
+ * @property {number} at - ms epoch the reading FINISHED; what staleness is measured from
  */
 
 /**
@@ -184,7 +215,8 @@ function plain(v) {
  * the caller persists BEFORE it says anything (a crash between the two should
  * cost one announcement, not repeat one forever).
  *
- * @param {{ samples?: StreamSample[], articles?: OrgArticle[], state?: MonitorState,
+ * @param {{ samples?: StreamSample[], articles?: OrgArticle[],
+ *           aircraft?: AircraftReading|null, state?: MonitorState,
  *           now: number, cfg?: object }} input
  * @returns {{ score: number,
  *             groups: Record<string, {score: number, channels: object, vetoed: boolean}>,
@@ -193,7 +225,7 @@ function plain(v) {
  *             announce: {text: string, incident: ChaseIncident}|null,
  *             opened: boolean, closed: boolean }}
  */
-export function evaluateChase({ samples = [], articles = [], state = null, now = 0, cfg = config.chase } = {}) {
+export function evaluateChase({ samples = [], articles = [], aircraft = null, state = null, now = 0, cfg = config.chase } = {}) {
   const at = num(now, 0);
   const s = normalizeState(state);
   const weights = plain(cfg?.weights);
@@ -216,6 +248,10 @@ export function evaluateChase({ samples = [], articles = [], state = null, now =
 
   // ── per-stream evidence ────────────────────────────────────────────────────
   const nextStreams = { ...s.streams };
+  // Did anything this tick actually name a CHASE, rather than just "an event"? The
+  // aircraft channel is gated on it, because aircraft converging on a patch of ground
+  // happens for a fire, a manhunt or a motorcade too.
+  let chaseNamed = false;
   const evidence = [];
   const readings = [];
   for (const raw of Array.isArray(samples) ? samples : []) {
@@ -250,6 +286,17 @@ export function evaluateChase({ samples = [], articles = [], state = null, now =
     const strong = matchesAny(title, cfg?.strongVocab);
     const weak = matchesAny(title, cfg?.weakVocab);
     const negative = matchesAny(title, cfg?.negativeVocab);
+    // Did ANYTHING this tick actually say "chase", as opposed to merely "an event is
+    // happening"? A live title carrying chase vocabulary does; so does a dedicated
+    // chase source going live, whose show name IS the claim. The aircraft channel
+    // depends on this — see where it is scored.
+    //
+    // Note this is NOT the same test as the `title` channel's. That one needs the
+    // title to have CHANGED (scoring a standing show name forever is the §2.1
+    // error); this one only asks whether the words are present. A chopper cam
+    // sitting under a permanent "pursuit" title scores 0 for `title` and still
+    // names a chase, which is correct for both.
+    if (live && !negative && (strong || weak || orgCfg?.titleIsShowName)) chaseNamed = true;
     const changed = title !== restingTitle;
     // A source that streams under a fixed SHOW NAME is not describing this broadcast,
     // so its title is a constant and carries no evidence about the event. Scoring it
@@ -331,8 +378,15 @@ export function evaluateChase({ samples = [], articles = [], state = null, now =
     const publishedAt = numOrNull(raw?.publishedAt);
     if (!orgId || publishedAt == null) continue;
     if (Math.abs(at - publishedAt) >= articleMaxAgeMs) continue; // stale, or a feed dated into the future
-    if (matchesAny(String(raw?.title ?? ''), cfg?.negativeVocab)) continue;
+    const headline = String(raw?.title ?? '');
+    if (matchesAny(headline, cfg?.negativeVocab)) continue;
     editorial[orgId] = w('A1', 2);
+    // A live newsroom article saying "pursuit" is the most EXPLICIT naming of a chase
+    // available anywhere in this design, so it satisfies the aircraft gate as well.
+    // The vocabulary is re-checked here rather than assumed: the fetcher already
+    // admits only strong-vocabulary items, but this evaluator is pure over its
+    // inputs and must not depend on an upstream filter for a gate this one matters.
+    if (matchesAny(headline, cfg?.strongVocab) || matchesAny(headline, cfg?.weakVocab)) chaseNamed = true;
   }
 
   // ── grouping ───────────────────────────────────────────────────────────────
@@ -362,6 +416,28 @@ export function evaluateChase({ samples = [], articles = [], state = null, now =
     const raw = ranked.length ? ranked[0] + discount * ranked.slice(1).reduce((a, b) => a + b, 0) : 0;
     groups[orgId] = { score: vetoed ? 0 : Math.min(round2(raw), cap), channels, vetoed };
   }
+  // ── the aircraft channel ───────────────────────────────────────────────────
+  // Its own pseudo-org group, because aircraft overhead belong to no newsroom.
+  // Across groups there is no discount (two independent observations are two
+  // independent observations), which is exactly the arithmetic this source wants:
+  // it adds its weight to whatever the newsrooms contributed, and that weight is
+  // below the threshold, so it can only ever TOP UP a case someone else opened.
+  // GATED ON SOMETHING HAVING NAMED A CHASE. Aircraft orbiting one patch of ground
+  // says "an event is happening there" — it does NOT say which kind. A brush fire
+  // converges news helicopters exactly as a pursuit does, and it spikes an audience
+  // exactly as a pursuit does. Summing those two as if they discriminated produced a
+  // real false positive: a 60x audience spike on a fire-titled stream plus an aircraft
+  // cluster reached 8 and announced a police chase. Measured, not hypothetical — a
+  // brush fire in the live logs produced that audience shape on 2026-10-03.
+  //
+  // So this channel can only TOP UP a case something else already called a chase. It
+  // costs no recall: every genuine-chase path names one (a retitle, or a dedicated
+  // source going live), and those are exactly the cases it still reinforces.
+  const aircraftScore = chaseNamed ? scoreAircraft(aircraft, at, cfg) : 0;
+  if (aircraftScore > 0 && !groups[AIRCRAFT_GROUP]) {
+    groups[AIRCRAFT_GROUP] = { score: aircraftScore, channels: { aircraft: aircraftScore }, vetoed: false };
+  }
+
   const score = round2(Object.values(groups).reduce((a, g) => a + g.score, 0));
 
   // The link. Rank by the org's score first — the announcement should point at
@@ -453,6 +529,44 @@ export function evaluateChase({ samples = [], articles = [], state = null, now =
     opened,
     closed,
   };
+}
+
+/**
+ * What an aircraft reading is worth this tick. PURE — it reads `now` from its
+ * caller and never a clock.
+ *
+ * ALL of these score 0, deliberately:
+ *   * no reading at all (the monitor has not sampled yet, or sampling failed);
+ *   * a reading with fewer than 2 surviving passes — an orbit cannot be seen in one
+ *     snapshot, so that is "we could not measure", not "the sky is empty";
+ *   * a reading older than `maxAgeMs`, or one dated into the future;
+ *   * a reading with no CLUSTER of at least `minCluster` aircraft. Lone orbiters are
+ *     the measured background — 4-7 of them over the basin at any moment — and a
+ *     count of them is not evidence of anything. Pairs within the cluster radius had
+ *     a measured background rate of ZERO.
+ *
+ * It is one score or nothing: a single channel in a single group, so two clusters
+ * cannot pay twice any more than two spiking streams can (§2.1).
+ *
+ * @param {AircraftReading|null|undefined} reading
+ * @param {number} at - the tick's `now`
+ * @param {object} [cfg] - the chase settings
+ * @returns {number}
+ */
+function scoreAircraft(reading, at, cfg) {
+  const ac = plain(cfg?.aircraft);
+  if (ac.enabled === false) return 0;
+  if (!reading || typeof reading !== 'object') return 0;
+  if (Math.round(num(reading.samples, 0)) < 2) return 0;
+  const sampledAt = numOrNull(reading.at);
+  if (sampledAt == null) return 0;
+  const age = at - sampledAt;
+  const maxAgeMs = Math.max(MIN_MS, num(ac.maxAgeMs, 10 * MIN_MS));
+  if (age < 0 || age > maxAgeMs) return 0;
+  const minCluster = Math.max(2, Math.round(num(ac.minCluster, 2)));
+  const clusters = Array.isArray(reading.clusters) ? reading.clusters : Object.values(plain(reading.clusters));
+  const qualifies = clusters.some((c) => Math.round(num(c?.size, 0)) >= minCluster);
+  return qualifies ? Math.max(0, num(ac.weight, 3)) : 0;
 }
 
 /**
