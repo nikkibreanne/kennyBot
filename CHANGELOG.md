@@ -1,5 +1,20 @@
 # Changelog
 
+## [0.17.0](https://github.com/nikkibreanne/kennyBot/compare/kennybot-v0.16.1...kennybot-v0.17.0) (2026-10-08)
+
+
+### Features
+
+* **chase:** ADS-B aircraft corroboration, gated so a busy sky can't invent a chase ([#113](https://github.com/nikkibreanne/kennyBot/issues/113)) ([b215577](https://github.com/nikkibreanne/kennyBot/commit/b215577ca291a41676c7627e08a12f5ce382d3f1))
+
+
+### Bug Fixes
+
+* **chase:** a show name is not evidence — make liveness the explicit signal ([#107](https://github.com/nikkibreanne/kennyBot/issues/107)) ([fa78132](https://github.com/nikkibreanne/kennyBot/commit/fa781326f9fec55df175521e0da6425a1fe4978c))
+* **chase:** discover immediately when the monitor is enabled, not 10 minutes later ([#105](https://github.com/nikkibreanne/kennyBot/issues/105)) ([9096765](https://github.com/nikkibreanne/kennyBot/commit/9096765a767cfdc668e821f41e73adafff65d602))
+* **deps:** bump @fastify/busboy ([#111](https://github.com/nikkibreanne/kennyBot/issues/111)) ([13d2de6](https://github.com/nikkibreanne/kennyBot/commit/13d2de6dd0f29581d4a4f1e82e674637c8a4d8ab))
+* **deps:** bump the production group across 1 directory with 2 updates ([#108](https://github.com/nikkibreanne/kennyBot/issues/108)) ([7b7fde2](https://github.com/nikkibreanne/kennyBot/commit/7b7fde29834c83dfd7a12b0260e5c0389a3d9666))
+
 ## [0.16.1](https://github.com/nikkibreanne/kennyBot/compare/kennybot-v0.16.0...kennybot-v0.16.1) (2026-09-30)
 
 
