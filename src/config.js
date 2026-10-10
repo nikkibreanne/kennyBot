@@ -538,9 +538,34 @@ export const config = {
       clusterKm: 5, // single-linkage radius between orbit centroids
       minCluster: 2, // a lone orbiter is the background; two is the signal
 
+      // ── the PURSUIT shape (§2.10) ──────────────────────────────────────────
+      // An orbit is what a chase looks like once it has STOPPED. While it is
+      // running the aircraft is following a car down a freeway, which fails the
+      // orbit test on both axes — measured against the 2026-10-09 CHP pursuit, a
+      // tracking helicopter's loiter is ~0.9 against `loiterMax: 0.4`, and a
+      // freeway is straight so its turn stays near 0 against `turnMinDeg: 60`.
+      // These describe the opposite geometry: low, at road speed, going somewhere.
+      pursuitSpdMinMs: 18, // ~40 mph — below this it is loitering, not following
+      pursuitSpdMaxMs: 75, // ~168 mph — above this it is transit, not a pursuit
+      pursuitLoiterMin: 0.6, // net/path: actually covered ground, in a line
+      pursuitMinPathKm: 2, // ...and enough of it to be a route rather than jitter
+      // Loose on purpose: aircraft over a pursuit weave and cut corners while the
+      // GROUP progresses, so tight formation is not what media aircraft fly. The
+      // precision comes from `clusterPursuits` requiring them to be close at BOTH
+      // ends of the window — co-movement, not a single coincident sample — which
+      // is what keeps LA's busy low-level helicopter corridors from scoring.
+      pursuitHeadingTolDeg: 60,
+      pursuitClusterKm: 5,
+      pursuitMinCluster: 2, // one aircraft going somewhere is a commute
+
       // The LA basin. Larger than the chases we care about, deliberately — a pursuit
       // that starts in the basin can end well outside it.
-      bbox: { lamin: 33.6, lomin: -118.8, lamax: 34.4, lomax: -117.4 },
+      // `lamin` was 33.6, which cut the basin off at the Orange County line. The
+      // 2026-10-09 CHP pursuit ran the 405 to Irvine and on toward San Juan
+      // Capistrano (~33.50) — the tail of a real, covered chase was outside
+      // coverage entirely. 33.35 reaches past San Clemente without pulling in
+      // San Diego approach traffic.
+      bbox: { lamin: 33.35, lomin: -118.8, lamax: 34.4, lomax: -117.4 },
     },
   },
 

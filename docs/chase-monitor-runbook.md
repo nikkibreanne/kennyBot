@@ -81,11 +81,23 @@ is one correct value and nothing to configure. The only env var you must supply 
 !chasemon status    # expect: ON · mode shadow · N sources · key present
 ```
 
-Pull the evidence back whenever you want a report:
+Pull the evidence back whenever you want a report. **Always into `.workspace/`** —
+these logs record the private roster's org ids verbatim, so a copy anywhere git can
+see it puts real outlet names in a public repo (`test/rules/chase-privacy.test.js`
+scans untracked files and will fail, which is the safety net, not the plan):
 
 ```bash
-docker cp kennybot:/data/chase-logs ./chase-logs
-npm run chase:report -- ./chase-logs --no-sweep
+docker cp kennybot:/data/chase-logs .workspace/chase-logs
+npm run chase:report -- .workspace/chase-logs --no-sweep
+```
+
+With no local `docker` CLI (WSL, Docker Desktop integration off) go over ssh
+instead — and note that the host name only resolves while Tailscale's MagicDNS is
+healthy, so the tailnet IP is the reliable form:
+
+```bash
+ssh -o BatchMode=yes -i ~/.ssh/faraday_ed25519 root@<tailnet-ip> \
+  'docker exec kennybot tar -cf - -C /data chase-logs' | tar -xf - -C .workspace/
 ```
 
 ### Running it standalone instead

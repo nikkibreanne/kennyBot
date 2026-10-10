@@ -27,3 +27,9 @@ firestore-debug.log
 # legacy local fixture (state now lives in Firebase)
 db.json
 db.json.*
+
+# Chase monitor logs. They record the PRIVATE roster's org ids verbatim, so a copy
+# landing anywhere git can see it puts real outlet names in a public repo — and
+# `git add -A` would stage them. `.workspace/` is the intended destination; this
+# covers the top-level path the runbook used to suggest.
+chase-logs/

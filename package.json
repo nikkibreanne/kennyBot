@@ -23,7 +23,8 @@
     "synthetic": "firebase emulators:exec --only database --project okrafans \"node scripts/synthetic-chat.js\"",
     "dev:console": "firebase emulators:exec --only database --project okrafans \"node scripts/dev-console.js\"",
     "dev:all": "bash scripts/dev-all.sh",
-    "seed:media": "node scripts/seed-media.mjs"
+    "seed:media": "node scripts/seed-media.mjs",
+    "chase:adsb": "node scripts/chase-adsb.mjs"
   },
   "repository": {
     "type": "git",
