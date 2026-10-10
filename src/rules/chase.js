@@ -563,9 +563,20 @@ function scoreAircraft(reading, at, cfg) {
   const age = at - sampledAt;
   const maxAgeMs = Math.max(MIN_MS, num(ac.maxAgeMs, 10 * MIN_MS));
   if (age < 0 || age > maxAgeMs) return 0;
-  const minCluster = Math.max(2, Math.round(num(ac.minCluster, 2)));
-  const clusters = Array.isArray(reading.clusters) ? reading.clusters : Object.values(plain(reading.clusters));
-  const qualifies = clusters.some((c) => Math.round(num(c?.size, 0)) >= minCluster);
+  // TWO shapes, ONE score. An orbit cluster is aircraft holding over one spot —
+  // a chase that has stopped, a standoff, a fire. A pursuit cluster is aircraft
+  // travelling together at road speed — a chase still running. Either answers
+  // "there is aerial activity consistent with an incident", and the second exists
+  // because the first structurally cannot see a moving pursuit (§2.10).
+  //
+  // They do not add. This is a single channel in a single group, so a sky with
+  // both cannot pay twice any more than two spiking streams can (§2.1) — which
+  // is the whole reason the previous version of this bug was dangerous.
+  const asList = (v) => (Array.isArray(v) ? v : Object.values(plain(v)));
+  const big = (list, min) => asList(list).some((c) => Math.round(num(c?.size, 0)) >= min);
+  const orbitMin = Math.max(2, Math.round(num(ac.minCluster, 2)));
+  const pursuitMin = Math.max(2, Math.round(num(ac.pursuitMinCluster, num(ac.minCluster, 2))));
+  const qualifies = big(reading.clusters, orbitMin) || big(reading.pursuitClusters, pursuitMin);
   return qualifies ? Math.max(0, num(ac.weight, 3)) : 0;
 }
 

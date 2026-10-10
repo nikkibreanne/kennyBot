@@ -15,8 +15,8 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import {
-  aircraftReady, clusterOrbits, detectOrbits, haversineKm,
-  initAircraftWith, parseStates, sampleAircraft,
+  aircraftReady, clusterOrbits, clusterPursuits, detectOrbits, detectPursuits,
+  haversineKm, initAircraftWith, parseStates, sampleAircraft,
 } from '../../src/integrations/aircraft.js';
 import { evaluateChase } from '../../src/rules/chase.js';
 import { config } from '../../src/config.js';
@@ -517,7 +517,13 @@ test('sampleAircraft takes N passes, finds the cluster, and reports the rate lim
   const r = await sampleAircraft({ ...AC, sampleGapMs: 0 }, { warn() {}, info() {} });
   assert.equal(urls.length, AC.samples, 'one call per sample — this is what the daily cap counts');
   assert.match(urls[0], /^https:\/\/opensky-network\.org\/api\/states\/all\?/);
-  assert.match(urls[0], /lamin=33\.6&lomin=-118\.8&lamax=34\.4&lomax=-117\.4/);
+  // Derived from config, not hardcoded: this asserts that the CONFIGURED box is the
+  // one queried, which is the actual contract. Pinning the literal numbers made a
+  // deliberate coverage change look like a regression — the box moved south because
+  // a real chase ran outside it (§2.10).
+  const b = AC.bbox;
+  assert.match(urls[0], new RegExp(`lamin=${b.lamin}&lomin=${b.lomin}&lamax=${b.lamax}&lomax=${b.lomax}`));
+  assert.ok(b.lamin <= 33.5, 'the box must still reach Orange County — San Juan Capistrano is ~33.50');
   assert.equal(r.samples, AC.samples);
   assert.equal(r.rateRemaining, 371, 'logged on every pass — it is the only view of the ~400/day budget');
   assert.deepEqual(r.orbiting.map((o) => o.icao24).sort(), ['aaa001', 'aaa002'], 'the transit is not an orbit');
@@ -685,4 +691,244 @@ test('an OFFLINE stream carrying chase vocabulary does not satisfy the gate', ()
   });
   assert.equal(r.groups.aircraft, undefined);
   assert.equal(r.score, 0);
+});
+
+
+// ── the PURSUIT shape ───────────────────────────────────────────────────────
+// Added after the orbit detector missed a real, televised, 44-minute CHP pursuit
+// on 2026-10-09. These describe the geometry it could not see.
+
+/**
+ * A helicopter FOLLOWING a vehicle: low, at road speed, covering ground in a line.
+ * Default is ~45 m/s (100 mph, the speed that chase actually reached) over 3 fixes
+ * 70 s apart, which is ~3.1 km a leg.
+ */
+function following(icao24, start, over = {}) {
+  const { headingDeg = 90, spdMs = 45, legKm = 3.1, ...fix } = over;
+  return [0, 1, 2].map((i) => ({
+    icao24,
+    callsign: '',
+    ...offset(start, i * legKm, headingDeg),
+    altM: 450,
+    spdMs,
+    trackDeg: headingDeg,
+    at: NOW,
+    ...fix,
+  }));
+}
+
+test('a following helicopter is a PURSUIT, and is invisible to the orbit test', () => {
+  // The 2026-10-09 miss, reproduced. Both assertions matter: the new detector sees
+  // it, and the old one provably cannot — so this is a gap being filled, not a
+  // threshold being loosened.
+  const ps = passes(following('p1', DOWNTOWN));
+  const pursuing = detectPursuits(ps, AC);
+  assert.equal(pursuing.length, 1);
+  const p = pursuing[0];
+  assert.equal(p.icao24, 'p1');
+  assert.ok(p.loiter > AC.pursuitLoiterMin, `loiter ${p.loiter} must clear ${AC.pursuitLoiterMin}`);
+  assert.ok(p.pathKm >= AC.pursuitMinPathKm);
+
+  assert.deepEqual(detectOrbits(ps, AC), [], 'the orbit test sees nothing — this is the bug');
+  // ...and specifically why: it fails BOTH orbit axes, not marginally.
+  assert.ok(p.loiter > AC.loiterMax, `loiter ${p.loiter} is way above the orbit max ${AC.loiterMax}`);
+  assert.ok(p.turnDeg < AC.turnMinDeg, `a freeway is straight: turn ${p.turnDeg} < ${AC.turnMinDeg}`);
+});
+
+test('an orbiting aircraft is NOT a pursuit — the two shapes are disjoint', () => {
+  const ps = passes(orbit('o1', DOWNTOWN));
+  assert.equal(detectOrbits(ps, AC).length, 1);
+  assert.deepEqual(detectPursuits(ps, AC), [], 'it went nowhere, so it is not following anything');
+});
+
+test('one aircraft going somewhere is a commute, not a cluster', () => {
+  // This is the whole reason a cluster is required. A single low aircraft flying in
+  // a straight line is a news helicopter heading home, and LA has many.
+  const pursuing = detectPursuits(passes(following('p1', DOWNTOWN)), AC);
+  assert.equal(pursuing.length, 1, 'detected...');
+  assert.deepEqual(clusterPursuits(pursuing, AC), [], '...but never clustered alone');
+});
+
+test('two aircraft following the SAME vehicle cluster', () => {
+  // A convoy: both low, both at road speed, 1.5 km apart, same heading, staying
+  // together for the whole window. That is media aircraft over a pursuit.
+  const chase = passes(
+    following('p1', DOWNTOWN),
+    following('p2', offset(DOWNTOWN, 1.5, 0)),
+  );
+  const cl = clusterPursuits(detectPursuits(chase, AC), AC);
+  assert.equal(cl.length, 1);
+  assert.equal(cl[0].size, 2);
+  assert.deepEqual(cl[0].aircraft.sort(), ['p1', 'p2']);
+});
+
+test('two aircraft crossing at right angles do not cluster — the HEADING test', () => {
+  // Both sit within the cluster radius for the whole window (4.4 km at each end),
+  // so proximity alone links them. What rejects them is the heading: 90 degrees
+  // apart against a 60 degree tolerance. They are in the same airspace, not on the
+  // same errand.
+  const crossing = passes(
+    following('x1', offset(DOWNTOWN, 3.1, 270), { headingDeg: 90 }),
+    following('x2', offset(DOWNTOWN, 3.1, 180), { headingDeg: 0 }),
+  );
+  const pursuing = detectPursuits(crossing, AC);
+  assert.equal(pursuing.length, 2, 'both are individually "going somewhere"');
+  const [a, b] = pursuing;
+  assert.ok(haversineKm(a.lat, a.lon, b.lat, b.lon) <= AC.pursuitClusterKm,
+    'premise: they ARE close enough, so proximity is not what rejects them');
+  assert.deepEqual(clusterPursuits(pursuing, AC), [], 'but they are not travelling together');
+});
+
+test('CONVERGING traffic does not cluster — this is what co-movement catches', () => {
+  // The case proximity-at-one-moment gets wrong and both-ends gets right, and the
+  // reason the start position is recorded at all. Two aircraft on headings only 45
+  // degrees apart (inside the tolerance) converge on the same point from 7.6 km
+  // apart. At the END of the window they are on top of each other — a proximity
+  // test would call that a convoy. They were never travelling together.
+  // Convergence point in south Orange County — clear of every excluded airport by
+  // >30 km, so the airport filter plays no part in the result. It is also inside
+  // the strip `bbox.lamin` was moved south to cover, which is where the chase that
+  // prompted all of this actually went.
+  const OC = { lat: 33.5, lon: -117.45 };
+  const converging = passes(
+    following('c1', offset(OC, 10, 270), { headingDeg: 90, legKm: 5 }),
+    following('c2', offset(OC, 10, 225), { headingDeg: 45, legKm: 5 }),
+  );
+  const pursuing = detectPursuits(converging, AC);
+  assert.equal(pursuing.length, 2);
+  const [a, b] = pursuing;
+  assert.ok(haversineKm(a.lat, a.lon, b.lat, b.lon) <= AC.pursuitClusterKm, 'close at the end');
+  assert.ok(haversineKm(a.lat0, a.lon0, b.lat0, b.lon0) > AC.pursuitClusterKm, 'far apart at the start');
+  assert.ok(Math.abs(a.headingDeg - b.headingDeg) <= AC.pursuitHeadingTolDeg,
+    'and their headings agree, so the heading test does NOT save us here');
+  assert.deepEqual(clusterPursuits(pursuing, AC), [],
+    'only the both-ends co-movement test rejects this');
+});
+
+test('oncoming traffic does not cluster however close it passes', () => {
+  const oncoming = passes(
+    following('h1', DOWNTOWN, { headingDeg: 90 }),
+    following('h2', offset(DOWNTOWN, 6.2, 90), { headingDeg: 270 }),
+  );
+  assert.deepEqual(clusterPursuits(detectPursuits(oncoming, AC), AC), [],
+    'head-on is not a convoy, whatever the separation');
+});
+
+test('a missing start position refuses the link rather than falling back to proximity', () => {
+  // Fail CLOSED. Without lat0 the co-movement test cannot run, and that test is the
+  // only thing providing precision here — passing on proximity alone would quietly
+  // restore the behaviour this guards against.
+  const a = { icao24: 'a1', lat: 34.05, lon: -118.25, headingDeg: 90, lat0: 34.05, lon0: -118.3 };
+  const b = { icao24: 'b1', lat: 34.06, lon: -118.25, headingDeg: 90 }; // no lat0/lon0
+  assert.deepEqual(clusterPursuits([a, b], AC), []);
+});
+
+test('speed bounds separate a pursuit from loitering and from transit', () => {
+  const slow = detectPursuits(passes(following('s1', DOWNTOWN, { spdMs: 8, legKm: 0.5 })), AC);
+  assert.deepEqual(slow, [], 'below the floor it is drifting, not following');
+  const fast = detectPursuits(passes(following('f1', DOWNTOWN, { spdMs: 120, legKm: 8 })), AC);
+  assert.deepEqual(fast, [], 'above the ceiling it is transit or a fixed-wing');
+  const airliner = detectPursuits(passes(following('a1', DOWNTOWN, { altM: 9000 })), AC);
+  assert.deepEqual(airliner, [], 'and altitude still rules out airliners');
+});
+
+test('a pursuit barely moving is rejected on path length', () => {
+  // High loiter is easy to achieve by jitter over a few hundred metres; it only
+  // means something once real ground is covered.
+  const twitchy = detectPursuits(passes(following('t1', DOWNTOWN, { legKm: 0.2, spdMs: 20 })), AC);
+  assert.deepEqual(twitchy, [], `under ${AC.pursuitMinPathKm} km it is noise`);
+});
+
+test('airport approach traffic is excluded at BOTH endpoints', () => {
+  // An aircraft on final is low, at moderate speed and travelling in a line — the
+  // pursuit signature exactly. Its track MIDPOINT can sit outside the exclusion
+  // radius while both ends are inside it, which is why the midpoint is not what is
+  // tested.
+  const onFinal = detectPursuits(passes(following('l1', LAX, { legKm: 1.5 })), AC);
+  assert.deepEqual(onFinal, [], 'departing or arriving LAX is not a chase');
+});
+
+test('a pursuit cluster scores the aircraft channel, exactly like an orbit cluster', () => {
+  const r = evaluateChase({
+    samples: [sample('org2', { title: 'LIVE: Police pursuit on the 405' })],
+    aircraft: {
+      orbiting: [], clusters: [], samples: 3, at: NOW, aircraftSeen: 61, tracked: 24,
+      pursuing: [{ icao24: 'p1' }, { icao24: 'p2' }],
+      pursuitClusters: [{ size: 2, lat: 33.66, lon: -118.0, spreadKm: 1.5 }],
+    },
+    state: baselined('org2'),
+    now: NOW,
+    cfg,
+  });
+  assert.equal(r.groups.aircraft.score, AC.weight);
+});
+
+test('orbit AND pursuit together still score ONCE', () => {
+  // One channel, one group. A sky holding both shapes must not pay twice — that is
+  // the same duplicate-measurement error as 2.1, and the reason the ungated version
+  // of this source was dangerous.
+  const r = evaluateChase({
+    samples: [sample('org2', { title: 'LIVE: Police pursuit on the 405' })],
+    aircraft: {
+      orbiting: [{ icao24: 'o1' }, { icao24: 'o2' }],
+      clusters: [{ size: 2, lat: 34.05, lon: -118.25, spreadKm: 2 }],
+      pursuing: [{ icao24: 'p1' }, { icao24: 'p2' }],
+      pursuitClusters: [{ size: 2, lat: 33.66, lon: -118.0, spreadKm: 1.5 }],
+      samples: 3, at: NOW,
+    },
+    state: baselined('org2'),
+    now: NOW,
+    cfg,
+  });
+  assert.equal(r.groups.aircraft.score, AC.weight, 'not 2x the weight');
+  assert.deepEqual(Object.keys(r.groups.aircraft.channels), ['aircraft']);
+});
+
+test('a pursuit cluster is still GATED — a fire plus a convoy stays silent', () => {
+  // The gate applies to both shapes. Aircraft travelling together over a fire
+  // perimeter is as plausible as over a pursuit, so nothing changes about who is
+  // allowed to open an incident.
+  let state = baselined('org1', { title: CHOPPER_CAM });
+  let last = null;
+  for (let i = 0; i < cfg.dwell + 2; i += 1) {
+    const now = NOW + i * MIN;
+    last = evaluateChase({
+      samples: [sample('org1', { title: 'LIVE: Bouquet Fire near Santa Clarita', viewers: 12_000, at: now })],
+      aircraft: {
+        orbiting: [], clusters: [], samples: 3, at: now,
+        pursuing: [{ icao24: 'p1' }, { icao24: 'p2' }],
+        pursuitClusters: [{ size: 2, lat: 34.4, lon: -118.5, spreadKm: 2 }],
+      },
+      state,
+      now,
+      cfg,
+    });
+    state = last.state;
+  }
+  assert.equal(last.groups.aircraft, undefined, 'nothing named a chase');
+  assert.equal(last.score, 5);
+  assert.equal(last.opened, false);
+});
+
+test('sampleAircraft reports the RAW counts, so an empty reading is diagnosable', () => {
+  // The 2026-10-09 miss logged `orbiting: 0` and nothing else, and there was no way
+  // to tell "the API returned nothing" from "the API returned a full sky the
+  // detector rejected". Those have opposite fixes.
+  const ps = passes(orbit('o1', DOWNTOWN), transit('t1', FAR), transit('t2', NEARBY));
+  const wire = ps.map((pass) => ({
+    time: Math.floor(NOW / 1000),
+    states: pass.map((f) => [f.icao24, f.callsign, '', 0, 0, f.lon, f.lat, f.altM,
+      false, f.spdMs, f.trackDeg, 0, null, f.altM, null, false, 0]),
+  }));
+  let n = 0;
+  initAircraftWith(async () => ({
+    ok: true, status: 200, headers: { get: () => '390' }, json: async () => wire[n++] || wire[0],
+  }));
+  return sampleAircraft({ ...AC, sampleGapMs: 0 }, { warn() {}, info() {} }).then((r) => {
+    initAircraftWith(null);
+    assert.equal(r.aircraftSeen, 3, 'three distinct aircraft were in the sky');
+    assert.equal(r.tracked, 3, 'and all three survived every pass');
+    assert.ok(Array.isArray(r.pursuing), 'the pursuit list is always present');
+    assert.ok(Array.isArray(r.pursuitClusters));
+  });
 });
