@@ -68,6 +68,11 @@ const AIRPORTS = [
   ['EMT', 34.0860, -118.0350], ['FUL', 33.8720, -117.9798], ['TOA', 33.8034, -118.3396],
   ['CNO', 33.9747, -117.6366], ['POC', 34.0916, -117.7817], ['AJO', 33.8977, -117.6025],
   ['CCB', 34.1116, -117.6879], ['RAL', 33.9519, -117.4450], ['SBD', 34.0954, -117.2350],
+  // Catalina. Only inside the box since `bbox.lamin` moved south to cover Orange
+  // County, and the island runs a steady helicopter shuttle — without this, that
+  // traffic is low, at road speed and travelling in a line, which is exactly the
+  // pursuit signature.
+  ['AVX', 33.4049, -118.4157],
 ];
 
 /** `states/all` column indices. The API returns bare positional arrays. */
@@ -200,6 +205,73 @@ function nearAirport(lat, lon, km) {
 }
 
 /**
+ * `icao24 -> one fix per pass, in order`, keeping only aircraft seen in EVERY pass.
+ *
+ * Shared by both detectors because "the same aircraft across time" is the
+ * measurement, and the two differ only in what shape they then look for.
+ * @param {AircraftFix[][]} passes
+ * @returns {Map<string, AircraftFix[]>}
+ */
+function buildTracks(passes) {
+  /** @type {Map<string, AircraftFix[]>} */
+  const tracks = new Map();
+  for (const [i, pass] of passes.entries()) {
+    const seen = new Set();
+    for (const fix of pass) {
+      const id = String(fix?.icao24 ?? '');
+      if (!id || seen.has(id)) continue; // one fix per aircraft per pass
+      // Present in ALL passes means present in every pass SO FAR, so an aircraft
+      // first seen in pass 2 can never catch up and is dropped without bookkeeping.
+      seen.add(id);
+      if (i === 0) tracks.set(id, [fix]);
+      else if (tracks.get(id)?.length === i) tracks.get(id).push(fix);
+    }
+  }
+  return tracks;
+}
+
+/**
+ * The geometry of one track, or null if it cannot be judged.
+ *
+ * `loiter` is net displacement over path length and is the whole discriminator
+ * between the two shapes this module looks for: near 0 the aircraft went nowhere
+ * (it is circling something), near 1 it travelled in a line (it is going
+ * somewhere, or following something that is).
+ * @param {AircraftFix[]} track
+ */
+function trackGeometry(track) {
+  const alts = track.map((f) => numOrNull(f.altM)).filter((v) => v != null);
+  const spds = track.map((f) => numOrNull(f.spdMs)).filter((v) => v != null);
+  // An aircraft that reported neither cannot be judged, so it is not judged.
+  if (!alts.length || !spds.length) return null;
+
+  let pathKm = 0;
+  let turnDeg = 0;
+  for (let i = 1; i < track.length; i += 1) {
+    const a = track[i - 1];
+    const b = track[i];
+    const leg = haversineKm(a.lat, a.lon, b.lat, b.lon);
+    if (Number.isFinite(leg)) pathKm += leg;
+    if (a.trackDeg != null && b.trackDeg != null) turnDeg += Math.abs(headingDelta(a.trackDeg, b.trackDeg));
+  }
+  if (!(pathKm > 0)) return null;
+  const last = track[track.length - 1];
+  const netKm = haversineKm(track[0].lat, track[0].lon, last.lat, last.lon);
+  if (!Number.isFinite(netKm)) return null;
+
+  return {
+    avgAlt: alts.reduce((a, b) => a + b, 0) / alts.length,
+    avgSpd: spds.reduce((a, b) => a + b, 0) / spds.length,
+    pathKm,
+    turnDeg,
+    netKm,
+    loiter: netKm / pathKm,
+    lat: track.reduce((a, f) => a + f.lat, 0) / track.length,
+    lon: track.reduce((a, f) => a + f.lon, 0) / track.length,
+  };
+}
+
+/**
  * Which aircraft were ORBITING across these samples. PURE.
  *
  * Takes N passes (each an AircraftFix[]), tracks by `icao24`, and keeps only aircraft
@@ -246,63 +318,28 @@ export function detectOrbits(samples, cfg = {}) {
   const turnMinDeg = num(cfg?.turnMinDeg, 60);
   const airportKm = num(cfg?.airportExclusionKm, 8);
 
-  /** @type {Map<string, AircraftFix[]>} icao24 -> one fix per pass, in order */
-  const tracks = new Map();
-  for (const [i, pass] of passes.entries()) {
-    const seen = new Set();
-    for (const fix of pass) {
-      const id = String(fix?.icao24 ?? '');
-      if (!id || seen.has(id)) continue; // one fix per aircraft per pass
-      seen.add(id);
-      // Present in ALL passes means present in every pass SO FAR, so an aircraft
-      // first seen in pass 2 can never catch up and is dropped without bookkeeping.
-      if (i === 0) tracks.set(id, [fix]);
-      else if (tracks.get(id)?.length === i) tracks.get(id).push(fix);
-    }
-  }
+  const tracks = buildTracks(passes);
 
   const out = [];
   for (const [icao24, track] of tracks) {
     if (track.length !== passes.length) continue;
-
-    const alts = track.map((f) => numOrNull(f.altM)).filter((v) => v != null);
-    const spds = track.map((f) => numOrNull(f.spdMs)).filter((v) => v != null);
-    // An aircraft that reported neither cannot be judged, so it is not judged.
-    if (!alts.length || !spds.length) continue;
-    const avgAlt = alts.reduce((a, b) => a + b, 0) / alts.length;
-    const avgSpd = spds.reduce((a, b) => a + b, 0) / spds.length;
-    if (!(avgAlt < altMaxM) || !(avgSpd < spdMaxMs)) continue;
-
-    let pathKm = 0;
-    let turnDeg = 0;
-    for (let i = 1; i < track.length; i += 1) {
-      const a = track[i - 1];
-      const b = track[i];
-      const leg = haversineKm(a.lat, a.lon, b.lat, b.lon);
-      if (Number.isFinite(leg)) pathKm += leg;
-      if (a.trackDeg != null && b.trackDeg != null) turnDeg += Math.abs(headingDelta(a.trackDeg, b.trackDeg));
-    }
-    if (!(pathKm > 0)) continue;
-    const netKm = haversineKm(track[0].lat, track[0].lon, track[track.length - 1].lat, track[track.length - 1].lon);
-    if (!Number.isFinite(netKm)) continue;
-    const loiter = netKm / pathKm;
-    if (!(loiter < loiterMax) || !(turnDeg > turnMinDeg)) continue;
-
-    const lat = track.reduce((a, f) => a + f.lat, 0) / track.length;
-    const lon = track.reduce((a, f) => a + f.lon, 0) / track.length;
-    if (nearAirport(lat, lon, airportKm)) continue;
+    const g = trackGeometry(track);
+    if (!g) continue;
+    if (!(g.avgAlt < altMaxM) || !(g.avgSpd < spdMaxMs)) continue;
+    if (!(g.loiter < loiterMax) || !(g.turnDeg > turnMinDeg)) continue;
+    if (nearAirport(g.lat, g.lon, airportKm)) continue;
 
     out.push({
       icao24,
       callsign: track[track.length - 1].callsign || '',
-      lat: round(lat, 4),
-      lon: round(lon, 4),
-      altM: Math.round(avgAlt),
-      spdMs: round(avgSpd, 1),
-      netKm: round(netKm, 2),
-      pathKm: round(pathKm, 2),
-      turnDeg: Math.round(turnDeg),
-      loiter: round(loiter, 3),
+      lat: round(g.lat, 4),
+      lon: round(g.lon, 4),
+      altM: Math.round(g.avgAlt),
+      spdMs: round(g.avgSpd, 1),
+      netKm: round(g.netKm, 2),
+      pathKm: round(g.pathKm, 2),
+      turnDeg: Math.round(g.turnDeg),
+      loiter: round(g.loiter, 3),
       fixes: track.length,
     });
   }
@@ -325,7 +362,7 @@ export function detectOrbits(samples, cfg = {}) {
  * @param {object} [cfg] - config.chase.aircraft
  * @returns {Array<{size: number, lat: number, lon: number, spreadKm: number, aircraft: string[]}>}
  */
-export function clusterOrbits(orbiting, cfg = {}) {
+export function clusterOrbits(orbiting, cfg = {}, linkable = null) {
   const birds = (Array.isArray(orbiting) ? orbiting : [])
     .filter((o) => o && Number.isFinite(Number(o.lat)) && Number.isFinite(Number(o.lon)));
   const clusterKm = num(cfg?.clusterKm, 5);
@@ -338,7 +375,9 @@ export function clusterOrbits(orbiting, cfg = {}) {
   for (let i = 0; i < birds.length; i += 1) {
     for (let j = i + 1; j < birds.length; j += 1) {
       const d = haversineKm(birds[i].lat, birds[i].lon, birds[j].lat, birds[j].lon);
-      if (Number.isFinite(d) && d <= clusterKm) parent[find(i)] = find(j);
+      if (!Number.isFinite(d) || d > clusterKm) continue;
+      if (linkable && !linkable(birds[i], birds[j])) continue;
+      parent[find(i)] = find(j);
     }
   }
 
@@ -375,6 +414,148 @@ export function clusterOrbits(orbiting, cfg = {}) {
   return out;
 }
 
+/**
+ * A PURSUIT, which is the shape an orbit test cannot see.
+ *
+ * This exists because the orbit detector missed a real, televised, 44-minute CHP
+ * pursuit on 2026-10-09 — and not by a narrow margin. While a chase is actually
+ * running, the helicopter covering it is not circling anything: it is following a
+ * car down a freeway. Measured against that event's route (the 405 through
+ * Huntington Beach, then the 5 at Irvine), a tracking aircraft's `loiter` sits
+ * near 0.9 against the orbit test's `< 0.4`, and a freeway is straight so its
+ * cumulative `turnDeg` stays near 0 against a required `> 60`. It fails both
+ * shape tests by design, not by tuning.
+ *
+ * Orbiting is what happens when a chase ENDS — the suspect bails, or stops, and
+ * the aircraft holds over one spot. That is a real and useful signal, and
+ * `detectOrbits` keeps it. But it is the tail of the event, and the useful moment
+ * is the pursuit itself.
+ *
+ * So this looks for the opposite geometry: low, moving at road speed, and
+ * actually covering ground in a line.
+ *
+ *   altitude  < `altMaxM`             — shared with orbits; airliners are excluded
+ *   speed     `pursuitSpdMinMs`..Max  — road speed. Below is loitering, above is transit
+ *   loiter    > `pursuitLoiterMin`    — went somewhere, rather than nowhere
+ *   path      >= `pursuitMinPathKm`   — and covered real ground doing it
+ *
+ * One aircraft matching that is unremarkable — it is also what a news helicopter
+ * flying home looks like. The discriminator is the CLUSTER (`clusterPursuits`):
+ * two or more of them low, at road speed, close together and not heading in
+ * opposing directions. That is a convoy, and media aircraft form one over a
+ * pursuit. Its background rate is UNMEASURED, which is why the aircraft weight
+ * stays below the threshold and gated — this widens what the channel can see, it
+ * does not promote it to a detector.
+ *
+ * Airport vicinity is excluded at BOTH endpoints rather than the midpoint: an
+ * aircraft on approach is low, at moderate speed and travelling in a line, which
+ * is this exact signature, and its midpoint can sit well outside the exclusion
+ * radius while both ends are inside it.
+ *
+ * @param {AircraftFix[][]} samples one array of fixes per pass, in order
+ * @param {object} [cfg] `config.chase.aircraft`
+ * @returns {object[]} one entry per aircraft that is tracking something
+ */
+export function detectPursuits(samples, cfg = {}) {
+  const passes = (Array.isArray(samples) ? samples : []).filter((p) => Array.isArray(p));
+  if (passes.length < 2) return [];
+
+  const altMaxM = num(cfg?.altMaxM, 1200);
+  const spdMinMs = num(cfg?.pursuitSpdMinMs, 18);
+  const spdMaxMs = num(cfg?.pursuitSpdMaxMs, 75);
+  const loiterMin = num(cfg?.pursuitLoiterMin, 0.6);
+  const minPathKm = num(cfg?.pursuitMinPathKm, 2);
+  const airportKm = num(cfg?.airportExclusionKm, 8);
+
+  const tracks = buildTracks(passes);
+  const out = [];
+  for (const [icao24, track] of tracks) {
+    if (track.length !== passes.length) continue;
+    const g = trackGeometry(track);
+    if (!g) continue;
+    if (!(g.avgAlt < altMaxM)) continue;
+    if (!(g.avgSpd >= spdMinMs) || !(g.avgSpd <= spdMaxMs)) continue;
+    if (!(g.loiter > loiterMin)) continue;
+    if (!(g.pathKm >= minPathKm)) continue;
+
+    const first = track[0];
+    const last = track[track.length - 1];
+    if (nearAirport(first.lat, first.lon, airportKm)) continue;
+    if (nearAirport(last.lat, last.lon, airportKm)) continue;
+
+    out.push({
+      icao24,
+      callsign: last.callsign || '',
+      // Where it is NOW, not the track mean: a moving aircraft's midpoint is
+      // behind it, and the cluster is about where the event currently is.
+      lat: round(last.lat, 4),
+      lon: round(last.lon, 4),
+      // ...and where it STARTED, which is what makes co-movement testable:
+      // two aircraft following the same car stay close for the whole window,
+      // while two crossing paths are close for one sample only.
+      lat0: round(first.lat, 4),
+      lon0: round(first.lon, 4),
+      altM: Math.round(g.avgAlt),
+      spdMs: round(g.avgSpd, 1),
+      netKm: round(g.netKm, 2),
+      pathKm: round(g.pathKm, 2),
+      turnDeg: Math.round(g.turnDeg),
+      loiter: round(g.loiter, 3),
+      headingDeg: last.trackDeg == null ? null : Math.round(last.trackDeg),
+      fixes: track.length,
+    });
+  }
+  // Furthest travelled first — the strongest instance of "this is going somewhere".
+  out.sort((a, b) => b.pathKm - a.pathKm || a.icao24.localeCompare(b.icao24));
+  return out;
+}
+
+/**
+ * Group tracking aircraft that are travelling TOGETHER.
+ *
+ * Proximity alone is nowhere near enough here, and this is the part that decides
+ * whether the whole pursuit source is usable. An orbit cluster could lean on
+ * proximity because its measured background rate was ZERO — two aircraft circling
+ * one spot essentially does not happen by chance. A pursuit cluster cannot: LA has
+ * busy low-level helicopter corridors along the freeways and the coast, a live
+ * sample holds roughly 15-20 aircraft that are low and at road speed, and "two of
+ * them within 5 km heading roughly alike" is an ordinary Tuesday. Scored naively
+ * that would hand a free +3 to any tick that merely named a chase.
+ *
+ * So a link requires co-movement, on three counts:
+ *
+ *   * close at the END of the window (where the event is now), AND
+ *   * close at the START of it — two aircraft following the same vehicle stay
+ *     together for the whole window, while two crossing paths are close for a
+ *     single sample. This is the test that does the real work.
+ *   * headings not opposed, within `pursuitHeadingTolDeg`.
+ *
+ * The heading tolerance stays loose (60 degrees) because aircraft over a pursuit
+ * weave and cut corners while the group progresses; the both-ends proximity test
+ * is what provides the precision, so this only has to reject oncoming traffic. An
+ * aircraft reporting no heading is linked on proximity alone rather than dropped,
+ * since the alternative is discarding a real convoy member over a missing field.
+ *
+ * Even so the background rate here is UNMEASURED, which is exactly why the
+ * channel's weight stays below the threshold and behind the naming gate. The
+ * calibration section of `chase:report` is what will settle it.
+ * @param {object[]} pursuing output of `detectPursuits`
+ * @param {object} [cfg]
+ */
+export function clusterPursuits(pursuing, cfg = {}) {
+  const tol = num(cfg?.pursuitHeadingTolDeg, 60);
+  const clusterKm = num(cfg?.pursuitClusterKm, num(cfg?.clusterKm, 5));
+  const opts = { clusterKm, minCluster: num(cfg?.pursuitMinCluster, num(cfg?.minCluster, 2)) };
+  return clusterOrbits(pursuing, opts, (a, b) => {
+    const started = haversineKm(a.lat0, a.lon0, b.lat0, b.lon0);
+    // A missing start position must not silently pass the test that provides the
+    // precision — without it this is proximity-only, so refuse the link.
+    if (!Number.isFinite(started) || started > clusterKm) return false;
+    if (a.headingDeg == null || b.headingDeg == null) return true;
+    return Math.abs(headingDelta(a.headingDeg, b.headingDeg)) <= tol;
+  });
+}
+
 /** The bounding box query, with the configured basin box as the default. */
 function statesUrl(cfg) {
   const box = cfg?.bbox && typeof cfg.bbox === 'object' ? cfg.bbox : {};
@@ -409,7 +590,9 @@ function statesUrl(cfg) {
 export async function sampleAircraft(cfg = {}, logger = console) {
   const startedAt = Date.now();
   const empty = (rateRemaining = null, samples = 0) => ({
-    orbiting: [], clusters: [], samples, rateRemaining, at: Date.now(), tookMs: Date.now() - startedAt,
+    orbiting: [], clusters: [], pursuing: [], pursuitClusters: [],
+    aircraftSeen: 0, tracked: 0,
+    samples, rateRemaining, at: Date.now(), tookMs: Date.now() - startedAt,
   });
   try {
     if (!aircraftReady()) return empty();
@@ -458,9 +641,29 @@ export async function sampleAircraft(cfg = {}, logger = console) {
     if (passes.length < 2) return empty(rateRemaining, passes.length);
     const orbiting = detectOrbits(passes, cfg);
     const clusters = clusterOrbits(orbiting, cfg);
+    const pursuing = detectPursuits(passes, cfg);
+    const pursuitClusters = clusterPursuits(pursuing, cfg);
+
+    // RAW COUNTS, and they are not decoration. The first real miss produced
+    // `orbiting: 0` and there was no way to tell from the log whether the API had
+    // returned nothing or had returned a full sky that the detector rejected —
+    // which have opposite fixes. `aircraftSeen` and `tracked` separate them:
+    // seen 0 is a fetch or bbox problem, seen 70 with tracked 0 means the passes
+    // share no aircraft, and tracked 30 with both detectors empty means the shape
+    // tests are too strict.
+    const union = new Set();
+    for (const pass of passes) for (const f of pass) union.add(String(f?.icao24 ?? ''));
+    union.delete('');
+    let tracked = 0;
+    for (const track of buildTracks(passes).values()) if (track.length === passes.length) tracked += 1;
+
     return {
       orbiting,
       clusters,
+      pursuing,
+      pursuitClusters,
+      aircraftSeen: union.size,
+      tracked,
       samples: passes.length,
       rateRemaining,
       at: Date.now(),

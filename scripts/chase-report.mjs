@@ -692,11 +692,20 @@ function aircraftReport(byKind) {
     return { readings: 0 };
   }
 
-  const withCluster = reads.filter((r) => Array.isArray(r.clusters) && r.clusters.length > 0);
-  const orbitCounts = reads.map((r) => (Array.isArray(r.orbiting) ? r.orbiting.length : 0));
+  const len = (v) => (Array.isArray(v) ? v.length : 0);
+  const withCluster = reads.filter((r) => len(r.clusters) > 0 || len(r.pursuitClusters) > 0);
+  const orbitCounts = reads.map((r) => len(r.orbiting));
   const failed = reads.filter((r) => !Number.isFinite(Number(r.samples)) || Number(r.samples) === 0);
   const rate = reads.map((r) => Number(r.rateRemaining)).filter(Number.isFinite);
   const took = reads.map((r) => Number(r.tookMs)).filter(Number.isFinite);
+  const orbitCl = reads.filter((r) => len(r.clusters) > 0);
+  const pursuitCl = reads.filter((r) => len(r.pursuitClusters) > 0);
+  const pursuitCounts = reads.map((r) => len(r.pursuing));
+  // Only present on readings taken after the counts were added, so they are
+  // reported separately rather than averaged with older ones as if they were 0.
+  const counted = reads.filter((r) => Number.isFinite(Number(r.aircraftSeen)));
+  const seen = counted.map((r) => Number(r.aircraftSeen));
+  const tracked = counted.map((r) => Number(r.tracked));
 
   // Did a cluster ever coincide with an open incident? Readings resolve ~140 s
   // after the tick that asked, so allow a 5-minute window either side rather
@@ -706,14 +715,31 @@ function aircraftReport(byKind) {
   const clusteredDuringIncident = withCluster.filter((r) => opens.some((o) => Math.abs(o - r.at) <= NEAR_MS));
 
   say(`  readings        ${reads.length}${failed.length ? ` · ${failed.length} returned nothing` : ''}`);
-  say(`  found a cluster ${withCluster.length} of ${reads.length} (${pct(withCluster.length, reads.length)})`);
+  say(`  found a cluster ${withCluster.length} of ${reads.length} (${pct(withCluster.length, reads.length)})`
+    + `  [orbit ${orbitCl.length} · pursuit ${pursuitCl.length}]`);
   say(`  orbiting/read   max ${Math.max(...orbitCounts)} · median ${median(orbitCounts).toFixed(1)}`);
+  say(`  pursuing/read   max ${Math.max(...pursuitCounts)} · median ${median(pursuitCounts).toFixed(1)}`);
+  if (seen.length) {
+    // The line that makes an empty reading readable rather than ambiguous.
+    say(`  sky size        seen median ${median(seen).toFixed(0)} · tracked median ${median(tracked).toFixed(0)}`
+      + `${counted.length < reads.length ? `  (${counted.length} of ${reads.length} readings carry counts)` : ''}`);
+  } else if (reads.length) {
+    say('  sky size        not recorded — these readings predate the raw counts, so an');
+    say('                  empty result cannot be told apart from an empty sky');
+  }
   if (took.length) say(`  sampling took   median ${(median(took) / 1000).toFixed(0)}s`);
   if (rate.length) say(`  ADS-B budget    lowest remaining seen ${Math.min(...rate)}`);
   say('');
   if (!withCluster.length) {
-    say('  NO clusters at all. The channel has cost calls and contributed nothing — it is');
-    say('  either too strict or the orbit test is wrong. Do not raise the weight on this.');
+    say('  NO clusters at all. The channel has cost calls and contributed nothing.');
+    if (seen.length && median(seen) > 0 && median(tracked) > 0) {
+      say(`  The sky was NOT empty (median ${median(seen).toFixed(0)} aircraft, ${median(tracked).toFixed(0)} tracked across passes),`);
+      say('  so this is the shape tests being too strict, not a fetch or bbox problem.');
+    } else if (seen.length) {
+      say('  The sky came back EMPTY, which is a fetch or bounding-box problem rather');
+      say('  than a detector one — check the box covers where the chases actually are.');
+    }
+    say('  Either way: do not raise the weight on this.');
   } else if (!opens.length) {
     say(`  ${withCluster.length} cluster(s) and NO incidents in the same log. This is the background`);
     say('  rate, and it is the argument for keeping the weight BELOW the threshold:');
@@ -727,6 +753,10 @@ function aircraftReport(byKind) {
     readings: reads.length,
     failed: failed.length,
     withCluster: withCluster.length,
+    orbitClusterReadings: orbitCl.length,
+    pursuitClusterReadings: pursuitCl.length,
+    medianSeen: seen.length ? median(seen) : null,
+    medianTracked: tracked.length ? median(tracked) : null,
     clusteredDuringIncident: clusteredDuringIncident.length,
     maxOrbiting: Math.max(...orbitCounts),
     lowestRateRemaining: rate.length ? Math.min(...rate) : null,

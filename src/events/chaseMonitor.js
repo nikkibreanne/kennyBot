@@ -239,12 +239,24 @@ export function startChaseMonitor({ send, logger = console }) {
           samples: reading.samples,
           rateRemaining: reading.rateRemaining,
           tookMs: reading.tookMs,
+          // The raw counts come FIRST because they are what makes an empty reading
+          // readable. The 2026-10-09 miss logged `orbiting: 0` and nothing else, and
+          // "the API returned nothing" and "the API returned a full sky the detector
+          // rejected" were indistinguishable — opposite fixes, same log line.
+          aircraftSeen: reading.aircraftSeen ?? null,
+          tracked: reading.tracked ?? null,
           orbiting: reading.orbiting, // verbatim: this IS the calibration dataset
           clusters: reading.clusters,
+          pursuing: reading.pursuing ?? [],
+          pursuitClusters: reading.pursuitClusters ?? [],
         });
         logger.info?.('chase: aircraft reading', {
+          seen: reading.aircraftSeen,
+          tracked: reading.tracked,
           orbiting: reading.orbiting.length,
           clusters: reading.clusters.map((c) => c.size),
+          pursuing: (reading.pursuing ?? []).length,
+          pursuitClusters: (reading.pursuitClusters ?? []).map((c) => c.size),
           samples: reading.samples,
           rateRemaining: reading.rateRemaining,
         });

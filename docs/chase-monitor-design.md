@@ -292,6 +292,21 @@ half-hour event. If one knob survives review, it is this one.
 - **Re-open lockout** `reopenCooldownMin` (default 20 min), so the ragged tail of one
   chase cannot flap into a second announcement.
 
+**An incident's duration is not the event's duration, and nobody should read it as
+one.** Observed on 2026-10-09: the broadcast ran 44 minutes, the incident opened at
+minute 3 and closed at minute 15. Nothing ended — `liveness` only scores within 10
+minutes of the witnessed transition, so for a source where liveness is the *only*
+signal (a `titleIsShowName` chase channel, §2.4) the score necessarily returns to 0
+about ten minutes in and `clearPolls` closes the incident five polls later. Every such
+incident is ~12 minutes by construction.
+
+That is the right behaviour for *announcing* — one announcement, at the start, which is
+what the streamer needs — but it means the monitor has no idea whether the chase is
+still running, and `chase:report`'s incident durations measure the scoring window
+rather than the event. Answering "is it still going?" would need a signal that persists
+through the event, which is what the `aircraft` channel (§2.10) could eventually
+provide and the editorial feed partly does.
+
 ### 2.8 Baselines: a 30-minute trailing median, not a 24-hour one
 
 A 24-hour median is wrong because viewership is strongly diurnal — 6 pm is ~10× 3 am
@@ -319,8 +334,11 @@ rather than open one.
 ### 2.10 Aircraft corroboration (ADS-B) — the only non-editorial channel
 
 Public ADS-B (OpenSky, free, no auth, ~400 calls/day anonymous) gives aircraft
-positions over the LA basin. A news or police helicopter covering a pursuit **orbits**
-it, and an orbit is mechanically distinguishable from transit:
+positions over the LA basin. Aircraft covering an incident fly one of **two**
+distinguishable shapes, and the channel looks for both.
+
+**Orbiting** — holding over one spot. This is a chase that has *stopped* (a bailout,
+a standoff), a fire, or a crash scene:
 
 ```
 net displacement / path length < 0.4    # went nowhere despite flying far
@@ -328,6 +346,49 @@ cumulative heading change     > 60°     # and kept turning
 low and slow                            # below cruise altitude and speed
 cluster = 2+ orbiting aircraft within 5 km of each other
 ```
+
+**Pursuing** — following a vehicle. This is a chase still *running*, and it is the
+exact opposite geometry:
+
+```
+net displacement / path length > 0.6    # went somewhere, in a line
+speed 18-75 m/s                         # road speed: 40-170 mph
+path >= 2 km                            # and covered real ground doing it
+low                                     # same altitude ceiling
+cluster = 2+ such aircraft, close at BOTH ends of the window, headings within 60°
+```
+
+The second shape exists because the first could not see a real one. On 2026-10-09 the
+monitor caught a televised 44-minute CHP pursuit (the 405 through Huntington Beach,
+then the 5 at Irvine) and the aircraft channel reported **zero** orbiting aircraft. It
+was not a tuning miss: a helicopter matching a car at 100 mph has a `loiter` near 0.9
+against a required `< 0.4`, and a freeway is straight so its `turnDeg` stays near 0
+against a required `> 60`. It failed both axes by construction. The orbit test
+describes the *tail* of an event; the useful moment is the pursuit itself.
+
+Two corrections came out of the same miss:
+
+- **The box was too small.** `bbox.lamin` was 33.6, which cuts the basin off at the
+  Orange County line — that chase ran on toward San Juan Capistrano (~33.50) and left
+  coverage entirely. Now 33.35, which reaches past San Clemente without pulling in San
+  Diego approach traffic. Catalina (AVX) joins the airport exclusions because the
+  widened box now contains it and the island runs a helicopter shuttle.
+- **The reading now records raw counts.** That miss logged `orbiting: 0` and nothing
+  else, so "the API returned nothing" and "the API returned a full sky the detector
+  rejected" were indistinguishable in the log — opposite fixes, identical evidence.
+  `aircraftSeen` and `tracked` separate them.
+
+**Precision is handled differently for the two shapes, and deliberately so.** An orbit
+cluster can lean on proximity because its measured background rate is zero — two
+aircraft circling one spot essentially does not happen by chance. A pursuit cluster
+cannot: LA has busy low-level helicopter corridors, a live sample holds roughly 15-20
+aircraft that are low and at road speed, and "two within 5 km heading roughly alike" is
+an ordinary afternoon. So a pursuit link additionally requires **co-movement** — the
+pair must be close at the *start* of the window as well as the end. Two aircraft
+following the same vehicle stay together throughout; two crossing or converging are
+close for a single sample. That test, not the heading tolerance, is what provides the
+precision, which is why a missing start position refuses the link rather than falling
+back to proximity.
 
 An orbit cannot be seen in one snapshot, so a reading is **3 passes ~70 s apart**,
 tracked by `icao24` — ~140 s wall clock, longer than a 60 s tick. It is therefore
@@ -338,7 +399,9 @@ holding pattern at LAX would read as a chase.
 
 **The weight is 3, below the threshold of 8, and that is structural.** A cluster can
 never fire an announcement. It cannot even nominate one: an announcement needs a
-stream to link to, and this source has none.
+stream to link to, and this source has none. Either shape scores the same 3, and a sky
+holding **both** still scores once — one channel in one group, so two shapes cannot pay
+twice any more than two spiking streams can (§2.1).
 
 **It is also gated — a cluster scores 0 until something else has named a chase.**
 This is not belt-and-braces; it is the §2.1 error in a subtler form, and it was
@@ -363,8 +426,9 @@ costs **no** recall — every genuine-chase row still fires, and the strictest
 near-miss (row 5, a bare retitle) now reaches 8 and fires where it previously
 could not.
 
-What remains unmeasured is the **background rate**: how often 2+ aircraft orbit one
-spot in LA with no pursuit at all. `npm run chase:report` prints that as a
+What remains unmeasured is the **background rate** for both shapes: how often 2+
+aircraft orbit one spot, or travel together at road speed, in LA with no pursuit at
+all. The pursuit shape's rate is the more suspect of the two, for the reasons above. `npm run chase:report` prints that as a
 calibration section (§7) rather than asserting a number nobody has yet collected.
 Until it is collected, the weight does not rise.
 

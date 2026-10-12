@@ -47,6 +47,28 @@ async function main() {
       note('fix: npm run chase:sources   (reads the gitignored .workspace/chase-sources.json)');
     }
     note(`threshold ${cfg.threshold} · dwell ${cfg.dwell} · clearScore ${cfg.clearScore}`);
+
+    // CHANNEL COVERAGE. A channel with no inputs is not "scoring 0", it is absent —
+    // and absent looks identical to quiet in every other line of this report. The
+    // editorial channel ran for TEN DAYS configured on exactly one source, and the
+    // one chase the monitor caught in that time was corroborated by a newsroom
+    // article from a source that had no feed at all. Nothing said so.
+    const feeds = (cfg.orgs || []).filter((o) => o?.articleFeed).length;
+    if (n > 0 && feeds === 0) {
+      bad('NO source has an articleFeed — the EDITORIAL channel is dead weight');
+      note('it can never score, so every incident rests on title/liveness/audience alone');
+      note('fix: add "articleFeed" to entries in .workspace/chase-sources.json, then npm run chase:sources');
+    } else if (n > 0 && feeds < n) {
+      note(`articleFeed on ${feeds} of ${n} source(s) — the editorial channel is inert for the other ${n - feeds}`);
+      note('a newsroom that publishes a chase article is free corroboration; a missing feed discards it');
+    } else if (n > 0) {
+      ok(`articleFeed on all ${feeds} source(s)`);
+    }
+
+    // Same reasoning for the aircraft channel: enabled-but-unavailable is silent.
+    if (cfg.aircraft?.enabled === false) {
+      note('aircraft corroboration is OFF (!chasemon aircraft on) — scoring is news sources only');
+    }
   }
 
   // ── is it actually ticking ─────────────────────────────────────────────────
@@ -92,8 +114,11 @@ async function main() {
   else console.log('  \x1b[32mHealthy.\x1b[0m A score of 0 is the expected result — real chases are ~1.7/week.\n');
 
   console.log('  For the on-disk evidence (and chase:report), from the host:');
-  console.log('    docker -H ssh://root@faraday cp kennybot:/data/chase-logs ./chase-logs');
-  console.log('    npm run chase:report -- ./chase-logs --no-sweep\n');
+  // .workspace/, NOT ./ — these logs name the private roster, and a copy git can
+  // see puts real outlet names in a public repo.
+  console.log('    docker -H ssh://root@faraday cp kennybot:/data/chase-logs .workspace/chase-logs');
+  console.log('    npm run chase:report -- .workspace/chase-logs --no-sweep');
+  console.log('    (.workspace/ is gitignored on purpose — the logs name the roster)\n');
 }
 
 main()
