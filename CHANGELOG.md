@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.17.1](https://github.com/nikkibreanne/kennyBot/compare/kennybot-v0.17.0...kennybot-v0.17.1) (2026-10-12)
+
+
+### Bug Fixes
+
+* **chase:** see a pursuit, not just an orbit — the aircraft channel's first real miss ([#114](https://github.com/nikkibreanne/kennyBot/issues/114)) ([8b6804c](https://github.com/nikkibreanne/kennyBot/commit/8b6804c7071fcadc9bed14c7db2a00e1bb9e5399))
+
 ## [0.17.0](https://github.com/nikkibreanne/kennyBot/compare/kennybot-v0.16.1...kennybot-v0.17.0) (2026-10-08)
 
 
