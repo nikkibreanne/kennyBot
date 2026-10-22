@@ -279,3 +279,10 @@ test('the shipped defaults are coherent — ids unique, kinds known, text presen
     if (r.kind === 'daily') for (const t of r.times) assert.ok(parseClock(t) != null, `${r.id}: bad time ${t}`);
   }
 });
+
+test('socials: every 45m on Nikki\'s channel only, and short enough for one chat message', () => {
+  const r = byId('socials');
+  assert.equal(describeSchedule(r), 'every 45m');
+  assert.equal(r.channel, 'nikkibreanne');
+  assert.ok(r.text.length <= 500, `${r.text.length} chars exceeds Twitch's 500 limit`);
+});
