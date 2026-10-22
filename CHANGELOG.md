@@ -1,5 +1,17 @@
 # Changelog
 
+## [0.18.0](https://github.com/nikkibreanne/kennyBot/compare/kennybot-v0.17.1...kennybot-v0.18.0) (2026-10-22)
+
+
+### Features
+
+* **reminders:** announce Nikki's social links every 45 minutes ([#119](https://github.com/nikkibreanne/kennyBot/issues/119)) ([4fcc438](https://github.com/nikkibreanne/kennyBot/commit/4fcc4386f7bd2480fb2dc7fadba5b920d58ad8d9))
+
+
+### Bug Fixes
+
+* **deps:** bump dotenv from 18.0.5 to 18.0.7 in the production group ([#116](https://github.com/nikkibreanne/kennyBot/issues/116)) ([bf7f065](https://github.com/nikkibreanne/kennyBot/commit/bf7f0658db0d5587749bf04a586969d232b6694c))
+
 ## [0.17.1](https://github.com/nikkibreanne/kennyBot/compare/kennybot-v0.17.0...kennybot-v0.17.1) (2026-10-12)
 
 
