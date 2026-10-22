@@ -252,13 +252,14 @@ one from chat with `!reminder` and it takes effect on the next tick.
 | `wallpaper` | 30 min after going live, once per stream | "is Wallpaper Engine still running?" |
 | `ghosty` | daily 08:00 + 17:00 Pacific, 20-min heads-up | Ghosty's meal times |
 | `hydration` | every 60 min of live time, ±10 min jitter | drink some water |
+| `socials` | every 45 min of live time | Nikki's social links |
 
 A reminder carries a `channel`: it fires **only** on that Twitch channel, and
 `channel: null` fires wherever the bot runs (that's hydration). So "this one is a
 Nikki thing" is a property of the data — there's no per-channel branch anywhere
 in the code, and `!reminder channel <id> <name|any>` re-points one from chat.
 
-All three are **live-gated** by default. A daily slot missed while offline is
+All of them are **live-gated** by default. A daily slot missed while offline is
 skipped rather than announced hours late, an `afterLive` reminder fires once per
 live session (a bot restart mid-stream doesn't repeat it), and an interval that
 came due during a long offline stretch is quietly re-armed instead of dumping a

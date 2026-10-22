@@ -43,4 +43,16 @@ export const DEFAULT_REMINDERS = [
     jitterMs: 10 * 60_000, // ±10 min so it never lands on the same beat twice
     text: '💧 Hydration check — go drink some water. Chat, you too. 🌱',
   },
+  {
+    id: 'socials',
+    enabled: true,
+    channel: 'nikkibreanne', // her links, not every channel's
+    kind: 'interval',
+    liveOnly: true,
+    everyMs: 45 * 60_000,
+    text:
+      '💬 Discord: discord.gg/nikkibreanne ▸ 📸 Insta: instagram.com/nikkibreanne ▸ ' +
+      '🐦 X: x.com/nikkibreanne ▸ ▶️ YouTube: youtube.com/c/nikkibreanne ▸ ' +
+      '🎬 IMDB: imdb.com/name/nm3363412 ▸ 🎵 Spotify: open.spotify.com/user/129883035',
+  },
 ];
