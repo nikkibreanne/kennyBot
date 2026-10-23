@@ -45,7 +45,7 @@
     "firebase-admin": "^14.5.0"
   },
   "devDependencies": {
-    "firebase-tools": "^15.33.0"
+    "firebase-tools": "^15.34.0"
   },
   "overrides": {
     "uuid": "^11.1.1",
