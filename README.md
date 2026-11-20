@@ -178,6 +178,7 @@ of the replay buffer.
 | Command | Who | Effect |
 |---|---|---|
 | `!song` / `!nowplaying` / `!np` | everyone | what's playing on the streamer's Spotify — track, artists, position, and a link |
+| `!weather` | everyone | current conditions, feels-like temperature in °F, and today's peak precipitation chance in Los Angeles, CA, via [Open-Meteo](https://open-meteo.com/) (free for non-commercial use, no API key) |
 
 **Around the stream**
 
