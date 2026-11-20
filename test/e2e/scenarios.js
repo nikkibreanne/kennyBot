@@ -657,6 +657,37 @@ export const SCENARIOS = [
     },
   },
   {
+    command: 'weather', title: 'viewers get current Los Angeles weather from a shared cache',
+    run: async ({ bot, u }) => {
+      const originalFetch = globalThis.fetch;
+      let calls = 0;
+      globalThis.fetch = async (url, options) => {
+        if (url.hostname !== 'api.open-meteo.com') return originalFetch(url, options);
+        calls += 1;
+        assert.equal(url.searchParams.get('latitude'), '34.0522');
+        assert.equal(url.searchParams.get('longitude'), '-118.2437');
+        assert.equal(url.searchParams.get('temperature_unit'), 'fahrenheit');
+        assert.equal(url.searchParams.get('daily'), 'precipitation_probability_max');
+        assert.equal(url.searchParams.get('timezone'), 'America/Los_Angeles');
+        assert.equal(url.searchParams.get('forecast_days'), '1');
+        if (calls === 1) return new Response(null, { status: 503 });
+        return Response.json({
+          current: { temperature_2m: 72.4, apparent_temperature: 71.8, weather_code: 2 },
+          daily: { precipitation_probability_max: [0] },
+        });
+      };
+      try {
+        assert.match(await bot.send(u('e2e_weather_retry'), '!weather'), /unavailable/);
+        const line = await bot.send(u('e2e_weather_first'), '!weather');
+        assert.equal(line, "Los Angeles weather | ⛅ Partly cloudy, 🌡️ 72°F (feels like 72°F) | ☔ Today's peak precipitation chance: 0% | Open-Meteo");
+        assert.equal(await bot.send(u('e2e_weather_cached'), '!weather'), line);
+        assert.equal(calls, 2);
+      } finally {
+        globalThis.fetch = originalFetch;
+      }
+    },
+  },
+  {
     command: 'chase', title: 'anyone can ask, and gets a straight answer with nothing leaked',
     run: async ({ bot, u }) => {
       const viewer = u('e2e_chase_v', { login: 'carl', name: 'Carl' });
