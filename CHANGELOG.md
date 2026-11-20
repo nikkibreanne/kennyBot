@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.19.0](https://github.com/nikkibreanne/kennyBot/compare/kennybot-v0.18.0...kennybot-v0.19.0) (2026-11-20)
+
+
+### Features
+
+* add Los Angeles weather command ([#124](https://github.com/nikkibreanne/kennyBot/issues/124)) ([32e9f6e](https://github.com/nikkibreanne/kennyBot/commit/32e9f6eb91a70930c641c9a509f0222b24083afc))
+
 ## [0.18.0](https://github.com/nikkibreanne/kennyBot/compare/kennybot-v0.17.1...kennybot-v0.18.0) (2026-10-22)
 
 
