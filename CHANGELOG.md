@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.19.1](https://github.com/nikkibreanne/kennyBot/compare/kennybot-v0.19.0...kennybot-v0.19.1) (2026-11-22)
+
+
+### Bug Fixes
+
+* **deps:** bump the production group across 1 directory with 2 updates ([#126](https://github.com/nikkibreanne/kennyBot/issues/126)) ([eaed446](https://github.com/nikkibreanne/kennyBot/commit/eaed446611d80a5510bbacb1bff37600347629a1))
+
 ## [0.19.0](https://github.com/nikkibreanne/kennyBot/compare/kennybot-v0.18.0...kennybot-v0.19.0) (2026-11-20)
 
 
