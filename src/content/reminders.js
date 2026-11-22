@@ -34,6 +34,18 @@ export const DEFAULT_REMINDERS = [
     leadText: '🐾 Heads up — Ghosty eats in 20 minutes.',
   },
   {
+    id: 'stilllive',
+    enabled: true,
+    channel: 'nikkibreanne', // her socials, her job
+    kind: 'daily',
+    liveOnly: true, // "still live" is only true while she is
+    timeZone: 'America/Los_Angeles',
+    // Twice a day, with a second nudge 20 min after each — the 20-minute echo is
+    // a deliberate second slot, not a heads-up, so there is no `leadMs`.
+    times: ['08:00', '08:20', '20:00', '20:20'],
+    text: '📣 Still live! Time for a quick "still live" update on socials so folks can hop in.',
+  },
+  {
     id: 'hydration',
     enabled: true,
     channel: null, // every channel, not just Nikki's
