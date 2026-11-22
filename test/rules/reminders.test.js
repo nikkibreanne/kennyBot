@@ -286,3 +286,40 @@ test('socials: every 45m on Nikki\'s channel only, and short enough for one chat
   assert.equal(r.channel, 'nikkibreanne');
   assert.ok(r.text.length <= 500, `${r.text.length} chars exceeds Twitch's 500 limit`);
 });
+
+// ── still-live: only after a long stream ────────────────────────────────────
+
+test('still-live stays quiet when the stream is under 3 hours old', () => {
+  const r = byId('stilllive');
+  const slot = pacific('2026-08-09T08:00:05', '-07:00');
+  // Started 07:30 → 30 minutes in at 08:00, and still only 50 at 08:20.
+  const liveSince = pacific('2026-08-09T07:30:00', '-07:00');
+  assert.equal(evaluateReminder(r, ctx({ now: slot, liveSince })).due, null);
+  assert.equal(evaluateReminder(r, ctx({ now: pacific('2026-08-09T08:20:05', '-07:00'), liveSince })).due, null);
+});
+
+test('still-live fires once the stream is 3 hours old, and not a minute sooner', () => {
+  const r = byId('stilllive');
+  const now = pacific('2026-08-09T20:00:05', '-07:00');
+  assert.ok(evaluateReminder(r, ctx({ now, liveSince: now - 3 * 60 * MIN })).due, 'exactly 3h');
+  assert.equal(evaluateReminder(r, ctx({ now, liveSince: now - 3 * 60 * MIN + MIN })).due, null, '2h59m');
+  assert.ok(evaluateReminder(r, ctx({ now, liveSince: pacific('2026-08-09T09:00:00', '-07:00') })).due, 'a long stream');
+});
+
+test('still-live does not fire when the live start time is unknown', () => {
+  const r = byId('stilllive');
+  const now = pacific('2026-08-09T20:00:05', '-07:00');
+  assert.equal(evaluateReminder(r, ctx({ now, liveSince: null })).due, null);
+});
+
+test('a skipped still-live slot is not marked as fired', () => {
+  const r = byId('stilllive');
+  const now = pacific('2026-08-09T08:00:05', '-07:00');
+  const res = evaluateReminder(r, ctx({ now, liveSince: now - 30 * MIN }));
+  assert.deepEqual([res.due, res.changed], [null, false]);
+});
+
+test('a daily reminder with no minLiveMs is unaffected by stream age', () => {
+  const res = evaluateReminder(byId('ghosty'), ctx({ now: pacific('2026-08-09T08:00:05', '-07:00'), liveSince: null }));
+  assert.equal(res.due?.kind, 'main');
+});

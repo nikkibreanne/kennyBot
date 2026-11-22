@@ -71,7 +71,7 @@ export async function editReminder(id, patch) {
     for (const t of patch.times) if (parseClock(t) == null) return { ok: false, reason: `bad-time:${t}` };
   }
   if (patch.timeZone && !isValidTimeZone(patch.timeZone)) return { ok: false, reason: 'bad-zone' };
-  for (const key of ['leadMs', 'everyMs', 'jitterMs', 'afterMs']) {
+  for (const key of ['leadMs', 'everyMs', 'jitterMs', 'afterMs', 'minLiveMs']) {
     if (patch[key] == null) continue;
     if (!Number.isFinite(patch[key]) || patch[key] < 0) return { ok: false, reason: `bad-${key}` };
   }

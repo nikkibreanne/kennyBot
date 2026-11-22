@@ -317,6 +317,7 @@ One of three `kind`s. Fields not used by a kind are simply ignored.
 | `times` / `timeZone` | `daily` | Wall-clock `HH:MM` times in an IANA zone (DST-aware — 08:00 stays 08:00 across the change). |
 | `leadMs` / `leadText` | `daily` | An optional heads-up this long before each slot. `0` disables it; without `leadText` the wording is generated. |
 | `graceMs` | `daily` | Per-reminder override of `dailyGraceMs`. |
+| `minLiveMs` | `daily` | Stay quiet until the stream has been live this long (default `0` = no minimum). A slot that comes up too early is skipped, not delayed. If the live start time is unknown it counts as too early. |
 | `everyMs` / `jitterMs` | `interval` | Period of **live** time between pings, ± the jitter (jitter is capped at half the period). |
 | `state` | all | Bot-managed: what has already fired. Persisted so a restart can't repeat an announcement. Don't hand-edit. |
 
