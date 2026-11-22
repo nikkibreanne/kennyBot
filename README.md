@@ -252,6 +252,7 @@ one from chat with `!reminder` and it takes effect on the next tick.
 |---|---|---|
 | `wallpaper` | 30 min after going live, once per stream | "is Wallpaper Engine still running?" |
 | `ghosty` | daily 08:00 + 17:00 Pacific, 20-min heads-up | Ghosty's meal times |
+| `stilllive` | daily 08:00 + 08:20 and 20:00 + 20:20 Pacific, live only | post a "still live" update to socials |
 | `hydration` | every 60 min of live time, ±10 min jitter | drink some water |
 | `socials` | every 45 min of live time | Nikki's social links |
 
