@@ -11,7 +11,7 @@
 // A lapsed sub keeps earning EXP on an existing character; only !create and loot
 // claims require an active sub (handled by the per-command `subOnly` gate).
 import { getCommand } from '../commands/registry.js';
-import { getConfig, isChatMuted } from '../db/configStore.js';
+import { getConfig, isChatMuted, isCommandDisabled } from '../db/configStore.js';
 import { config, shouldGrantExp } from '../config.js';
 import { applyChatTick } from '../db/players.js';
 import { hasNotice, takeNotice } from '../db/notices.js';
@@ -43,6 +43,13 @@ export function createMessageHandler({ sender, channel, botUserId, logger, onAct
       // trace, which is indistinguishable from the bot being broken. Debug-level,
       // so it costs nothing until someone goes looking.
       logger.debug('unknown command ignored', { command: name, userId: user.id, login: user.login });
+      return;
+    }
+    // Switched off for this channel (`!kcommand off`). Silent on purpose: the usual
+    // reason is that another bot already answers this command here, so a reply
+    // from us would be the duplicate. Debug-logged so it is never invisible.
+    if (!def.alwaysOn && isCommandDisabled(def.names[0])) {
+      logger.debug('disabled command ignored', { command: name, userId: user.id });
       return;
     }
     if (def.mod && !user.isMod && !user.isBroadcaster) {

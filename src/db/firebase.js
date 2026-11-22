@@ -87,6 +87,9 @@ export const PATHS = {
   configExpMode: () => 'config/expMode',
   configChatMuted: () => 'config/chatMuted',
   configClipMode: () => 'config/clipMode',
+  // Commands switched off for THIS deployment's channel (`!kcommand off <name>`):
+  // `{ <primary name>: true }`. One database per channel, so this is per-channel.
+  configDisabledCommands: () => 'config/disabledCommands',
   seasonCurrent: () => 'config/season/current',
   configRaid: () => 'config/raid',
   configDropScheduler: () => 'config/dropScheduler',

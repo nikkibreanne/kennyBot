@@ -389,6 +389,15 @@ export const SCENARIOS = [
     },
   },
   {
+    command: 'kcommand', title: 'mod switches a command off and back on',
+    run: async ({ bot, u }) => {
+      const mod = u('e2e_cmd', { login: 'mod', name: 'Mod', mod: true });
+      assert.match(await bot.send(mod, '!kcommand off duel'), /!duel is now off/);
+      assert.match(await bot.send(mod, '!kcommand list'), /!duel/);
+      assert.match(await bot.send(mod, '!kcommand on duel'), /!duel is back on/);
+    },
+  },
+  {
     command: 'drop', title: 'mod forces a specific loot drop',
     run: async ({ bot, u }) => {
       const reply = await bot.send(u('e2e_drop', { login: 'mod', name: 'Mod', mod: true }), `!drop ${DPS_ITEM}`);

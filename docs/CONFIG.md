@@ -44,6 +44,7 @@ so a mod can change them **while the bot is running**. These are the
 | **Clip mode** — which of `!clip`'s outputs run | `!clipmode horizontal vertical twitch` · `!clipmode local\|all\|off` · `!clipmode status` | `config/clipMode` |
 | **Stream timer** — the one mod countdown | `!timer 10m [label]` · `!timer +5` · `!timer -2m` · `!timer pause` / `resume` · `!timer stop` | `config/timer` |
 | **Reminders** — schedules, text, on/off | `!reminder` · `!reminder at ghosty 08:00 17:00` · `!reminder every hydration 60` · `!reminder off <id>` | `config/reminders/<id>` |
+| **Disabled commands** — switch a command off for this channel (e.g. another bot already answers it) | `!kcommand off duel` · `!kcommand on duel` · `!kcommand list` | `config/disabledCommands/<name>` |
 | **Media slots** — number → OBS media source | `!media inputs` · `!media set 3 <source>` · `!media scene 3 <scene>` · `!media action 3 stop` · `!media clear 3` | `config/media/<n>` |
 | **Live status** (set automatically by Twitch) | _(no command — EventSub / Helix poll set it)_ | `config/live` |
 | **Active season** | `!season start <id>` · `!season rollover <id>` | `config/season/current` |

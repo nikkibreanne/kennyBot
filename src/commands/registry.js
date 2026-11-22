@@ -39,8 +39,9 @@ import reminder from './mod/reminder.js';
 import media from './mod/media.js';
 import obs from './mod/obs.js';
 import chasemon from './mod/chasemon.js';
+import kcommand from './mod/kcommand.js';
 
-const defs = [create, char, bag, equip, unequip, grab, raid, top, fact, kennycommands, points, daily, bet, duel, trade, offer, clip, song, weather, start, exp, clipmode, mute, drop, drops, boss, raidnight, season, salvage, respec, market, todo, timer, reminder, media, obs, chase, chasemon];
+const defs = [create, char, bag, equip, unequip, grab, raid, top, fact, kennycommands, points, daily, bet, duel, trade, offer, clip, song, weather, start, exp, clipmode, mute, drop, drops, boss, raidnight, season, salvage, respec, market, todo, timer, reminder, media, obs, chase, chasemon, kcommand];
 
 /** @type {Map<string, typeof defs[number]>} */
 const byName = new Map();
