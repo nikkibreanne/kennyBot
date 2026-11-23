@@ -41,6 +41,9 @@ const mirror = {
   // of something that arrives in bursts (a large gift bundle is one event per
   // recipient).
   subathon: null,
+  // config/disabledCommands: `{ <primary command name>: true }`. Read on EVERY
+  // chat command, so it is mirrored. Empty by default — every command is on.
+  disabledCommands: {},
 };
 
 let started = false;
@@ -75,6 +78,7 @@ export async function startConfigMirror(logger = console) {
   const remindersRef = db.ref(PATHS.reminders());
   const mediaRef = db.ref(PATHS.mediaSlots());
   const subathonRef = db.ref(PATHS.subathon());
+  const disabledRef = db.ref(PATHS.configDisabledCommands());
 
   // Seed drop-scheduler defaults once (never clobber a mod's settings).
   await dropRef.transaction((v) => (v == null ? { enabled: gameConfig.loot.scheduler.enabled, intervalSec: gameConfig.loot.scheduler.intervalSec } : v));
@@ -89,6 +93,7 @@ export async function startConfigMirror(logger = console) {
   timerRef.on('value', (s) => { mirror.timer = s.val() || null; });
   liveSinceRef.on('value', (s) => { mirror.liveSince = s.val() || null; });
   remindersRef.on('value', (s) => { mirror.reminders = s.val() || {}; });
+  disabledRef.on('value', (s) => { mirror.disabledCommands = s.val() || {}; });
   mediaRef.on('value', (s) => { mirror.media = s.val() || {}; });
   // Log the on/off edge. The subathon is switched on by a CLI writing a record,
   // with no restart and no env var — so without this there is nothing in the log
@@ -103,9 +108,9 @@ export async function startConfigMirror(logger = console) {
   });
 
   // Wait for the initial reads so the mirror is warm before chat starts.
-  const [liveSnap, expSnap, mutedSnap, clipSnap, seasonSnap, raidSnap, dropSnap, timerSnap, liveSinceSnap, remindersSnap, mediaSnap, subathonSnap] = await Promise.all([
+  const [liveSnap, expSnap, mutedSnap, clipSnap, seasonSnap, raidSnap, dropSnap, timerSnap, liveSinceSnap, remindersSnap, mediaSnap, subathonSnap, disabledSnap] = await Promise.all([
     liveRef.get(), expRef.get(), mutedRef.get(), clipRef.get(), seasonRef.get(), raidRef.get(), dropRef.get(),
-    timerRef.get(), liveSinceRef.get(), remindersRef.get(), mediaRef.get(), subathonRef.get(),
+    timerRef.get(), liveSinceRef.get(), remindersRef.get(), mediaRef.get(), subathonRef.get(), disabledRef.get(),
   ]);
   mirror.live = Boolean(liveSnap.val());
   mirror.expMode = expSnap.val() || gameConfig.liveGate.defaultExpMode;
@@ -119,6 +124,7 @@ export async function startConfigMirror(logger = console) {
   mirror.reminders = remindersSnap.val() || {};
   mirror.media = mediaSnap.val() || {};
   mirror.subathon = subathonSnap.val() || null;
+  mirror.disabledCommands = disabledSnap.val() || {};
   logger.info?.('config mirror warm', {
     live: mirror.live, expMode: mirror.expMode, chatMuted: mirror.chatMuted, clipMode: mirror.clipMode,
   });
@@ -402,6 +408,31 @@ export async function setChatMuted(value) {
   mirror.chatMuted = next;
   await database().ref(PATHS.configChatMuted()).set(next);
   return next;
+}
+
+/** True when a mod has switched this command off for the channel. Hot-path read. */
+export function isCommandDisabled(primaryName) {
+  return Boolean(mirror.disabledCommands?.[primaryName]);
+}
+
+/** Primary names of every disabled command, sorted. */
+export function listDisabledCommands() {
+  return Object.keys(mirror.disabledCommands || {}).filter((n) => mirror.disabledCommands[n]).sort();
+}
+
+/**
+ * Switch a command off (`true`) or back on (`false`). Mirrored synchronously so
+ * the very next message respects it; persisted so a restart keeps the choice.
+ * Turning it back on REMOVES the key rather than storing `false`, so the node
+ * only ever lists what is actually off.
+ */
+export async function setCommandDisabled(primaryName, disabled) {
+  const next = { ...(mirror.disabledCommands || {}) };
+  if (disabled) next[primaryName] = true; else delete next[primaryName];
+  mirror.disabledCommands = next;
+  const ref = database().ref(`${PATHS.configDisabledCommands()}/${primaryName}`);
+  await (disabled ? ref.set(true) : ref.remove());
+  return Boolean(disabled);
 }
 
 /**

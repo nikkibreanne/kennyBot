@@ -13,6 +13,7 @@ export default {
   names: ['mute', 'silence'],
   mod: true,
   bypassMute: true,
+  alwaysOn: true, // the emergency control must never be switchable off
   cooldownMs: 0,
   help: '!mute on|off|status — mod-only: silence kennyBot’s chat output (it keeps listening + tracking)',
   async run({ args, reply }) {

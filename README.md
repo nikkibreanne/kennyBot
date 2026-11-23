@@ -189,6 +189,7 @@ of the replay buffer.
 | `!timer +5` / `!timer -2m` | mod | add/remove time without restarting the countdown (bare number = minutes) |
 | `!timer pause\|resume\|stop` | mod | freeze / un-freeze / dismiss it |
 | `!reminder` | mod | list the scheduled reminders; `on\|off\|test <id>`, `at <id> <HH:MM…>`, `every\|jitter\|after\|lead\|minlive <id> <min>`, `text\|leadtext <id> <msg>`, `zone`, `channel` — see below |
+| `!kcommand` / `!kcmd` | mod | `!kcommand off <name>` / `on <name>` / `list` — switch a command off for this channel (aliases follow it; silent when off). Stored per channel in `config/disabledCommands`; `!kcommand` and `!mute` can't be switched off |
 | `!todo` / `!todos` | mod | date-organised to-do list, published to [okrafans.com/todo](https://okrafans.com/todo/) |
 | `!fact` / `!facts` | everyone | a random fact, with its number · `!fact <#>` the one numbered `#` on [/info/](https://okrafans.com/info/) · `!fact suggest <text>` submits one for approval |
 | `!kennycommands` / `!kennybot` / `!kcommands` | everyone | the full command list, in chat |
