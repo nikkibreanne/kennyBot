@@ -188,7 +188,7 @@ of the replay buffer.
 | `!timer <dur> [label]` | mod | set the stream countdown — `10` (minutes), `90s`, `1h30m`, `5:30`; the words after it are the label |
 | `!timer +5` / `!timer -2m` | mod | add/remove time without restarting the countdown (bare number = minutes) |
 | `!timer pause\|resume\|stop` | mod | freeze / un-freeze / dismiss it |
-| `!reminder` | mod | list the scheduled reminders; `on\|off\|test <id>`, `at <id> <HH:MM…>`, `every\|jitter\|after\|lead <id> <min>`, `text\|leadtext <id> <msg>`, `zone`, `channel` — see below |
+| `!reminder` | mod | list the scheduled reminders; `on\|off\|test <id>`, `at <id> <HH:MM…>`, `every\|jitter\|after\|lead\|minlive <id> <min>`, `text\|leadtext <id> <msg>`, `zone`, `channel` — see below |
 | `!todo` / `!todos` | mod | date-organised to-do list, published to [okrafans.com/todo](https://okrafans.com/todo/) |
 | `!fact` / `!facts` | everyone | a random fact, with its number · `!fact <#>` the one numbered `#` on [/info/](https://okrafans.com/info/) · `!fact suggest <text>` submits one for approval |
 | `!kennycommands` / `!kennybot` / `!kcommands` | everyone | the full command list, in chat |
@@ -252,6 +252,7 @@ one from chat with `!reminder` and it takes effect on the next tick.
 |---|---|---|
 | `wallpaper` | 30 min after going live, once per stream | "is Wallpaper Engine still running?" |
 | `ghosty` | daily 08:00 + 17:00 Pacific, 20-min heads-up | Ghosty's meal times |
+| `stilllive` | daily 08:00 + 08:20 and 20:00 + 20:20 Pacific, only once live 3h+ | post a "still live" update to socials |
 | `hydration` | every 60 min of live time, ±10 min jitter | drink some water |
 | `socials` | every 45 min of live time | Nikki's social links |
 

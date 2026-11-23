@@ -18,7 +18,7 @@ import {
 } from '../../db/reminders.js';
 import { describeSchedule } from '../../rules/reminders.js';
 
-const USAGE = 'Usage: !reminder · on|off|test <id> · at <id> <HH:MM…> · every|jitter|after|lead <id> <min> · text|leadtext <id> <msg> · zone <id> <IANA> · channel <id> <name|any>';
+const USAGE = 'Usage: !reminder · on|off|test <id> · at <id> <HH:MM…> · every|jitter|after|lead|minlive <id> <min> · text|leadtext <id> <msg> · zone <id> <IANA> · channel <id> <name|any>';
 
 /** Minutes → ms from a chat argument, or null when it isn't a sane number. */
 function minutesArg(raw) {
@@ -107,7 +107,7 @@ export default {
     }
 
     // ── numeric knobs, all in minutes ──
-    const MINUTE_KEYS = { lead: 'leadMs', every: 'everyMs', jitter: 'jitterMs', after: 'afterMs' };
+    const MINUTE_KEYS = { lead: 'leadMs', every: 'everyMs', jitter: 'jitterMs', after: 'afterMs', minlive: 'minLiveMs' };
     if (MINUTE_KEYS[sub]) {
       const ms = minutesArg(args[2]);
       if (ms == null) { reply(`Usage: !reminder ${sub} ${id} <minutes>`); return; }

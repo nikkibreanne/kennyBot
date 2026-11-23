@@ -129,6 +129,13 @@ function dueDaily(reminder, ctx, state, idle) {
   const times = Array.isArray(reminder.times) ? reminder.times : [];
   const fired = Array.isArray(state.firedKeys) ? state.firedKeys : [];
 
+  // `minLiveMs`: stay quiet until the stream has been up this long. A "still live"
+  // nudge makes no sense minutes after going live, so a stream that starts at 07:30
+  // never hears the 08:00 one. Unknown start time counts as NOT long enough — the
+  // safe side for a nudge whose whole claim is "you have been live a while".
+  const minLiveMs = Math.max(0, num(reminder.minLiveMs, 0));
+  if (minLiveMs > 0 && !(ctx.liveSince && ctx.now - ctx.liveSince >= minLiveMs)) return idle;
+
   const { date, minutes, seconds } = zonedNow(ctx.now, timeZone);
   const nowMs = minutes * 60_000 + seconds * 1000;
 
@@ -188,7 +195,8 @@ export function describeSchedule(reminder) {
   if (reminder.kind === 'daily') {
     const times = (reminder.times || []).join(', ') || '(no times set)';
     const lead = num(reminder.leadMs, 0) > 0 ? ` +${mins(reminder.leadMs)}m heads-up` : '';
-    return `daily ${times} ${shortZone(reminder.timeZone)}${lead}`;
+    const minLive = num(reminder.minLiveMs, 0) > 0 ? `, once live ${Math.round(num(reminder.minLiveMs, 0) / 3_600_000 * 10) / 10}h+` : '';
+    return `daily ${times} ${shortZone(reminder.timeZone)}${lead}${minLive}`;
   }
   if (reminder.kind === 'interval') {
     const jitter = num(reminder.jitterMs, 0) > 0 ? ` ±${mins(reminder.jitterMs)}m` : '';
