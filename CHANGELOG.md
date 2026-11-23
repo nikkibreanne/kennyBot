@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.20.0](https://github.com/nikkibreanne/kennyBot/compare/kennybot-v0.19.1...kennybot-v0.20.0) (2026-11-23)
+
+
+### Features
+
+* add !kcommand to switch commands off per channel ([#130](https://github.com/nikkibreanne/kennyBot/issues/130)) ([409c35a](https://github.com/nikkibreanne/kennyBot/commit/409c35a3222ddb4df26bda67d59f51002f13d52a))
+* add still-live social reminder, only after 3h live ([#131](https://github.com/nikkibreanne/kennyBot/issues/131)) ([0f54d5c](https://github.com/nikkibreanne/kennyBot/commit/0f54d5c49edb973368256eb5dfe716bfcbe160af))
+
 ## [0.19.1](https://github.com/nikkibreanne/kennyBot/compare/kennybot-v0.19.0...kennybot-v0.19.1) (2026-11-22)
 
 
